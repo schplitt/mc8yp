@@ -75,8 +75,9 @@ For local development with Claude Desktop or similar MCP clients, add to your MC
 
 ```json
 {
-  "mcpServers": {
-    "cumulocity": {
+  "servers": {
+    "mc8yp": {
+      "type": "stdio",
       "command": "pnpm",
       "args": ["dlx", "mc8yp"]
     }
@@ -90,8 +91,8 @@ The server will automatically use credentials stored in your system keyring.
 
 ### Prerequisites
 
-- Node.js ≥20.0.0
-- pnpm (recommended) or npm
+- Node.js ≥22.0.0
+- pnpm
 - Access to a Cumulocity IoT tenant
 
 ### Setup
@@ -110,9 +111,31 @@ pnpm typecheck
 pnpm build
 ```
 
+### Run Locally
+
+Add the mc8yp server to your local MCP client configuration (e.g., Claude Desktop) with the following command:
+
+```json
+{
+  "servers": {
+    "local_mc8yp": {
+      "type": "stdio",
+      "command": "pnpm",
+      "args": [
+        "dlx",
+        "jiti",
+        "/path/to/your/project/src/cli/index.ts"
+      ]
+    }
+  }
+}
+```
+
+This allows you to test and develop the MCP server locally using your preferred MCP client.
+
 ## Available Tools & Prompts
 
-### 🛠️ Tools (18 Total)
+### 🛠️ Tools (20 Total)
 
 > **Note**: In CLI mode, an additional `list-credentials` tool is available to view stored credentials from your system keyring. This tool is not available in microservice deployments.
 
@@ -138,7 +161,7 @@ pnpm build
 - `get-alarms` - Query alarms with filtering by severity, status, type
 - `get-alarm-counts` - Get alarm counts grouped by severity
 
-**Metadata & Administration** (8 tools)
+**Metadata & Administration** (10 tools)
 
 - `get-current-tenant` - Get current tenant information
 - `get-current-user` - Get current user details
@@ -151,38 +174,47 @@ pnpm build
 - `get-tenant-summary` - Get tenant usage summary
 - `get-dashboards` - Get dashboards for a device or group
 
-### 💬 Prompts (20 Total)
+### 💬 Prompts (17 Total)
 
 Pre-built prompt templates that guide AI agents through common IoT workflows:
 
-**Inventory**
+**Date & Time** (2 prompts)
+
+- Date/time range calculations
+- Time window guidance for queries
+
+**Inventory** (4 prompts)
 
 - Device lookup and hierarchy navigation
 - Finding devices by criteria
 - OData query syntax help
+- Device discovery workflows
 
-**Measurements**
+**Measurements** (3 prompts)
 
 - Measurement data analysis
 - Time range calculations
 - Data aggregation guidance
 
-**Events & Alarms**
+**Events** (2 prompts)
 
 - Event type discovery
+- Event history querying
+
+**Alarms** (2 prompts)
+
 - Alarm status interpretation
 - Troubleshooting workflows
 
-**Metadata**
+**Metadata** (1 prompt)
 
 - Tenant context understanding
-- Application management
+
+**Tenant & Administration** (3 prompts)
+
+- Tenant configuration and settings
 - Audit log querying
-
-**Utilities**
-
-- Date/time range calculations
-- Best practices for data queries
+- Application management
 
 ## License
 
