@@ -1,5 +1,4 @@
 import * as v from 'valibot'
-import consola from 'consola'
 
 function createTenantURLSchemaEntry(): {
   tenantUrl: v.SchemaWithPipe<readonly [v.StringSchema<undefined>, v.UrlAction<string, undefined>, v.DescriptionAction<string, 'The Cumulocity tenant URL against which the operation is executed.'>, v.ExamplesAction<string, readonly ['https://my-tenant.cumulocity.com', 'https://tenantName.acme.com']>]>
@@ -15,7 +14,6 @@ export function addTenantURLToSchema<TSchema extends v.ObjectSchema<v.ObjectEntr
   const executionEnvironment = globalThis.executionEnvironment
   // if the execution environment is cli, the have to add the tenantUrl to the schema
   if (executionEnvironment === 'cli') {
-    consola.warn('Adding tenantUrl to schema for CLI execution environment')
     return v.object({
       ...schema.entries,
       ...createTenantURLSchemaEntry(),
