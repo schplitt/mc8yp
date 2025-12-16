@@ -23,6 +23,7 @@ const command: CommandDef = defineCommand({
       const selected = await consola.prompt('Select credentials to remove:', {
         type: 'multiselect',
         options,
+        cancel: 'reject',
       })
 
       if (!selected || (Array.isArray(selected) && selected.length === 0)) {

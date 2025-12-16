@@ -15,37 +15,21 @@ const command: CommandDef = defineCommand({
     try {
       const tenantUrl = await consola.prompt('Cumulocity tenant URL:', {
         type: 'text',
+        cancel: 'reject',
       })
 
-      if (!tenantUrl) {
-        consola.info('Cancelled.')
-        exit()
-      }
-
       // check if tenantUrl is valid
-      const res = v.safeParse(v.pipe(v.string(), v.url()), tenantUrl)
-      if (!res.success) {
-        consola.error('Invalid tenant URL format.')
-        exit(1)
-      }
+      v.parse(v.pipe(v.string(), v.url()), tenantUrl)
 
       const user = await consola.prompt('Username:', {
         type: 'text',
+        cancel: 'reject',
       })
-
-      if (!user) {
-        consola.info('Cancelled.')
-        exit()
-      }
 
       const password = await consola.prompt('Password:', {
         type: 'text',
+        cancel: 'reject',
       })
-
-      if (!password) {
-        consola.info('Cancelled.')
-        exit()
-      }
 
       // Check if credentials with same tenant URL already exist
       const existingCreds = await getStoredC8yAuth()
@@ -54,6 +38,7 @@ const command: CommandDef = defineCommand({
       if (exists) {
         const overwrite = await consola.prompt('Credentials for this tenant already exist. Overwrite?', {
           type: 'confirm',
+          cancel: 'reject',
         })
 
         if (!overwrite) {
