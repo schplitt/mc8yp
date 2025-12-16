@@ -1,0 +1,70 @@
+{
+  "name": "mc8yp",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Cumulocity IoT MCP Server - Model Context Protocol integration for IoT device management",
+  "keywords": [
+    "cumulocity",
+    "c8y",
+    "iot",
+    "mcp",
+    "model-context-protocol",
+    "cli"
+  ],
+  "license": "MIT",
+  "author": "schplitt",
+  "homepage": "https://github.com/schplitt/mc8yp#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/schplitt/mc8yp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/schplitt/mc8yp/issues"
+  },
+  "bin": {
+    "mc8yp": "./dist/cli.mjs"
+  },
+  "files": [
+    "LICENSE",
+    "README.md",
+    "dist"
+  ],
+  "scripts": {
+    "creds-add": "pnpm dlx jiti ./src/cli/index.ts creds add",
+    "creds-remove": "pnpm dlx jiti ./src/cli/index.ts creds remove",
+    "creds-list": "pnpm dlx jiti ./src/cli/index.ts creds list",
+    "build": "tsdown",
+    "lint": "eslint",
+    "lint:fix": "eslint --fix",
+    "typecheck": "tsc --noEmit",
+    "prerelease": "eslint && tsc --noEmit && pnpm build",
+    "release": "bumpp"
+  },
+  "dependencies": {
+    "@c8y/client": "^1023.12.0",
+    "@napi-rs/keyring": "^1.2.0",
+    "@schplitt/eslint-config": "^1.1.0",
+    "@tmcp/adapter-valibot": "^0.1.5",
+    "@tmcp/transport-http": "^0.8.3",
+    "@tmcp/transport-stdio": "^0.4.1",
+    "@toon-format/toon": "^2.1.0",
+    "bumpp": "^10.3.2",
+    "citty": "^0.1.6",
+    "consola": "^3.4.2",
+    "h3": "2.0.1-rc.6",
+    "tmcp": "^1.19.0",
+    "ufo": "^1.6.1",
+    "unctx": "^2.4.1",
+    "valibot": "^1.2.0"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^6.6.1",
+    "@types/node": "^22.19.2",
+    "eslint": "^9.39.1",
+    "tsdown": "^0.18.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

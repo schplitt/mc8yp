@@ -1,0 +1,50 @@
+{
+  "apiVersion": "v2",
+  "name": "mc8yp-server",
+  "contextPath": "mc8yp-server",
+  "version": "0.0.0",
+  "provider": {
+    "name": "schplitt"
+  },
+  "isolation": "MULTI_TENANT",
+  "scale": "NONE",
+  "replicas": 1,
+  "requestedResources": {
+    "memory": "256M",
+    "cpu": "250m"
+  },
+  "resources": {
+    "memory": "512M",
+    "cpu": "1000m"
+  },
+  "requiredRoles": [
+    "ROLE_INVENTORY_READ",
+    "ROLE_MEASUREMENT_READ",
+    "ROLE_ALARM_READ",
+    "ROLE_EVENT_READ",
+    "ROLE_USER_MANAGEMENT_READ",
+    "ROLE_USER_MANAGEMENT_OWN_READ",
+    "ROLE_AUDIT_READ",
+    "ROLE_TENANT_STATISTICS_READ",
+    "ROLE_TENANT_MANAGEMENT_READ",
+    "ROLE_APPLICATION_MANAGEMENT_READ"
+  ],
+  "roles": [],
+  "livenessProbe": {
+    "httpGet": {
+      "path": "/health"
+    },
+    "initialDelaySeconds": 60,
+    "periodSeconds": 10
+  },
+  "readinessProbe": {
+    "httpGet": {
+      "path": "/health",
+      "port": 80
+    },
+    "initialDelaySeconds": 20,
+    "periodSeconds": 10
+  },
+  "settings": [],
+  "key": "mc8yp-key"
+}
