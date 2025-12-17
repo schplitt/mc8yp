@@ -57,9 +57,6 @@ export async function getAuthenticatedClient(input?: unknown): Promise<Client> {
 
   const { tenantUrl } = parsed.output
   const credentials = await globalThis._getCredentialsByTenantUrl(tenantUrl)
-  if (!credentials) {
-    throw new Error(`No credentials found for ${tenantUrl}`)
-  }
 
   if ('user' in credentials && 'password' in credentials && credentials.user && credentials.password) {
     return Client.authenticate({
