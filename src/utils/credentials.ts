@@ -49,18 +49,19 @@ export async function getStoredC8yAuth(): Promise<UserC8yAuth[]> {
   return creds
 }
 
-export async function getCredentialsByTenantUrl(tenantUrl: string): Promise<UserC8yAuth | null> {
+export async function getCredentialsByTenantUrl(tenantUrl: string): Promise<UserC8yAuth> {
   const cleanedUrl = cleanTenantUrl(tenantUrl)
-  const entry = new AsyncEntry(pkgjson.name, cleanedUrl)
+  const found = await findCredentialsAsync(pkgjson.name, cleanedUrl)
+  if (found.length === 0) {
+    throw new Error(`No stored credentials found for tenant URL: ${cleanedUrl}`)
+  }
+  const entry = found[0]!
+  const { password: jsonString } = entry
   try {
-    const jsonString = await entry.getPassword()
-    if (!jsonString) {
-      return null
-    }
     const cred = JSON.parse(jsonString) as UserC8yAuth
     return cred
   } catch {
-    return null
+    throw new Error(`Stored credentials for tenant URL ${cleanedUrl} are corrupted`)
   }
 }
 
