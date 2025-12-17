@@ -3,7 +3,7 @@ FROM node:22-slim AS runtime
 WORKDIR /app
 
 # Copy the build output from the pipeline
-COPY dist/ dist/
+COPY .output/ .output/
 
 ENV NODE_ENV=production
 ENV PORT=80
@@ -19,4 +19,4 @@ USER app
 EXPOSE 80
 
 # Run the server entrypoint with source maps enabled if present
-CMD ["node", "--enable-source-maps", "dist/index.mjs"]
+CMD ["node", "--enable-source-maps", ".output/server.mjs"]
