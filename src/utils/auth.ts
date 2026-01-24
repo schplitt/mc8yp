@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
 import type { C8yAuth } from './credentials'
-import { parseURL } from 'ufo'
+import process from 'node:process'
 
 /**
  * Extract authentication credentials from HTTP request headers.
@@ -16,11 +16,7 @@ export function extractAuthFromHeaders(request: Request): C8yAuth {
   }
 
   // Get the tenant URL from the request URL (extract protocol + host)
-  const requestURL = parseURL(request.url)
-  if (!requestURL.protocol || !requestURL.host) {
-    throw new Error('Invalid request URL')
-  }
-  const tenantUrl = `${requestURL.protocol}//${requestURL.host}`
+  const tenantUrl = process.env.C8Y_BASEURL!
 
   if (authorization.startsWith('Basic ')) {
     try {
@@ -35,16 +31,8 @@ export function extractAuthFromHeaders(request: Request): C8yAuth {
       const username = decoded.slice(0, colonIndex)
       const password = decoded.slice(colonIndex + 1)
 
-      // Extract tenant from username if in format "tenant/username"
-      const slashIndex = username.indexOf('/')
-      let user = username
-
-      if (slashIndex !== -1) {
-        user = username.slice(slashIndex + 1)
-      }
-
       return {
-        user,
+        user: username,
         password,
         tenantUrl,
       }
