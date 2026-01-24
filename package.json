@@ -1,6 +1,6 @@
 {
   "name": "mc8yp",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "module",
   "packageManager": "pnpm@10.28.0",
   "description": "Cumulocity IoT MCP Server - Model Context Protocol integration for IoT device management",
