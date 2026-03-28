@@ -1,10 +1,10 @@
 import { ValibotJsonSchemaAdapter } from '@tmcp/adapter-valibot'
 import { McpServer } from 'tmcp'
+import consola from 'consola'
 import pkgjson from '../package.json' with { type: 'json' }
 import { createPrompts } from './prompts'
 import { createTools } from './tools'
 import { createListCredentialsTool } from './tools/credentials'
-import consola from 'consola'
 
 export function createC8YMcpServer(): McpServer {
   const adapter = new ValibotJsonSchemaAdapter()

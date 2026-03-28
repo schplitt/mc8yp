@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import type { C8yAuth } from './credentials'
+import type { AuthContext } from './credentials'
 import process from 'node:process'
 
 /**
@@ -8,7 +8,7 @@ import process from 'node:process'
  * @param request - The incoming HTTP request
  * @returns Extracted credentials or throws error if invalid/missing
  */
-export function extractAuthFromHeaders(request: Request): C8yAuth {
+export function extractAuthFromHeaders(request: Request): AuthContext {
   const authorization = request.headers.get('authorization')
 
   if (!authorization) {
@@ -28,13 +28,23 @@ export function extractAuthFromHeaders(request: Request): C8yAuth {
         throw new Error('Invalid Basic auth format')
       }
 
-      const username = decoded.slice(0, colonIndex)
+      const principal = decoded.slice(0, colonIndex)
       const password = decoded.slice(colonIndex + 1)
+      const slashIndex = principal.indexOf('/')
+
+      if (slashIndex === -1) {
+        throw new Error('Basic auth must include tenantId/user')
+      }
+
+      const tenantId = principal.slice(0, slashIndex)
+      const username = principal.slice(slashIndex + 1)
 
       return {
         user: username,
         password,
+        tenantId,
         tenantUrl,
+        authorizationHeader: authorization,
       }
     } catch (error) {
       throw new Error('Invalid Basic authentication credentials', { cause: error })
@@ -50,6 +60,7 @@ export function extractAuthFromHeaders(request: Request): C8yAuth {
       return {
         token,
         tenantUrl,
+        authorizationHeader: authorization,
       }
     } catch (error) {
       throw new Error('Invalid Bearer token', { cause: error })

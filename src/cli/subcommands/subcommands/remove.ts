@@ -18,7 +18,7 @@ const command: CommandDef = defineCommand({
         exit()
       }
 
-      const options = creds.map((c) => ({ value: c.tenantUrl, label: `${c.tenantUrl} — ${c.user}` }))
+      const options = creds.map((c) => ({ value: c.tenantUrl, label: `${c.tenantUrl} (${c.tenantId}) - ${c.user}` }))
 
       const selected = await consola.prompt('Select credentials to remove:', {
         type: 'multiselect',

@@ -16,7 +16,7 @@ export function createListCredentialsTool() {
       }
 
       const lines = creds.map(
-        (c) => `TenantUrl: ${c.tenantUrl}`,
+        (c) => `TenantUrl: ${c.tenantUrl} TenantId: ${c.tenantId}`,
       ).join('\n')
 
       return tool.text(`Found credentials for the following tenants:\n${lines}`)

@@ -20,7 +20,7 @@ const command: CommandDef = defineCommand({
 
       consola.box('Stored credentials')
       for (const c of creds) {
-        consola.log(`${c.tenantUrl} — ${c.user}`)
+        consola.log(`${c.tenantUrl} (${c.tenantId}) - ${c.user}`)
       }
       exit()
     } catch (err) {

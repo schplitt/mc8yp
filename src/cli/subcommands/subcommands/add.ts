@@ -1,5 +1,5 @@
 import type { CommandDef } from 'citty'
-import type { C8yAuth } from '../../../utils/credentials'
+import type { UserC8yAuth } from '../../../utils/credentials'
 import { exit } from 'node:process'
 import { defineCommand } from 'citty'
 import consola from 'consola'
@@ -33,7 +33,7 @@ const command: CommandDef = defineCommand({
 
       // Check if credentials with same tenant URL already exist
       const existingCreds = await getStoredC8yAuth()
-      const exists = existingCreds.some((cred: C8yAuth) => cred.tenantUrl === cleanTenantUrl(tenantUrl))
+      const exists = existingCreds.some((cred: UserC8yAuth) => cred.tenantUrl === cleanTenantUrl(tenantUrl))
 
       if (exists) {
         const overwrite = await consola.prompt('Credentials for this tenant already exist. Overwrite?', {
