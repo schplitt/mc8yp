@@ -47,6 +47,8 @@ declare const spec: Spec
 
 Your code should be JavaScript module source. The top-level binding \`spec\` is available automatically. Export the final result as the default export. Top-level \`await\` is supported.
 
+Structured tool results are returned in Toon format to reduce token usage. If you export a string, it is returned as-is.
+
 Examples:
 const results = []
 for (const [path, methods] of Object.entries(spec.paths)) {
@@ -91,17 +93,19 @@ type CumulocityRequestOptions = {
 }
 
 declare const cumulocity: {
-  request<T = unknown>(path: string, init?: RequestInit): Promise<T>
   request<T = unknown>(options: CumulocityRequestOptions): Promise<T>
 }
 
-Your code should be JavaScript module source. The top-level binding \`cumulocity\` is available automatically. Export the final result as the default export. Top-level \`await\` is supported.
+Your code should be JavaScript module source. The top-level binding \`cumulocity\` is available automatically. Call \`await cumulocity.request({ method, path, ... })\`, export the final result as the default export, and use top-level \`await\` when needed.
+
+Structured tool results are returned in Toon format to reduce token usage. If you export a string, it is returned as-is.
 
 In CLI mode, this MCP can access multiple tenants. Use list-credentials first if the tenant is unclear, then pass the chosen tenantUrl to this tool.
 
 Examples:
-export default await cumulocity.request('/inventory/managedObjects?pageSize=5', {
+export default await cumulocity.request({
   method: 'GET',
+  path: '/inventory/managedObjects?pageSize=5',
 })
 
 const alarms = await cumulocity.request({

@@ -18,6 +18,7 @@ Use \`query\` when you need to inspect the OpenAPI spec.
 - The top-level binding \`spec\` is available automatically
 - Export the exact value you want back with \`export default\`
 - Top-level \`await\` is supported
+- Structured results are returned in Toon format; exported strings are returned as-is
 
 ### Available Shape
 \`\`\`ts
@@ -58,10 +59,11 @@ Use \`execute\` when you want to call the real Cumulocity API.
 
 - Input: JavaScript module source
 - The top-level binding \`cumulocity\` is available automatically
-- It can call \`await cumulocity.request(pathOrDescriptor, init?)\`
+- It can call \`await cumulocity.request({ method, path, ... })\`
 - Do not build auth headers or tenant URLs yourself
 - Export the exact value you want back with \`export default\`
 - Top-level \`await\` is supported
+- Structured results are returned in Toon format; exported strings are returned as-is
 
 ### Available Shape
 \`\`\`ts
@@ -73,15 +75,15 @@ interface CumulocityRequestOptions {
 }
 
 declare const cumulocity: {
-  request<T = unknown>(path: string, init?: RequestInit): Promise<T>
   request<T = unknown>(options: CumulocityRequestOptions): Promise<T>
 }
 \`\`\`
 
 Examples:
 \`\`\`js
-export default await cumulocity.request('/inventory/managedObjects?pageSize=5', {
+export default await cumulocity.request({
   method: 'GET',
+  path: '/inventory/managedObjects?pageSize=5',
 })
 \`\`\`
 

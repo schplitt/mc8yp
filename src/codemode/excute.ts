@@ -1,3 +1,4 @@
+import { encode } from '@toon-format/toon'
 import openapi from '../../openapi.json' with { type: 'json' }
 import { NodeRuntime, allowAllNetwork, createNodeDriver, createNodeRuntimeDriverFactory } from 'secure-exec'
 import { createC8yAuthHeaders, resolveC8yAuth } from '../utils/client'
@@ -30,12 +31,8 @@ function formatResult(result: unknown): string {
     return result
   }
 
-  if (typeof result === 'undefined') {
-    return 'undefined'
-  }
-
   try {
-    return JSON.stringify(result, null, 2)
+    return encode(result)
   } catch {
     return String(result)
   }
@@ -73,15 +70,12 @@ function buildExecuteScript(sourceCode: string, tenantUrl: string, headers: Reco
     '    }',
     '    return tenantUrl + "/" + descriptor;',
     '  };',
-    '  const normalizeRequest = (descriptor, input) => {',
-    '    if (typeof descriptor === "string") {',
-    '      return { path: descriptor, init: input ?? {} };',
+    '  const normalizeRequest = (options) => {',
+    '    if (!options || typeof options !== "object") {',
+    '      throw new TypeError("request options must be an object");',
     '    }',
-    '    if (!descriptor || typeof descriptor !== "object") {',
-    '      throw new TypeError("descriptor must be a path string or object");',
-    '    }',
-    '    const { path, ...rest } = descriptor;',
-    '    return { path, init: { ...rest, ...(input ?? {}) } };',
+    '    const { path, ...rest } = options;',
+    '    return { path, init: rest };',
     '  };',
     '  const normalizeBody = (headers, body) => {',
     '    if (body == null || typeof body === "string") {',
@@ -107,8 +101,8 @@ function buildExecuteScript(sourceCode: string, tenantUrl: string, headers: Reco
     '    return text;',
     '  };',
     '  return {',
-    '    request: async (descriptor, input = {}) => {',
-    '      const { path, init } = normalizeRequest(descriptor, input);',
+    '    request: async (options) => {',
+    '      const { path, init } = normalizeRequest(options);',
     '      if (typeof path !== "string" || path.length === 0) {',
     '        throw new TypeError("request path must be a non-empty string");',
     '      }',
