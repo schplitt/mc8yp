@@ -16,9 +16,9 @@ export function createQueryTool() {
   return defineTool({
     name: 'query',
     title: 'Query Cumulocity OpenAPI Spec',
-    description: `Search the Cumulocity OpenAPI spec. All data is available through the function argument; do not rely on globals.
+    description: `Search the Cumulocity OpenAPI spec using a JavaScript module.
 
-Available in your function:
+Available in your module:
 
 type OperationInfo = {
   summary?: string
@@ -43,27 +43,27 @@ type Spec = {
   tags: Array<{ name: string, description: string }>
 }
 
-Your code must be a JavaScript function. It will be called like ({ spec }) => ... and must return the result.
+declare const spec: Spec
+
+Your code should be JavaScript module source. The top-level binding \`spec\` is available automatically. Export the final result as the default export. Top-level \`await\` is supported.
 
 Examples:
-async ({ spec }) => {
-  const results = []
-  for (const [path, methods] of Object.entries(spec.paths)) {
-    for (const [method, op] of Object.entries(methods)) {
-      if (op?.tags?.some(tag => tag.toLowerCase() === 'inventory')) {
-        results.push({ method: method.toUpperCase(), path, summary: op.summary })
-      }
+const results = []
+for (const [path, methods] of Object.entries(spec.paths)) {
+  for (const [method, op] of Object.entries(methods)) {
+    if (op?.tags?.some(tag => tag.toLowerCase() === 'inventory')) {
+      results.push({ method: method.toUpperCase(), path, summary: op.summary })
     }
   }
-  return results
 }
 
-async ({ spec }) => {
-  const op = spec.paths['/inventory/managedObjects']?.get
-  return { summary: op?.summary, parameters: op?.parameters, responses: op?.responses }
-}`,
+export default results
+
+const op = spec.paths['/inventory/managedObjects']?.get
+export default { summary: op?.summary, parameters: op?.parameters, responses: op?.responses }
+`,
     schema: v.object({
-      code: createCodeSchema('JavaScript function source. It will be called with one argument object containing `spec`, for example async ({ spec }) => Object.keys(spec.paths). Return the value to send back.'),
+      code: createCodeSchema('JavaScript module source. The top-level binding `spec` is available automatically. Export the final result with `export default`. Top-level `await` is supported.'),
     }),
   }, async (input) => {
     try {
@@ -79,9 +79,9 @@ export function createExecuteTool() {
   return defineTool({
     name: 'execute',
     title: 'Execute Cumulocity API Call',
-    description: `Execute JavaScript code against the Cumulocity API. First use the query tool to find the right endpoint, then write a function using cumulocity.request().
+    description: `Execute JavaScript code against the Cumulocity API. First use the query tool to find the right endpoint, then write a JavaScript module that uses cumulocity.request().
 
-Available in your function:
+Available in your module:
 
 type CumulocityRequestOptions = {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
@@ -95,33 +95,31 @@ declare const cumulocity: {
   request<T = unknown>(options: CumulocityRequestOptions): Promise<T>
 }
 
-Your code must be a JavaScript function. It will be called like async ({ cumulocity }) => ... and must return the result.
+Your code should be JavaScript module source. The top-level binding \`cumulocity\` is available automatically. Export the final result as the default export. Top-level \`await\` is supported.
 
 In CLI mode, this MCP can access multiple tenants. Use list-credentials first if the tenant is unclear, then pass the chosen tenantUrl to this tool.
 
 Examples:
-async ({ cumulocity }) => {
-  return cumulocity.request('/inventory/managedObjects?pageSize=5', {
-    method: 'GET',
-  })
-}
+export default await cumulocity.request('/inventory/managedObjects?pageSize=5', {
+  method: 'GET',
+})
 
-async ({ cumulocity }) => {
-  return cumulocity.request({
-    method: 'GET',
-    path: '/alarm/alarms?pageSize=10&withTotalPages=true',
-  })
-}
+const alarms = await cumulocity.request({
+  method: 'GET',
+  path: '/alarm/alarms?pageSize=10&withTotalPages=true',
+})
 
-async ({ cumulocity }) => {
-  const device = await cumulocity.request({
-    method: 'GET',
-    path: '/inventory/managedObjects/12345',
-  })
-  return { id: device.id, name: device.name }
-}`,
+export default alarms
+
+const device = await cumulocity.request({
+  method: 'GET',
+  path: '/inventory/managedObjects/12345',
+})
+
+export default { id: device.id, name: device.name }
+`,
     schema: addTenantURLToSchema(v.object({
-      code: createCodeSchema('JavaScript function source. It will be called with one argument object containing `cumulocity`, for example async ({ cumulocity }) => cumulocity.request(...). Return the final value to send back.'),
+      code: createCodeSchema('JavaScript module source. The top-level binding `cumulocity` is available automatically. Export the final result with `export default`. Top-level `await` is supported.'),
     })),
   }, async (input) => {
     try {

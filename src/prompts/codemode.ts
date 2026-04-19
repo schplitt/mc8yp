@@ -14,9 +14,10 @@ You have exactly two MCP tools available.
 ## query
 Use \`query\` when you need to inspect the OpenAPI spec.
 
-- Input: JavaScript source that evaluates to a function
-- The function receives one argument object with a frozen \`spec\` property
-- Return the exact value you want back
+- Input: JavaScript module source
+- The top-level binding \`spec\` is available automatically
+- Export the exact value you want back with \`export default\`
+- Top-level \`await\` is supported
 
 ### Available Shape
 \`\`\`ts
@@ -44,26 +45,23 @@ declare const spec: {
 
 Example:
 \`\`\`js
-({ spec }) => {
-  return Object.keys(spec.paths).filter((path) => path.includes('inventory'))
-}
+export default Object.keys(spec.paths).filter((path) => path.includes('inventory'))
 \`\`\`
 
 \`\`\`js
-async ({ spec }) => {
-  const op = spec.paths['/inventory/managedObjects']?.get
-  return op?.parameters
-}
+const op = spec.paths['/inventory/managedObjects']?.get
+export default op?.parameters
 \`\`\`
 
 ## execute
 Use \`execute\` when you want to call the real Cumulocity API.
 
-- Input: JavaScript source that evaluates to a function
-- The function receives one argument object with \`cumulocity\`
+- Input: JavaScript module source
+- The top-level binding \`cumulocity\` is available automatically
 - It can call \`await cumulocity.request(pathOrDescriptor, init?)\`
 - Do not build auth headers or tenant URLs yourself
-- Return the exact value you want back
+- Export the exact value you want back with \`export default\`
+- Top-level \`await\` is supported
 
 ### Available Shape
 \`\`\`ts
@@ -82,30 +80,27 @@ declare const cumulocity: {
 
 Examples:
 \`\`\`js
-async ({ cumulocity }) => {
-  return cumulocity.request('/inventory/managedObjects?pageSize=5', {
-    method: 'GET',
-  })
-}
+export default await cumulocity.request('/inventory/managedObjects?pageSize=5', {
+  method: 'GET',
+})
 \`\`\`
 
 \`\`\`js
-async ({ cumulocity }) => {
-  const alarms = await cumulocity.request({
-    method: 'GET',
-    path: '/alarm/alarms?pageSize=10',
-  })
-  return alarms.alarms
-}
+const alarms = await cumulocity.request({
+  method: 'GET',
+  path: '/alarm/alarms?pageSize=10',
+})
+
+export default alarms.alarms
 \`\`\`
 
 \`\`\`js
-async ({ cumulocity }) => {
-  return cumulocity.request({
-    method: 'GET',
-    path: '/inventory/managedObjects?pageSize=20&withTotalPages=true',
-  })
-}
+const devices = await cumulocity.request({
+  method: 'GET',
+  path: '/inventory/managedObjects?pageSize=20&withTotalPages=true',
+})
+
+export default devices
 \`\`\`
 
 ## CLI Mode
@@ -114,7 +109,7 @@ When running in CLI mode, first use \`list-credentials\` to see available tenant
 ## Working Pattern
 1. Use \`query\` to find the right endpoint, parameters, and response shape.
 2. Use \`execute\` to call that endpoint.
-3. Keep functions small and return only the data needed for the next reasoning step.
+3. Keep modules small and export only the data needed for the next reasoning step.
 `,
     )
   })
