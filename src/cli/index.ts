@@ -4,12 +4,20 @@ import consola from 'consola'
 import pkgjson from '../../package.json' with { type: 'json' }
 import { createC8YMcpServer } from '../server'
 import { getCredentialsByTenantUrl, getStoredC8yAuth } from '../utils/credentials'
+import { parseRestrictionRule } from '../utils/restrictions'
 
 const main = defineCommand({
   meta: {
     name: `${pkgjson.name}-cli`,
     version: pkgjson.version,
     description: pkgjson.description,
+  },
+  args: {
+    restriction: {
+      type: 'string',
+      description: 'Restriction rule to deny API access (e.g. "GET:/inventory/**"). Can be repeated.',
+      alias: 'r',
+    },
   },
   setup: () => {
     globalThis.executionEnvironment = 'cli'
@@ -20,13 +28,22 @@ const main = defineCommand({
   subCommands: {
     creds: () => import('./subcommands/creds').then((m) => m.default),
   },
-  run: async () => {
+  run: async ({ args }) => {
+    const raw = args.restriction
+    const restrictions = (Array.isArray(raw) ? raw : raw ? [raw] : [])
+      .filter(Boolean)
+      .map(parseRestrictionRule)
+
+    if (restrictions.length > 0) {
+      consola.info(`Applying ${restrictions.length} restriction rule(s):`, restrictions.map((r) => r.source))
+    }
+
     const server = createC8YMcpServer()
 
     // Start the server with stdio transport
     const transport = new StdioTransport(server)
     consola.info('Starting MCP server over stdio transport...')
-    transport.listen()
+    transport.listen({ restrictions })
   },
 })
 
