@@ -1,29 +1,45 @@
 import { encode } from '@toon-format/toon'
 import openapi from '../../openapi.json' with { type: 'json' }
-import { NodeRuntime, allowAllNetwork, createNodeDriver, createNodeRuntimeDriverFactory } from 'secure-exec'
+import { NodeRuntime, createNodeDriver, createNodeRuntimeDriverFactory } from 'secure-exec'
+import { applyRestrictionsToOpenApiSpec } from './openapi-restrictions'
+import { AsyncSemaphore } from './semaphore'
 import { createC8yAuthHeaders, resolveC8yAuth } from '../utils/client'
+import {
+  createNetworkPermissionDecision,
+  type RestrictionRule,
+} from '../utils/restrictions'
 
-let runtime: NodeRuntime | null = null
 const NO_DEFAULT_EXPORT_MESSAGE = 'Execution completed without returning a value.'
 const QUERY_ENTRY_PATH = '/codemode-query.mjs'
 const EXECUTE_ENTRY_PATH = '/codemode-execute.mjs'
+const runtimeSemaphore = new AsyncSemaphore(3)
 
-function getRuntime() {
-  if (!runtime) {
-    runtime = new NodeRuntime({
-      systemDriver: createNodeDriver({
-        useDefaultNetwork: true,
-        permissions: {
-          ...allowAllNetwork,
-        },
-      }),
-      runtimeDriverFactory: createNodeRuntimeDriverFactory(),
-      memoryLimit: 128,
-      cpuTimeLimitMs: 50000,
-    })
-  }
+function createQueryRuntime() {
+  return new NodeRuntime({
+    systemDriver: createNodeDriver({
+      useDefaultNetwork: true,
+      permissions: {
+        network: () => ({ allow: false, reason: 'Network access is disabled for query execution.' }),
+      },
+    }),
+    runtimeDriverFactory: createNodeRuntimeDriverFactory(),
+    memoryLimit: 128,
+    cpuTimeLimitMs: 50000,
+  })
+}
 
-  return runtime
+function createExecuteRuntime(restrictions: readonly RestrictionRule[] = []) {
+  return new NodeRuntime({
+    systemDriver: createNodeDriver({
+      useDefaultNetwork: true,
+      permissions: {
+        network: (request) => createNetworkPermissionDecision(restrictions, request),
+      },
+    }),
+    runtimeDriverFactory: createNodeRuntimeDriverFactory(),
+    memoryLimit: 128,
+    cpuTimeLimitMs: 50000,
+  })
 }
 
 function formatResult(result: unknown): string {
@@ -49,9 +65,11 @@ function normalizeCode(functionCode: string): string {
   return normalized
 }
 
-function buildQueryScript(sourceCode: string): string {
+function buildQueryScript(sourceCode: string, restrictions: readonly RestrictionRule[]): string {
+  const restrictedSpec = applyRestrictionsToOpenApiSpec(openapi, restrictions)
+
   return [
-    `const spec = ${JSON.stringify(openapi)};`,
+    `const spec = ${JSON.stringify(restrictedSpec)};`,
     normalizeCode(sourceCode),
   ].join('\n\n')
 }
@@ -144,33 +162,41 @@ function extractDefaultExport(exportsObject: unknown): unknown {
   throw new Error(NO_DEFAULT_EXPORT_MESSAGE)
 }
 
-async function runExecuteScript(code: string): Promise<unknown> {
-  return runModule(code, EXECUTE_ENTRY_PATH)
+async function runExecuteScript(code: string, restrictions: readonly RestrictionRule[]): Promise<unknown> {
+  return runModule(code, EXECUTE_ENTRY_PATH, createExecuteRuntime(restrictions))
 }
 
 async function runQueryScript(code: string): Promise<unknown> {
-  return runModule(code, QUERY_ENTRY_PATH)
+  return runModule(code, QUERY_ENTRY_PATH, createQueryRuntime())
 }
 
-async function runModule(code: string, entryPath: string): Promise<unknown> {
-  const result = await getRuntime().run<unknown>(code, entryPath)
+async function runModule(code: string, entryPath: string, runtime: NodeRuntime): Promise<unknown> {
+  const release = await runtimeSemaphore.acquire()
 
-  if (result.code !== 0) {
-    const errorMessage = `Execution failed with code ${result.code}${result.errorMessage ? `: ${result.errorMessage}` : ''}`
-    throw new Error(errorMessage)
+  try {
+    const result = await runtime.run<unknown>(code, entryPath)
+
+    if (result.code !== 0) {
+      const errorMessage = `Execution failed with code ${result.code}${result.errorMessage ? `: ${result.errorMessage}` : ''}`
+      throw new Error(errorMessage)
+    }
+
+    return extractDefaultExport(result.exports)
+  } finally {
+    runtime.dispose()
+    release()
   }
-
-  return extractDefaultExport(result.exports)
 }
 
-export async function query(functionCode: string): Promise<string> {
-  const result = await runQueryScript(buildQueryScript(functionCode))
+export async function query(functionCode: string, restrictions: readonly RestrictionRule[] = []): Promise<string> {
+  const result = await runQueryScript(buildQueryScript(functionCode, restrictions))
   return formatResult(result)
 }
 
-export async function execute(functionCode: string, input?: unknown): Promise<string> {
+export async function execute(functionCode: string, input?: unknown, restrictions: readonly RestrictionRule[] = []): Promise<string> {
   const auth = await resolveC8yAuth(input)
   const authHeaders = createC8yAuthHeaders(auth)
-  const result = await runExecuteScript(buildExecuteScript(functionCode, auth.tenantUrl, authHeaders))
+
+  const result = await runExecuteScript(buildExecuteScript(functionCode, auth.tenantUrl, authHeaders), restrictions)
   return formatResult(result)
 }

@@ -5,8 +5,9 @@ import pkgjson from '../package.json' with { type: 'json' }
 import { createPrompts } from './prompts'
 import { createTools } from './tools'
 import { createListCredentialsTool } from './tools/credentials'
+import type { C8yMcpCustomContext } from './types/mcp-context'
 
-export function createC8YMcpServer(): McpServer {
+export function createC8YMcpServer(): McpServer<undefined, C8yMcpCustomContext> {
   const adapter = new ValibotJsonSchemaAdapter()
 
   const server = new McpServer(
@@ -23,10 +24,10 @@ export function createC8YMcpServer(): McpServer {
         resources: { listChanged: false },
       },
     },
-  )
+  ).withContext<C8yMcpCustomContext>()
 
-  server.tools(createTools())
-  server.prompts(createPrompts())
+  server.tools(createTools(server))
+  server.prompts(createPrompts(server))
   const executionEnvironment = globalThis.executionEnvironment
   consola.info('Running in execution environment:', executionEnvironment)
 

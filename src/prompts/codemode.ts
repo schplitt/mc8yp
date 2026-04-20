@@ -1,11 +1,18 @@
+import type { McpServer } from 'tmcp'
 import { definePrompt } from 'tmcp/prompt'
 import { prompt } from 'tmcp/utils'
+import type { C8yMcpCustomContext } from '../types/mcp-context'
 
-export function createCodeModeGuidePrompt() {
+export function createCodeModeGuidePrompt(server: McpServer<undefined, C8yMcpCustomContext>) {
   return definePrompt({
     name: 'code-mode-guide',
     description: 'Guide for the two code-mode tools: query and execute, including available shapes and examples.',
   }, () => {
+    const restrictions = server.ctx.custom?.restrictions ?? []
+    const restrictionSection = restrictions.length > 0
+      ? `\n## Current Connection Restrictions\nThe current MCP connection blocks matching operations using these deny rules:\n${restrictions.map((rule) => `- \`${rule.source}\``).join('\n')}\n\nRestricted operations stay visible in the spec and are annotated with \`x-mc8yp-restricted\` and related \`x-mc8yp-*\` fields.\n`
+      : ''
+
     return prompt.message(
       `# Cumulocity Code Mode
 
@@ -19,6 +26,7 @@ Use \`query\` when you need to inspect the OpenAPI spec.
 - Export the exact value you want back with \`export default\`
 - Top-level \`await\` is supported
 - Structured results are returned in Toon format; exported strings are returned as-is
+- Restricted operations stay visible and are annotated with \`x-mc8yp-restricted\` and related \`x-mc8yp-*\` fields
 
 ### Available Shape
 \`\`\`ts
@@ -64,6 +72,7 @@ Use \`execute\` when you want to call the real Cumulocity API.
 - Export the exact value you want back with \`export default\`
 - Top-level \`await\` is supported
 - Structured results are returned in Toon format; exported strings are returned as-is
+- The current MCP connection may reject restricted method/path combinations before network access
 
 ### Available Shape
 \`\`\`ts
@@ -112,6 +121,7 @@ When running in CLI mode, first use \`list-credentials\` to see available tenant
 1. Use \`query\` to find the right endpoint, parameters, and response shape.
 2. Use \`execute\` to call that endpoint.
 3. Keep modules small and export only the data needed for the next reasoning step.
+${restrictionSection}
 `,
     )
   })

@@ -1,7 +1,9 @@
+import type { McpServer } from 'tmcp'
 import { defineTool } from 'tmcp/tool'
 import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
 import { execute, query } from '../codemode/excute'
+import type { C8yMcpCustomContext } from '../types/mcp-context'
 import { addTenantURLToSchema } from '../utils/schema'
 
 function createCodeSchema(description: string) {
@@ -12,7 +14,7 @@ function createCodeSchema(description: string) {
   )
 }
 
-export function createQueryTool() {
+export function createQueryTool(server: McpServer<undefined, C8yMcpCustomContext>) {
   return defineTool({
     name: 'query',
     title: 'Query Cumulocity OpenAPI Spec',
@@ -49,6 +51,8 @@ Your code should be JavaScript module source. The top-level binding \`spec\` is 
 
 Structured tool results are returned in Toon format to reduce token usage. If you export a string, it is returned as-is.
 
+The current MCP connection may mark blocked operations with \`x-mc8yp-restricted\` and related \`x-mc8yp-*\` fields. These operations are intentionally unavailable even though they still exist in the OpenAPI spec.
+
 Examples:
 const results = []
 for (const [path, methods] of Object.entries(spec.paths)) {
@@ -69,7 +73,7 @@ export default { summary: op?.summary, parameters: op?.parameters, responses: op
     }),
   }, async (input) => {
     try {
-      return tool.text(await query(input.code))
+      return tool.text(await query(input.code, server.ctx.custom?.restrictions ?? []))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return tool.error(message)
@@ -77,7 +81,7 @@ export default { summary: op?.summary, parameters: op?.parameters, responses: op
   })
 }
 
-export function createExecuteTool() {
+export function createExecuteTool(server: McpServer<undefined, C8yMcpCustomContext>) {
   return defineTool({
     name: 'execute',
     title: 'Execute Cumulocity API Call',
@@ -99,6 +103,8 @@ declare const cumulocity: {
 Your code should be JavaScript module source. The top-level binding \`cumulocity\` is available automatically. Call \`await cumulocity.request({ method, path, ... })\`, export the final result as the default export, and use top-level \`await\` when needed.
 
 Structured tool results are returned in Toon format to reduce token usage. If you export a string, it is returned as-is.
+
+The current MCP connection may deny certain method/path combinations. Restricted routes remain visible in the spec, and \`cumulocity.request(...)\` will reject blocked calls before sending them.
 
 In CLI mode, this MCP can access multiple tenants. Use list-credentials first if the tenant is unclear, then pass the chosen tenantUrl to this tool.
 
@@ -127,7 +133,7 @@ export default { id: device.id, name: device.name }
     })),
   }, async (input) => {
     try {
-      return tool.text(await execute(input.code, input))
+      return tool.text(await execute(input.code, input, server.ctx.custom?.restrictions ?? []))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return tool.error(message)

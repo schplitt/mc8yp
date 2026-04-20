@@ -5,6 +5,7 @@ import { createC8YMcpServer } from './server'
 import { getAuthContext } from './ctx/auth'
 import process from 'node:process'
 import { extractAuthFromHeaders } from './utils/auth'
+import { parseRestrictionQuery } from './utils/restrictions'
 
 globalThis.executionEnvironment = 'server'
 
@@ -15,10 +16,11 @@ const transport = new HttpTransport(server)
 const app = new H3().all('/mcp', async (event) => {
   // Extract authentication from request headers
   const credentials = extractAuthFromHeaders(event.req)
+  const restrictions = parseRestrictionQuery(event.req.url)
 
   // Set auth context for the request
   const authContext = getAuthContext()
-  return authContext.call(credentials, () => transport.respond(event.req))
+  return authContext.call(credentials, () => transport.respond(event.req, { restrictions }))
 })
 
 app.get('/health', () => 'OK')
