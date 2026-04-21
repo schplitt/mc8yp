@@ -242,7 +242,8 @@ async function runModule(code: string, entryPath: string, runtime: NodeRuntime):
 
 export async function query(functionCode: string, restrictions: readonly RestrictionRule[] = []): Promise<string> {
   const result = await runQueryScript(buildQueryScript(functionCode, restrictions))
-  return encode(result)
+  // dont encode as toon to make spec easier to understand
+  return typeof result === 'string' ? result : JSON.stringify(result)
 }
 
 export async function execute(functionCode: string, input?: unknown, restrictions: readonly RestrictionRule[] = []): Promise<string> {
