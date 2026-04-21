@@ -57,68 +57,45 @@ describe('restriction matching', () => {
 })
 
 describe('network permission decisions', () => {
-  const rules = [parseRestrictionRule('GET:/inventory/**')]
+  const tenantUrl = 'https://tenant.example.com'
 
-  it('blocks restricted requests when passed an absolute url', () => {
-    expect(createNetworkPermissionDecision(rules, {
+  it('rejects fetch requests', () => {
+    expect(createNetworkPermissionDecision(tenantUrl, {
       op: 'fetch',
       method: 'GET',
       url: 'https://tenant.example.com/inventory/managedObjects',
     })).toEqual({
       allow: false,
-      reason: 'Network request blocked by MCP restrictions: GET:/inventory/**',
+      reason: 'Unsupported network operation "fetch". Only "connect" is allowed.',
     })
   })
 
-  it('blocks restricted requests on any origin', () => {
-    expect(createNetworkPermissionDecision(rules, {
-      op: 'fetch',
-      method: 'GET',
-      url: 'https://other.example.com/inventory/managedObjects',
-    })).toEqual({
-      allow: false,
-      reason: 'Network request blocked by MCP restrictions: GET:/inventory/**',
-    })
-  })
-
-  it('allows unrestricted requests even on other origins', () => {
-    expect(createNetworkPermissionDecision(rules, {
-      op: 'fetch',
-      method: 'POST',
-      url: 'https://other.example.com/event/events',
+  it('allows connects to the configured tenant host', () => {
+    expect(createNetworkPermissionDecision(tenantUrl, {
+      op: 'connect',
+      hostname: 'tenant.example.com',
     })).toEqual({
       allow: true,
     })
   })
 
-  it('blocks restricted requests when passed only a path', () => {
-    expect(createNetworkPermissionDecision(rules, {
-      op: 'fetch',
-      method: 'GET',
-      url: '/inventory/managedObjects?pageSize=10',
+  it('blocks connects to other hosts', () => {
+    expect(createNetworkPermissionDecision(tenantUrl, {
+      op: 'connect',
+      hostname: 'other.example.com',
     })).toEqual({
       allow: false,
-      reason: 'Network request blocked by MCP restrictions: GET:/inventory/**',
+      reason: 'Network connect blocked: only tenant.example.com is allowed in execute mode.',
     })
   })
 
-  it('rejects non-fetch operations', () => {
-    expect(createNetworkPermissionDecision(rules, {
+  it('rejects disallowed network operations', () => {
+    expect(createNetworkPermissionDecision(tenantUrl, {
       op: 'dns',
       hostname: 'other.example.com',
     })).toEqual({
       allow: false,
-      reason: 'Only fetch network operations are allowed in execute mode.',
-    })
-  })
-
-  it('rejects requests without a parseable url', () => {
-    expect(createNetworkPermissionDecision(rules, {
-      op: 'fetch',
-      method: 'GET',
-    })).toEqual({
-      allow: false,
-      reason: 'Network request URL is required.',
+      reason: 'Unsupported network operation "dns". Only "connect" is allowed.',
     })
   })
 })

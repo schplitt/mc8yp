@@ -5,14 +5,45 @@ import { applyRestrictionsToOpenApiSpec } from './openapi-restrictions'
 import { AsyncSemaphore } from './semaphore'
 import { createC8yAuthHeaders, resolveC8yAuth } from '../utils/client'
 import {
-  createNetworkPermissionDecision,
+  HTTP_METHODS,
+  compileRestrictionRule,
+  compileRestrictionSegment,
+  compileRestrictionSources,
+  escapeRestrictionRegex,
+  getBlockedCompiledRestrictions,
+  matchCompiledSegments,
+  matchesCompiledRule,
+  normalizeAndValidateRestrictionPath,
+  normalizeRestrictionMatchPath,
+  parseRestrictionRule,
   type RestrictionRule,
+} from '../utils/restriction-core'
+import {
+  createNetworkPermissionDecision,
 } from '../utils/restrictions'
 
 const NO_DEFAULT_EXPORT_MESSAGE = 'Execution completed without returning a value.'
 const QUERY_ENTRY_PATH = '/codemode-query.mjs'
 const EXECUTE_ENTRY_PATH = '/codemode-execute.mjs'
 const runtimeSemaphore = new AsyncSemaphore(3)
+
+function serializeExecuteConfig(tenantUrl: string, headers: Record<string, string>, restrictions: readonly RestrictionRule[]): string {
+  const normalizedTenantUrl = new URL(tenantUrl).toString()
+  const restrictionSources = restrictions.map((rule) => {
+    const parsedRule = parseRestrictionRule(rule.source)
+    if (parsedRule.method !== rule.method || parsedRule.pathPattern !== rule.pathPattern) {
+      throw new TypeError(`Restriction source "${rule.source}" does not match its parsed shape.`)
+    }
+    return parsedRule.source
+  })
+
+  return JSON.stringify({
+    tenantUrl: normalizedTenantUrl,
+    tenantOrigin: new URL(normalizedTenantUrl).origin,
+    authHeaders: headers,
+    restrictionSources,
+  })
+}
 
 function createQueryRuntime() {
   return new NodeRuntime({
@@ -28,12 +59,12 @@ function createQueryRuntime() {
   })
 }
 
-function createExecuteRuntime(restrictions: readonly RestrictionRule[] = []) {
+function createExecuteRuntime(tenantUrl: string) {
   return new NodeRuntime({
     systemDriver: createNodeDriver({
       useDefaultNetwork: true,
       permissions: {
-        network: (request) => createNetworkPermissionDecision(restrictions, request),
+        network: (request) => createNetworkPermissionDecision(tenantUrl, request),
       },
     }),
     runtimeDriverFactory: createNodeRuntimeDriverFactory(),
@@ -42,17 +73,6 @@ function createExecuteRuntime(restrictions: readonly RestrictionRule[] = []) {
   })
 }
 
-function formatResult(result: unknown): string {
-  if (typeof result === 'string') {
-    return result
-  }
-
-  try {
-    return encode(result)
-  } catch {
-    return String(result)
-  }
-}
 
 function normalizeCode(functionCode: string): string {
   let normalized = functionCode.trim()
@@ -74,19 +94,28 @@ function buildQueryScript(sourceCode: string, restrictions: readonly Restriction
   ].join('\n\n')
 }
 
-function buildExecuteScript(sourceCode: string, tenantUrl: string, headers: Record<string, string>): string {
+export function buildExecutePrelude(tenantUrl: string, headers: Record<string, string>, restrictions: readonly RestrictionRule[] = []): string {
+  const serializedConfig = JSON.stringify(serializeExecuteConfig(tenantUrl, headers, restrictions))
+
   return [
     'const cumulocity = Object.freeze((() => {',
-    `  const tenantUrl = ${JSON.stringify(tenantUrl)};`,
-    `  const authHeaders = ${JSON.stringify(headers)};`,
+    `  const config = JSON.parse(${serializedConfig});`,
+    '  if (!config || typeof config !== "object") {',
+    '    throw new TypeError("Invalid execute configuration.");',
+    '  }',
+    '  const { tenantUrl, tenantOrigin, authHeaders, restrictionSources } = config;',
+    '  if (typeof tenantUrl !== "string" || typeof tenantOrigin !== "string") {',
+    '    throw new TypeError("Execute configuration must contain string tenant values.");',
+    '  }',
+    '  if (!Array.isArray(restrictionSources) || restrictionSources.some((source) => typeof source !== "string")) {',
+    '    throw new TypeError("Execute configuration must contain string restriction sources.");',
+    '  }',
     '  const resolveUrl = (descriptor) => {',
-    '    if (descriptor.startsWith(tenantUrl)) {',
-    '      return descriptor;',
+    '    const resolved = new URL(descriptor, tenantUrl.endsWith("/") ? tenantUrl : tenantUrl + "/");',
+    '    if (resolved.origin !== tenantOrigin) {',
+    '      throw new Error("Cumulocity requests must target the configured tenant origin.");',
     '    }',
-    '    if (descriptor.startsWith("/")) {',
-    '      return tenantUrl + descriptor;',
-    '    }',
-    '    return tenantUrl + "/" + descriptor;',
+    '    return resolved;',
     '  };',
     '  const normalizeRequest = (options) => {',
     '    if (!options || typeof options !== "object") {',
@@ -95,6 +124,18 @@ function buildExecuteScript(sourceCode: string, tenantUrl: string, headers: Reco
     '    const { path, ...rest } = options;',
     '    return { path, init: rest };',
     '  };',
+    `  const HTTP_METHOD_SET = new Set(${JSON.stringify(HTTP_METHODS)});`,
+    `  const normalizeRestrictionMatchPath = ${normalizeRestrictionMatchPath.toString()};`,
+    `  const normalizeAndValidateRestrictionPath = ${normalizeAndValidateRestrictionPath.toString()};`,
+    `  const parseRestrictionRule = ${parseRestrictionRule.toString()};`,
+    `  const escapeRestrictionRegex = ${escapeRestrictionRegex.toString()};`,
+    `  const compileRestrictionSegment = ${compileRestrictionSegment.toString()};`,
+    `  const matchCompiledSegments = ${matchCompiledSegments.toString()};`,
+    `  const compileRestrictionRule = ${compileRestrictionRule.toString()};`,
+    `  const matchesCompiledRule = ${matchesCompiledRule.toString()};`,
+    `  const compileRestrictionSources = ${compileRestrictionSources.toString()};`,
+    `  const getBlockedCompiledRestrictions = ${getBlockedCompiledRestrictions.toString()};`,
+    '  const compiledRestrictions = compileRestrictionSources(restrictionSources);',
     '  const normalizeBody = (headers, body) => {',
     '    if (body == null || typeof body === "string") {',
     '      return body;',
@@ -124,13 +165,18 @@ function buildExecuteScript(sourceCode: string, tenantUrl: string, headers: Reco
     '      if (typeof path !== "string" || path.length === 0) {',
     '        throw new TypeError("request path must be a non-empty string");',
     '      }',
+    '      const resolvedUrl = resolveUrl(path);',
+    '      const blockedRules = getBlockedCompiledRestrictions(compiledRestrictions, init.method, resolvedUrl.pathname);',
+    '      if (blockedRules.length > 0) {',
+    '        throw new Error("Cumulocity request blocked by MCP restrictions: " + blockedRules.map((rule) => rule.source).join(", "));',
+    '      }',
     '      const headers = new Headers(init.headers ?? {});',
     '      for (const [key, value] of Object.entries(authHeaders)) {',
     '        headers.set(key, value);',
     '      }',
     '      const body = normalizeBody(headers, init.body);',
     '      const requestHeaders = Object.fromEntries(headers.entries());',
-    '      const response = await fetch(resolveUrl(path), {',
+    '      const response = await fetch(resolvedUrl.toString(), {',
     '        ...init,',
     '        headers: requestHeaders,',
     '        body,',
@@ -144,6 +190,12 @@ function buildExecuteScript(sourceCode: string, tenantUrl: string, headers: Reco
     '    },',
     '  };',
     '})());',
+  ].join('\n\n')
+}
+
+export function buildExecuteScript(sourceCode: string, tenantUrl: string, headers: Record<string, string>, restrictions: readonly RestrictionRule[] = []): string {
+  return [
+    buildExecutePrelude(tenantUrl, headers, restrictions),
     normalizeCode(sourceCode),
   ].join('\n\n')
 }
@@ -162,8 +214,8 @@ function extractDefaultExport(exportsObject: unknown): unknown {
   throw new Error(NO_DEFAULT_EXPORT_MESSAGE)
 }
 
-async function runExecuteScript(code: string, restrictions: readonly RestrictionRule[]): Promise<unknown> {
-  return runModule(code, EXECUTE_ENTRY_PATH, createExecuteRuntime(restrictions))
+async function runExecuteScript(code: string, tenantUrl: string): Promise<unknown> {
+  return runModule(code, EXECUTE_ENTRY_PATH, createExecuteRuntime(tenantUrl))
 }
 
 async function runQueryScript(code: string): Promise<unknown> {
@@ -190,13 +242,13 @@ async function runModule(code: string, entryPath: string, runtime: NodeRuntime):
 
 export async function query(functionCode: string, restrictions: readonly RestrictionRule[] = []): Promise<string> {
   const result = await runQueryScript(buildQueryScript(functionCode, restrictions))
-  return formatResult(result)
+  return encode(result)
 }
 
 export async function execute(functionCode: string, input?: unknown, restrictions: readonly RestrictionRule[] = []): Promise<string> {
   const auth = await resolveC8yAuth(input)
   const authHeaders = createC8yAuthHeaders(auth)
 
-  const result = await runExecuteScript(buildExecuteScript(functionCode, auth.tenantUrl, authHeaders), restrictions)
-  return formatResult(result)
+  const result = await runExecuteScript(buildExecuteScript(functionCode, auth.tenantUrl, authHeaders, restrictions), auth.tenantUrl)
+  return encode(result)
 }
