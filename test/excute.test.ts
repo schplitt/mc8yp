@@ -39,6 +39,17 @@ const INVALID_RESTRICTION_QUERY_PAYLOADS = [
   'GET:inventory/managedObjects',
 ] as const
 
+const OUT_OF_ORIGIN_REQUEST_PATHS = [
+  {
+    description: 'absolute URLs that point to a different origin',
+    path: 'https://other.example.com/inventory/managedObjects',
+  },
+  {
+    description: 'scheme-relative URLs that point to a different origin',
+    path: '//other.example.com/inventory/managedObjects',
+  },
+] as const
+
 function resetTestGlobals() {
   delete testGlobals.__called
   delete testGlobals.__done
@@ -145,6 +156,27 @@ describe('buildExecuteScript', () => {
     expect(result.errorMessage).toContain('Cumulocity request blocked by MCP restrictions: GET:/inventory/**')
   })
 
+  it('blocks query-derived restrictions for same-origin absolute URLs before fetch is called', async () => {
+    const restrictions = parseRestrictionQuery('https://example.test/mcp?restriction=GET%3A%2Finventory%2F**')
+    const result = await runGeneratedExecuteScript([
+      `${installFetchTrap.toString()}`,
+      'installFetchTrap();',
+      'globalThis.__done = (async () => {',
+      '  try {',
+      '    await cumulocity.request({',
+      '      method: "GET",',
+      '      path: "https://tenant.example.com/inventory/managedObjects?pageSize=5",',
+      '    });',
+      '  } catch (error) {',
+      '    globalThis.__errorMessage = error instanceof Error ? error.message : String(error);',
+      '  }',
+      '})();',
+    ].join('\n'), restrictions)
+
+    expect(result.called).toBe(false)
+    expect(result.errorMessage).toContain('Cumulocity request blocked by MCP restrictions: GET:/inventory/**')
+  })
+
   it('allows safe requests when valid restrictions are present', async () => {
     const restrictions = parseRestrictionQuery('https://example.test/mcp?restriction=GET%3A%2Finventory%2F**&restriction=%2Falarm%2F*')
     const result = await runGeneratedExecuteScript([
@@ -160,6 +192,26 @@ describe('buildExecuteScript', () => {
     expect(result.url).toBe('https://tenant.example.com/event/events')
     expect(result.method).toBe('POST')
     expect(result.pwned).toBeUndefined()
+  })
+
+  it.each(OUT_OF_ORIGIN_REQUEST_PATHS)('rejects $description before fetch is called', async ({ path }) => {
+    const result = await runGeneratedExecuteScript([
+      `${installFetchTrap.toString()}`,
+      'installFetchTrap();',
+      'globalThis.__done = (async () => {',
+      '  try {',
+      '    await cumulocity.request({',
+      '      method: "GET",',
+      `      path: ${JSON.stringify(path)},`,
+      '    });',
+      '  } catch (error) {',
+      '    globalThis.__errorMessage = error instanceof Error ? error.message : String(error);',
+      '  }',
+      '})();',
+    ].join('\n'))
+
+    expect(result.called).toBe(false)
+    expect(result.errorMessage).toBe('Cumulocity requests must target the configured tenant origin.')
   })
 
   it('rejects invalid handcrafted restriction objects before prelude generation', () => {

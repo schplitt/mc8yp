@@ -29,6 +29,13 @@ describe('restriction parsing', () => {
       { method: 'POST', pathPattern: '/alarm/**', source: 'POST:/alarm/**' },
     ])
   })
+
+  it('extracts repeated query parameters from server-relative MCP URLs', () => {
+    expect(parseRestrictionQuery('/mcp?restriction=/inventory/**&restriction=DELETE:/alarm/**')).toEqual([
+      { method: '*', pathPattern: '/inventory/**', source: '/inventory/**' },
+      { method: 'DELETE', pathPattern: '/alarm/**', source: 'DELETE:/alarm/**' },
+    ])
+  })
 })
 
 describe('restriction matching', () => {
@@ -53,6 +60,18 @@ describe('restriction matching', () => {
       path: '/inventory/managedObjects/123',
       matchingRules: [parseRestrictionRule('/inventory/**')],
     })
+  })
+
+  it('matches absolute URLs using only the normalized pathname', () => {
+    expect(evaluateRestrictions(rules, 'GET', 'https://tenant.example.com/inventory/managedObjects?pageSize=5')).toEqual({
+      method: 'GET',
+      path: '/inventory/managedObjects',
+      matchingRules: [parseRestrictionRule('/inventory/**')],
+    })
+  })
+
+  it('rejects unsupported HTTP methods', () => {
+    expect(() => evaluateRestrictions(rules, 'MERGE', '/inventory/managedObjects')).toThrow('Unsupported HTTP method "MERGE".')
   })
 })
 

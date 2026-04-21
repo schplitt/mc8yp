@@ -106,6 +106,20 @@ const MATCH_CASES = [
     expected: false,
   },
   {
+    description: 'literal dots are matched literally within a path segment',
+    rule: '/inventory/device.1',
+    method: 'GET',
+    path: '/inventory/device.1',
+    expected: true,
+  },
+  {
+    description: 'literal dots do not behave like regex wildcards',
+    rule: '/inventory/device.1',
+    method: 'GET',
+    path: '/inventory/deviceX1',
+    expected: false,
+  },
+  {
     description: 'root restriction matches the normalized root path',
     rule: '/',
     method: 'GET',
@@ -167,6 +181,14 @@ describe('restriction core helpers', () => {
       method: '*',
       pathPattern: '/inventory/managedObjects*/**/evil',
       source: '/inventory/managedObjects*/**/evil',
+    })
+  })
+
+  it('accepts explicit wildcard method prefixes', () => {
+    expect(parseRestrictionRule('*:/inventory/**')).toEqual({
+      method: '*',
+      pathPattern: '/inventory/**',
+      source: '*:/inventory/**',
     })
   })
 
