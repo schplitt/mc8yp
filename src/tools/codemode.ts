@@ -52,6 +52,7 @@ Your code should be JavaScript module source. The top-level binding \`spec\` is 
 Structured tool results are returned in Toon format to reduce token usage. If you export a string, it is returned as-is.
 
 The current MCP connection may mark blocked operations with \`x-mc8yp-restricted\` and related \`x-mc8yp-*\` fields. These operations are intentionally unavailable even though they still exist in the OpenAPI spec.
+Treat those annotations as a hard connection-level restriction: use them to understand what exists, but do not plan to call those operations with \`execute\`.
 
 Examples:
 const results = []
@@ -85,7 +86,7 @@ export function createExecuteTool(server: McpServer<undefined, C8yMcpCustomConte
   return defineTool({
     name: 'execute',
     title: 'Execute Cumulocity API Call',
-    description: `Execute JavaScript code against the Cumulocity API. First use the query tool to find the right endpoint, then write a JavaScript module that uses cumulocity.request().
+    description: `Execute JavaScript code against the Cumulocity API. First use the query tool to find the right endpoint, then write an async JavaScript function expression that uses cumulocity.request().
 
 Available in your module:
 
@@ -100,36 +101,52 @@ declare const cumulocity: {
   request<T = unknown>(options: CumulocityRequestOptions): Promise<T>
 }
 
-Your code should be JavaScript module source. The top-level binding \`cumulocity\` is available automatically. Call \`await cumulocity.request({ method, path, ... })\`, export the final result as the default export, and use top-level \`await\` when needed.
+Your code must evaluate to a function, preferably an async anonymous function or async arrow function expression. The top-level binding \`cumulocity\` is available automatically. The sandbox assigns your function to a local variable, invokes it, and returns its result.
 
-Structured tool results are returned in Toon format to reduce token usage. If you export a string, it is returned as-is.
+Recommended shape:
+\`async () => { ... }\`
+
+Inside that function, call \`await cumulocity.request({ method, path, ... })\` and \`return\` the final value you want.
+
+Internally the sandbox classifies execution as success, blocked, or failed.
+
+Tool output behavior:
+- On success, the actual function result is returned in Toon format.
+- On blocked or failed execution, the tool returns a plain text message.
 
 The current MCP connection may deny certain method/path combinations. Restricted routes remain visible in the spec, and \`cumulocity.request(...)\` will reject blocked calls before sending them.
+When that happens, the tool returns a plain text connection-policy message. That is not a Cumulocity API failure and retrying the same operation through the same connection will not help.
 
 In CLI mode, this MCP can access multiple tenants. Use list-credentials first if the tenant is unclear, then pass the chosen tenantUrl to this tool.
 
 Examples:
-export default await cumulocity.request({
-  method: 'GET',
-  path: '/inventory/managedObjects?pageSize=5',
-})
+async () => {
+  return await cumulocity.request({
+    method: 'GET',
+    path: '/inventory/managedObjects?pageSize=5',
+  })
+}
 
-const alarms = await cumulocity.request({
-  method: 'GET',
-  path: '/alarm/alarms?pageSize=10&withTotalPages=true',
-})
+async () => {
+  const alarms = await cumulocity.request({
+    method: 'GET',
+    path: '/alarm/alarms?pageSize=10&withTotalPages=true',
+  })
 
-export default alarms
+  return alarms
+}
 
-const device = await cumulocity.request({
-  method: 'GET',
-  path: '/inventory/managedObjects/12345',
-})
+async () => {
+  const device = await cumulocity.request({
+    method: 'GET',
+    path: '/inventory/managedObjects/12345',
+  })
 
-export default { id: device.id, name: device.name }
+  return { id: device.id, name: device.name }
+}
 `,
     schema: addTenantURLToSchema(v.object({
-      code: createCodeSchema('JavaScript module source. The top-level binding `cumulocity` is available automatically. Export the final result with `export default`. Top-level `await` is supported.'),
+      code: createCodeSchema('An async JavaScript function expression. The top-level binding `cumulocity` is available automatically. Return the final result from that function. `await` is supported.'),
     })),
   }, async (input) => {
     try {

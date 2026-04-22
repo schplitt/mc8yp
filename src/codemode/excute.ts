@@ -26,6 +26,21 @@ const NO_DEFAULT_EXPORT_MESSAGE = 'Execution completed without returning a value
 const QUERY_ENTRY_PATH = '/codemode-query.mjs'
 const EXECUTE_ENTRY_PATH = '/codemode-execute.mjs'
 const runtimeSemaphore = new AsyncSemaphore(3)
+const BLOCKED_REQUEST_PREFIX = 'Request blocked by MCP connection policy.'
+
+interface ExecuteSuccessEnvelope {
+  status: 'success'
+  result: unknown
+}
+
+interface ExecuteErrorEnvelope {
+  status: 'blocked' | 'failed'
+  error: {
+    message: string
+  }
+}
+
+type ExecuteEnvelope = ExecuteSuccessEnvelope | ExecuteErrorEnvelope
 
 function serializeExecuteConfig(tenantUrl: string, headers: Record<string, string>, restrictions: readonly RestrictionRule[]): string {
   const normalizedTenantUrl = new URL(tenantUrl).toString()
@@ -59,12 +74,12 @@ function createQueryRuntime() {
   })
 }
 
-function createExecuteRuntime(tenantUrl: string) {
+function createExecuteRuntime(tenantUrl: string, restrictions: readonly RestrictionRule[]) {
   return new NodeRuntime({
     systemDriver: createNodeDriver({
       useDefaultNetwork: true,
       permissions: {
-        network: (request) => createNetworkPermissionDecision(tenantUrl, request),
+        network: (request) => createNetworkPermissionDecision(tenantUrl, request, restrictions),
       },
     }),
     runtimeDriverFactory: createNodeRuntimeDriverFactory(),
@@ -136,6 +151,22 @@ export function buildExecutePrelude(tenantUrl: string, headers: Record<string, s
     `  const compileRestrictionSources = ${compileRestrictionSources.toString()};`,
     `  const getBlockedCompiledRestrictions = ${getBlockedCompiledRestrictions.toString()};`,
     '  const compiledRestrictions = compileRestrictionSources(restrictionSources);',
+    '  const formatBlockedRequestMessage = (method, path, matchingRules) => [',
+    '    "Request blocked by MCP connection policy.",',
+    '    "",',
+    '    "This operation is intentionally denied by the current MCP connection configuration.",',
+    '    "It did not fail at the Cumulocity API and it was not executed against the tenant.",',
+    '    "Retrying or trying the same operation again through this connection will not succeed.",',
+    '    "",',
+    '    "Report this to the user as a connection-level access restriction.",',
+    '    "If the operation is needed, the MCP restrictions for this connection must be updated by whoever manages that configuration.",',
+    '    "",',
+    '    "Blocked operation:",',
+    '    "Method: " + method,',
+    '    "Path: " + path,',
+    '    "Matching restrictions:",',
+    '    ...matchingRules.map((rule) => "- " + rule),',
+    '  ].join("\\n");',
     '  const normalizeBody = (headers, body) => {',
     '    if (body == null || typeof body === "string") {',
     '      return body;',
@@ -168,7 +199,8 @@ export function buildExecutePrelude(tenantUrl: string, headers: Record<string, s
     '      const resolvedUrl = resolveUrl(path);',
     '      const blockedRules = getBlockedCompiledRestrictions(compiledRestrictions, init.method, resolvedUrl.pathname);',
     '      if (blockedRules.length > 0) {',
-    '        throw new Error("Cumulocity request blocked by MCP restrictions: " + blockedRules.map((rule) => rule.source).join(", "));',
+    '        const method = typeof init.method === "string" && init.method.trim() ? init.method.trim().toUpperCase() : "GET";',
+    '        throw new Error(formatBlockedRequestMessage(method, resolvedUrl.pathname, blockedRules.map((rule) => rule.source)));',
     '      }',
     '      const headers = new Headers(init.headers ?? {});',
     '      for (const [key, value] of Object.entries(authHeaders)) {',
@@ -193,10 +225,40 @@ export function buildExecutePrelude(tenantUrl: string, headers: Record<string, s
   ].join('\n\n')
 }
 
-export function buildExecuteScript(sourceCode: string, tenantUrl: string, headers: Record<string, string>, restrictions: readonly RestrictionRule[] = []): string {
+export function buildExecuteScript(
+  sourceCode: string,
+  tenantUrl: string,
+  headers: Record<string, string>,
+  restrictions: readonly RestrictionRule[] = [],
+): string {
+  const functionExpression = normalizeCode(sourceCode)
+
   return [
     buildExecutePrelude(tenantUrl, headers, restrictions),
-    normalizeCode(sourceCode),
+    `const __mc8ypExecute = (${functionExpression});`,
+    '',
+    'const __mc8ypErrorMessage = (error) => error instanceof Error ? error.message : String(error);',
+    '',
+    'let __mc8ypEnvelope;',
+    'try {',
+    '  if (typeof __mc8ypExecute !== "function") {',
+    '    throw new TypeError("Execute code must evaluate to a function.");',
+    '  }',
+    '  __mc8ypEnvelope = {',
+    '    status: "success",',
+    '    result: await __mc8ypExecute(),',
+    '  };',
+    '} catch (error) {',
+    '  const message = __mc8ypErrorMessage(error);',
+    '  __mc8ypEnvelope = {',
+    `    status: message.startsWith(${JSON.stringify(BLOCKED_REQUEST_PREFIX)}) ? "blocked" : "failed",`,
+    '    error: {',
+    '      message,',
+    '    },',
+    '  };',
+    '}',
+    '',
+    'export default __mc8ypEnvelope;',
   ].join('\n\n')
 }
 
@@ -214,8 +276,23 @@ function extractDefaultExport(exportsObject: unknown): unknown {
   throw new Error(NO_DEFAULT_EXPORT_MESSAGE)
 }
 
-async function runExecuteScript(code: string, tenantUrl: string): Promise<unknown> {
-  return runModule(code, EXECUTE_ENTRY_PATH, createExecuteRuntime(tenantUrl))
+async function runExecuteScript(code: string, tenantUrl: string, restrictions: readonly RestrictionRule[]): Promise<unknown> {
+  const release = await runtimeSemaphore.acquire()
+  const runtime = createExecuteRuntime(tenantUrl, restrictions)
+
+  try {
+    const result = await runtime.run<unknown>(code, EXECUTE_ENTRY_PATH)
+
+    if (result.code !== 0) {
+      const errorMessage = `Execution failed with code ${result.code}${result.errorMessage ? `: ${result.errorMessage}` : ''}`
+      throw new Error(errorMessage)
+    }
+
+    return extractDefaultExport(result.exports)
+  } finally {
+    runtime.dispose()
+    release()
+  }
 }
 
 async function runQueryScript(code: string): Promise<unknown> {
@@ -250,6 +327,11 @@ export async function execute(functionCode: string, input?: unknown, restriction
   const auth = await resolveC8yAuth(input)
   const authHeaders = createC8yAuthHeaders(auth)
 
-  const result = await runExecuteScript(buildExecuteScript(functionCode, auth.tenantUrl, authHeaders, restrictions), auth.tenantUrl)
-  return encode(result)
+  const result = await runExecuteScript(buildExecuteScript(functionCode, auth.tenantUrl, authHeaders, restrictions), auth.tenantUrl, restrictions) as ExecuteEnvelope
+
+  if (result.status === 'success') {
+    return encode(result.result)
+  }
+
+  return result.error.message
 }

@@ -81,18 +81,34 @@ export function evaluateRestrictions(rules: readonly RestrictionRule[], method: 
     }
 }
 
-
-export function createNetworkPermissionDecision(tenantUrl: string, request: NetworkPermissionRequest): NetworkPermissionDecision {
+export function createNetworkPermissionDecision(tenantUrl: string, request: NetworkPermissionRequest, rules: readonly RestrictionRule[] = []): NetworkPermissionDecision {
     const tenantHostname = new URL(tenantUrl).hostname
 
-    if (request.op === 'connect') {
-        return {
-            allow: request.hostname === tenantHostname,
-            reason: request.hostname === tenantHostname
-                ? undefined
-                : `Network connect blocked: only ${tenantHostname} is allowed in execute mode.`,
-        }
+    if(request.op !== "connect"){
+        return { allow: false, reason: `Unsupported network operation "${request.op}". Only "connect" is allowed.` }
     }
 
-    return { allow: false, reason: `Unsupported network operation "${request.op}". Only "connect" is allowed.` }
+        if (request.hostname !== tenantHostname) {
+            return {
+                allow: false,
+                reason: `Network connect blocked: only ${tenantHostname} is allowed in execute mode.`,
+            }
+        }
+
+        if (typeof request.method === 'string') {
+            const requestPath = typeof request.url === 'string'
+                ? new URL(request.url).pathname
+                : '/'
+            const restrictionMatch = evaluateRestrictions(rules, request.method, requestPath)
+            if (restrictionMatch.matchingRules.length > 0) {
+                return {
+                    allow: false,
+                    reason: `Network connect blocked by MCP restrictions: ${restrictionMatch.matchingRules.map((rule) => rule.source).join(', ')}`,
+                }
+            }
+        }
+
+        return {
+            allow: true,
+        }
 }

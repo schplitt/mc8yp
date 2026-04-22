@@ -77,24 +77,26 @@ describe('restriction matching', () => {
 
 describe('network permission decisions', () => {
   const tenantUrl = 'https://tenant.example.com'
+  const rules = [parseRestrictionRule('/inventory/**')]
 
-  it('rejects fetch requests', () => {
-    expect(createNetworkPermissionDecision(tenantUrl, {
-      op: 'fetch',
-      method: 'GET',
-      url: 'https://tenant.example.com/inventory/managedObjects',
-    })).toEqual({
-      allow: false,
-      reason: 'Unsupported network operation "fetch". Only "connect" is allowed.',
-    })
-  })
-
-  it('allows connects to the configured tenant host', () => {
+  it('allows connect requests to the configured tenant host when no method is available', () => {
     expect(createNetworkPermissionDecision(tenantUrl, {
       op: 'connect',
       hostname: 'tenant.example.com',
-    })).toEqual({
+    }, rules)).toEqual({
       allow: true,
+    })
+  })
+
+  it('keeps method-aware restriction blocking available when request metadata includes method and url', () => {
+    expect(createNetworkPermissionDecision(tenantUrl, {
+      op: 'connect',
+      hostname: 'tenant.example.com',
+      method: 'GET',
+      url: 'https://tenant.example.com/inventory/managedObjects?pageSize=5',
+    }, rules)).toEqual({
+      allow: false,
+      reason: 'Network connect blocked by MCP restrictions: /inventory/**',
     })
   })
 

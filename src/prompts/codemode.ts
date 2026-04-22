@@ -27,6 +27,7 @@ Use \`query\` when you need to inspect the OpenAPI spec.
 - Top-level \`await\` is supported
 - Structured results are returned in Toon format; exported strings are returned as-is
 - Restricted operations stay visible and are annotated with \`x-mc8yp-restricted\` and related \`x-mc8yp-*\` fields
+- Treat operations marked with \`x-mc8yp-restricted\` as intentionally unavailable on this MCP connection; inspect them for context, but do not plan to execute them
 
 ### Available Shape
 \`\`\`ts
@@ -65,14 +66,15 @@ export default op?.parameters
 ## execute
 Use \`execute\` when you want to call the real Cumulocity API.
 
-- Input: JavaScript module source
+- Input: an async JavaScript function expression
 - The top-level binding \`cumulocity\` is available automatically
 - It can call \`await cumulocity.request({ method, path, ... })\`
 - Do not build auth headers or tenant URLs yourself
-- Export the exact value you want back with \`export default\`
-- Top-level \`await\` is supported
-- Structured results are returned in Toon format; exported strings are returned as-is
+- Write an async anonymous function or async arrow function that returns the value you want
+- On success, the returned value is sent back in Toon format
+- If execution is blocked or fails, execute returns a plain text error message
 - The current MCP connection may reject restricted method/path combinations before network access
+- If a request is blocked by MCP connection policy, \`execute\` returns an explanatory text message. That is an intentional connection-level restriction, not a Cumulocity API failure, and retrying through the same connection will not help
 
 ### Available Shape
 \`\`\`ts
@@ -90,28 +92,34 @@ declare const cumulocity: {
 
 Examples:
 \`\`\`js
-export default await cumulocity.request({
-  method: 'GET',
-  path: '/inventory/managedObjects?pageSize=5',
-})
+async () => {
+  return await cumulocity.request({
+    method: 'GET',
+    path: '/inventory/managedObjects?pageSize=5',
+  })
+}
 \`\`\`
 
 \`\`\`js
-const alarms = await cumulocity.request({
-  method: 'GET',
-  path: '/alarm/alarms?pageSize=10',
-})
+async () => {
+  const alarms = await cumulocity.request({
+    method: 'GET',
+    path: '/alarm/alarms?pageSize=10',
+  })
 
-export default alarms.alarms
+  return alarms.alarms
+}
 \`\`\`
 
 \`\`\`js
-const devices = await cumulocity.request({
-  method: 'GET',
-  path: '/inventory/managedObjects?pageSize=20&withTotalPages=true',
-})
+async () => {
+  const devices = await cumulocity.request({
+    method: 'GET',
+    path: '/inventory/managedObjects?pageSize=20&withTotalPages=true',
+  })
 
-export default devices
+  return devices
+}
 \`\`\`
 
 ## CLI Mode
@@ -119,8 +127,8 @@ When running in CLI mode, first use \`list-credentials\` to see available tenant
 
 ## Working Pattern
 1. Use \`query\` to find the right endpoint, parameters, and response shape.
-2. Use \`execute\` to call that endpoint.
-3. Keep modules small and export only the data needed for the next reasoning step.
+2. Use \`execute\` with a small async function expression that calls that endpoint and returns only the needed result.
+3. Keep functions small and return only the data needed for the next reasoning step.
 ${restrictionSection}
 `,
     )
