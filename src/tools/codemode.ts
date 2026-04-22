@@ -25,9 +25,9 @@ export function createQueryTool(server: McpServer<undefined, C8yMcpCustomContext
   return defineTool({
     name: 'query',
     title: 'Query Cumulocity OpenAPI Spec',
-    description: `Search the Cumulocity OpenAPI spec using a JavaScript module.
+    description: `Search the Cumulocity OpenAPI spec by evaluating a JavaScript function.
 
-Available in your module:
+Available in your function:
 
 type OperationInfo = {
   summary?: string
@@ -54,30 +54,38 @@ type Spec = {
 
 declare const spec: Spec
 
-Your code should be JavaScript module source. The top-level binding \`spec\` is available automatically. Export the final result as the default export. Top-level \`await\` is supported.
+Your code must evaluate to a function. The top-level binding \`spec\` is available automatically. The sandbox assigns your function to a local variable, invokes it, and returns its result.
 
-Structured tool results are returned in Toon format to reduce token usage. If you export a string, it is returned as-is.
+Recommended shapes:
+\`(() => { ... })\`
+\`async () => { ... }\`
+
+If your function returns a string, it is returned as-is. Otherwise the result is returned as JSON text.
 
 The current MCP connection may mark blocked operations with \`x-mc8yp-restricted\` and related \`x-mc8yp-*\` fields. These operations are intentionally unavailable even though they still exist in the OpenAPI spec.
 Treat those annotations as a hard connection-level restriction: use them to understand what exists, but do not plan to call those operations with \`execute\`.
 
 Examples:
-const results = []
-for (const [path, methods] of Object.entries(spec.paths)) {
-  for (const [method, op] of Object.entries(methods)) {
-    if (op?.tags?.some(tag => tag.toLowerCase() === 'inventory')) {
-      results.push({ method: method.toUpperCase(), path, summary: op.summary })
+() => {
+  const results = []
+  for (const [path, methods] of Object.entries(spec.paths)) {
+    for (const [method, op] of Object.entries(methods)) {
+      if (op?.tags?.some(tag => tag.toLowerCase() === 'inventory')) {
+        results.push({ method: method.toUpperCase(), path, summary: op.summary })
+      }
     }
   }
+
+  return results
 }
 
-export default results
-
-const op = spec.paths['/inventory/managedObjects']?.get
-export default { summary: op?.summary, parameters: op?.parameters, responses: op?.responses }
+() => {
+  const op = spec.paths['/inventory/managedObjects']?.get
+  return { summary: op?.summary, parameters: op?.parameters, responses: op?.responses }
+}
 `,
     schema: v.object({
-      code: createCodeSchema('JavaScript module source. The top-level binding `spec` is available automatically. Export the final result with `export default`. Top-level `await` is supported.'),
+      code: createCodeSchema('A JavaScript function expression. The top-level binding `spec` is available automatically. Return the final result from that function. Async functions are supported.'),
     }),
   }, async (input) => {
     try {
@@ -108,7 +116,7 @@ declare const cumulocity: {
   request<T = unknown>(options: CumulocityRequestOptions): Promise<T>
 }
 
-Your code must evaluate to a function, preferably an async anonymous function or async arrow function expression. The top-level binding \`cumulocity\` is available automatically. The sandbox assigns your function to a local variable, invokes it, and returns its result.
+Your code must evaluate to a function. The top-level binding \`cumulocity\` is available automatically. The sandbox assigns your function to a local variable, invokes it, and returns its result.
 
 Recommended shape:
 \`async () => { ... }\`

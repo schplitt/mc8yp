@@ -102,10 +102,17 @@ function normalizeCode(functionCode: string): string {
 
 function buildQueryScript(sourceCode: string, restrictions: readonly RestrictionRule[]): string {
   const restrictedSpec = applyRestrictionsToOpenApiSpec(openapi, restrictions)
+  const functionExpression = normalizeCode(sourceCode)
 
   return [
     `const spec = ${JSON.stringify(restrictedSpec)};`,
-    normalizeCode(sourceCode),
+    `const __mc8ypQuery = (${functionExpression});`,
+    '',
+    'if (typeof __mc8ypQuery !== "function") {',
+    '  throw new TypeError("Query code must evaluate to a function.");',
+    '}',
+    '',
+    'export default await __mc8ypQuery();',
   ].join('\n\n')
 }
 

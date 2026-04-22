@@ -27,11 +27,11 @@ You have exactly two MCP tools available.
 ## query
 Use \`query\` when you need to inspect the OpenAPI spec.
 
-- Input: JavaScript module source
+- Input: a JavaScript function expression
 - The top-level binding \`spec\` is available automatically
-- Export the exact value you want back with \`export default\`
-- Top-level \`await\` is supported
-- Structured results are returned in Toon format; exported strings are returned as-is
+- Return the exact value you want back from that function
+- Sync and async functions are both supported
+- Strings are returned as-is; other results are returned as JSON text
 - Restricted operations stay visible and are annotated with \`x-mc8yp-restricted\` and related \`x-mc8yp-*\` fields
 - Treat operations marked with \`x-mc8yp-restricted\` as intentionally unavailable on this MCP connection; inspect them for context, but do not plan to execute them
 
@@ -61,22 +61,24 @@ declare const spec: {
 
 Example:
 \`\`\`js
-export default Object.keys(spec.paths).filter((path) => path.includes('inventory'))
+() => Object.keys(spec.paths).filter((path) => path.includes('inventory'))
 \`\`\`
 
 \`\`\`js
-const op = spec.paths['/inventory/managedObjects']?.get
-export default op?.parameters
+() => {
+  const op = spec.paths['/inventory/managedObjects']?.get
+  return op?.parameters
+}
 \`\`\`
 
 ## execute
 Use \`execute\` when you want to call the real Cumulocity API.
 
-- Input: an async JavaScript function expression
+- Input: a JavaScript function expression
 - The top-level binding \`cumulocity\` is available automatically
 - It can call \`await cumulocity.request({ method, path, ... })\`
 - Do not build auth headers or tenant URLs yourself
-- Write an async anonymous function or async arrow function that returns the value you want
+- Return the value you want from that function; async functions are usually the right choice here
 - On success, the returned value is sent back in Toon format
 - If execution is blocked or fails, execute returns a plain text error message
 - The current MCP connection may reject restricted method/path combinations before network access
