@@ -47,17 +47,10 @@ jobs:
       - name: Update cumulocity.json from package.json
         run: node scripts/cumulocity.mjs
 
-      - name: Build Docker image & prepare Cumulocity package
+      - name: Build versioned Cumulocity packages
         run: |
           set -eux
-          docker build -t "${{ env.ASSET_BASENAME }}:${{ env.TAG_NAME }}" .
-          docker save "${{ env.ASSET_BASENAME }}:${{ env.TAG_NAME }}" -o "${{ github.workspace }}/image.tar"
-
-      - name: Create cumulocity package zip
-        run: |
-          set -eux
-          cd "${{ github.workspace }}"
-          zip -j "${{ env.ASSET_BASENAME }}_${{ env.TAG_NAME }}.zip" "${{ github.workspace }}/image.tar" "${{ github.workspace }}/cumulocity.json"
+          TAG_NAME="${{ env.TAG_NAME }}" pnpm package:microservices
 
       - name: Generate changelog and create release
         run: pnpm dlx changelogithub
@@ -69,11 +62,9 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Upload Cumulocity package to release
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ env.ASSET_BASENAME }}_${{ env.TAG_NAME }}.zip
-          asset_name: ${{ env.ASSET_BASENAME }}_${{ env.TAG_NAME }}.zip
-          tag: ${{ github.ref_name }}
-          overwrite: true
+      - name: Upload Cumulocity packages to release
+        run: |
+          set -eux
+          gh release upload "${{ env.TAG_NAME }}" "${{ env.ASSET_BASENAME }}"-*_"${{ env.TAG_NAME }}".zip --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

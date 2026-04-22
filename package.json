@@ -35,6 +35,7 @@
     "creds-remove": "pnpm dlx jiti ./src/cli/index.ts creds remove",
     "creds-list": "pnpm dlx jiti ./src/cli/index.ts creds list",
     "build": "tsdown",
+    "package:microservices": "node ./scripts/package-microservices.mjs",
     "lint": "eslint",
     "lint:fix": "eslint --fix",
     "test": "vitest",

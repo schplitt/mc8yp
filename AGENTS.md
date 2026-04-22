@@ -61,8 +61,15 @@ test/
   restrictions.test.ts
   restrictions.bench.ts
   semaphore.test.ts
-openapi.json                  Bundled Cumulocity OpenAPI spec
-tsdown.config.ts              CLI/server build configuration
+core-openapi/
+  release.json               Bundled latest Cumulocity core OpenAPI snapshot
+  2025.json                  Bundled 2025 Cumulocity core OpenAPI snapshot
+  2024.json                  Bundled 2024 Cumulocity core OpenAPI snapshot
+scripts/
+  cumulocity.mjs             Updates cumulocity.json metadata from package.json
+  package-microservices.mjs  Builds versioned Docker-based Cumulocity release zips
+tsdown.config.ts              CLI/server build configuration plus the `#core-openapi` virtual module plugin
+src/core-openapi.d.ts         Ambient type declarations for the `#core-openapi` virtual module
 ```
 
 ### Runtime Flow
@@ -70,9 +77,10 @@ tsdown.config.ts              CLI/server build configuration
 #### CLI mode
 
 1. `src/cli/index.ts` parses CLI arguments and restriction flags.
-2. It sets `globalThis.executionEnvironment = 'cli'`.
-3. It exposes credential lookup helpers on `globalThis` for tools and subcommands.
-4. It starts the shared MCP server over stdio transport.
+2. It accepts `--spec` / `-s` to select the bundled core OpenAPI snapshot exposed by `query`.
+3. It sets `globalThis.executionEnvironment = 'cli'`.
+4. It exposes credential lookup helpers on `globalThis` for tools and subcommands.
+5. It starts the shared MCP server over stdio transport.
 
 #### Microservice mode
 
@@ -84,6 +92,7 @@ tsdown.config.ts              CLI/server build configuration
 #### Shared MCP surface
 
 - `src/server.ts` creates the MCP server, registers tools and prompts, and conditionally enables `list-credentials` only in CLI mode.
+- `core-openapi/` contains the versioned Cumulocity core OpenAPI snapshots consumed by the build.
 - `src/tools/codemode.ts` defines the `query` and `execute` tools.
 - `src/prompts/codemode.ts` defines the `code-mode-guide` prompt.
 
@@ -91,11 +100,21 @@ tsdown.config.ts              CLI/server build configuration
 
 `src/codemode/execute.ts` is the main control surface for sandbox execution.
 
-- `query` executes JavaScript against the bundled OpenAPI spec with network access disabled.
+- `query` executes JavaScript against the selected bundled core OpenAPI spec with network access disabled.
 - `execute` executes JavaScript with a provided `cumulocity.request()` helper.
 - Both runtimes use `secure-exec` with a 128 MB memory limit and 50 second CPU time limit.
 - A semaphore limits concurrent sandbox runs to 3.
 - Input code is normalized before execution so fenced code blocks can still run.
+
+### Core OpenAPI Selection
+
+- All consumers import from the virtual module `#core-openapi`, which exposes `getCoreOpenApiSpec`, `getCoreOpenApiVersion`, `setCoreOpenApiVersion`, and `getCoreOpenApiLabel`.
+- The module body is synthesized by a small tsdown plugin in `tsdown.config.ts`:
+  - For the CLI build the plugin inlines all `core-openapi/*.json` snapshots and `setCoreOpenApiVersion` switches between them at runtime.
+  - For each server build the plugin inlines exactly one snapshot and `setCoreOpenApiVersion` only accepts that build's version.
+- Types for the virtual module live in `src/core-openapi.d.ts` (ambient `declare module '#core-openapi'`); no `tsconfig.paths` entry is needed.
+- `tsdown.config.ts` emits one server bundle per supported core OpenAPI version into `.output/<version>/`.
+- `scripts/package-microservices.mjs` turns those built server outputs into one Docker-based zip per version for releases.
 
 ### Query vs Execute
 
@@ -138,6 +157,7 @@ pnpm lint
 pnpm typecheck
 pnpm test:run
 pnpm build
+pnpm package:microservices
 ```
 
 ### Important scripts
@@ -148,14 +168,16 @@ pnpm test:bench    # Vitest benchmark run
 pnpm lint          # ESLint
 pnpm lint:fix      # ESLint autofix
 pnpm typecheck     # TypeScript noEmit check
-pnpm build         # tsdown build for server and CLI outputs
+pnpm build         # tsdown build for CLI plus all versioned server outputs
+pnpm package:microservices # Docker-based zip packaging for all built server variants
 pnpm prerelease    # lint + typecheck + build
 ```
 
 ### Build outputs
 
-- `tsdown.config.ts` builds the HTTP server bundle into `.output/`
+- `tsdown.config.ts` builds versioned HTTP server bundles into `.output/<version>/`
 - `tsdown.config.ts` builds the CLI bundle into `dist/`
+- Release zip artifacts are created in the repository root by `pnpm package:microservices`
 
 ## Code Style And Conventions
 
@@ -170,6 +192,7 @@ pnpm prerelease    # lint + typecheck + build
 ### Practical editing guidance
 
 - If a change affects tool behavior, inspect both the tool definition and the codemode runtime.
+- If a change affects core OpenAPI selection, update the `#core-openapi` plugin in `tsdown.config.ts` and the ambient declaration in `src/core-openapi.d.ts`.
 - If a change affects restrictions, verify both spec annotation behavior and live request blocking.
 - If a change affects auth, verify the CLI and server paths separately.
 - If a change affects public MCP behavior, update `README.md` as well as this file.
@@ -224,6 +247,8 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 
 - `execute` uses a generated ESM module entry and reads the default export from sandbox execution.
 - `query` and `execute` accept function-expression style code and normalize fenced code input before evaluation.
+- `#core-openapi` is a virtual module synthesized by a tsdown plugin; consumers must not import the JSON snapshots directly.
+- The CLI build inlines all `core-openapi/*.json` snapshots; each server build inlines exactly one.
 - Restrictions are both discoverability metadata and enforcement logic; both layers matter.
 - Server-mode auth must stay request-local.
 

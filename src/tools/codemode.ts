@@ -2,6 +2,7 @@ import type { McpServer } from 'tmcp'
 import { defineTool } from 'tmcp/tool'
 import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
+import { getCoreOpenApiLabel } from '#core-openapi'
 import { execute, query } from '../codemode/execute'
 import type { C8yMcpCustomContext } from '../types/mcp-context'
 import { addTenantURLToSchema } from '../utils/schema'
@@ -21,11 +22,17 @@ function getExecuteEnvironmentNote(): string {
     : 'This deployed MCP server executes requests against the current tenant using the service user attached to this MCP connection. Do not pass tenant-specific credentials or tenant URLs yourself.'
 }
 
+function getCoreOpenApiNote(): string {
+  return `This MCP currently exposes the ${getCoreOpenApiLabel()} core OpenAPI snapshot for the query tool.`
+}
+
 export function createQueryTool(server: McpServer<undefined, C8yMcpCustomContext>) {
   return defineTool({
     name: 'query',
-    title: 'Query Cumulocity OpenAPI Spec',
-    description: `Search the Cumulocity OpenAPI spec by evaluating a JavaScript function.
+    title: 'Query Cumulocity Core OpenAPI Spec',
+    description: `Search the Cumulocity core OpenAPI spec by evaluating a JavaScript function.
+
+${getCoreOpenApiNote()}
 
 Available in your function:
 
@@ -102,6 +109,8 @@ export function createExecuteTool(server: McpServer<undefined, C8yMcpCustomConte
     name: 'execute',
     title: 'Execute Cumulocity API Call',
     description: `Execute JavaScript code against the Cumulocity API. First use the query tool to find the right endpoint, then write an async JavaScript function expression that uses cumulocity.request().
+
+${getCoreOpenApiNote()}
 
 Available in your module:
 
