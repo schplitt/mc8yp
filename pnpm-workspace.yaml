@@ -1,0 +1,14 @@
+
+catalogMode: prefer
+
+shellEmulator: true
+
+
+trustPolicy: no-downgrade
+
+
+onlyBuiltDependencies:
+  - better-sqlite3
+  - cbor-extract
+  - esbuild
+  - isolated-vm

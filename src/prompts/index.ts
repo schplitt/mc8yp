@@ -1,67 +1,10 @@
-import {
-  createAlarmsGuidePrompt,
-  createAlarmStatusPrompt,
-} from './alarms'
-import {
-  createCalculateDateRangePrompt,
-  createDateTimeGuidePrompt,
-} from './datetime'
-import {
-  createDeviceEventTypesPrompt,
-  createEventsGuidePrompt,
-} from './events'
-import {
-  createDeviceHierarchyPrompt,
-  createFindDevicesPrompt,
-  createInventoryQueryPrompt,
-  createLookupDevicePrompt,
-} from './inventory'
-import {
-  createAnalyzeMeasurementsPrompt,
-  createGetMeasurementsPrompt,
-  createMeasurementTimeRangePrompt,
-} from './measurements'
-import {
-  createMetadataGuidePrompt,
-} from './metadata'
-import {
-  createApplicationsGuidePrompt,
-  createAuditQueryPrompt,
-  createTenantContextPrompt,
-} from './tenant'
+import type { McpServer } from 'tmcp'
+import { createCodeModeGuidePrompt } from './codemode'
+import type { C8yMcpCustomContext } from '../types/mcp-context'
 
 // Create all prompts - called at server startup after execution context is set
-export function createPrompts() {
+export function createPrompts(server: McpServer<undefined, C8yMcpCustomContext>) {
   return [
-    // Date/Time prompts
-    createDateTimeGuidePrompt(),
-    createCalculateDateRangePrompt(),
-
-    // Inventory prompts
-    createFindDevicesPrompt(),
-    createInventoryQueryPrompt(),
-    createDeviceHierarchyPrompt(),
-    createLookupDevicePrompt(),
-
-    // Measurement prompts
-    createGetMeasurementsPrompt(),
-    createAnalyzeMeasurementsPrompt(),
-    createMeasurementTimeRangePrompt(),
-
-    // Event prompts
-    createEventsGuidePrompt(),
-    createDeviceEventTypesPrompt(),
-
-    // Alarm prompts
-    createAlarmsGuidePrompt(),
-    createAlarmStatusPrompt(),
-
-    // Metadata prompts
-    createMetadataGuidePrompt(),
-
-    // Tenant prompts
-    createTenantContextPrompt(),
-    createAuditQueryPrompt(),
-    createApplicationsGuidePrompt(),
+    createCodeModeGuidePrompt(server),
   ]
 }

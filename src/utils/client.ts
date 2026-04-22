@@ -3,13 +3,61 @@
  * Centralizes the logic for getting an authenticated C8y client.
  */
 
+import { Buffer } from 'node:buffer'
 import { Client } from '@c8y/client'
+import type { AuthContext, C8yAuth } from './credentials'
 import { useAuth } from '../ctx/auth'
 import * as v from 'valibot'
 
 const tenantUrlSchema = v.object({
   tenantUrl: v.string(),
 })
+
+export async function resolveC8yAuth(input: unknown): Promise<C8yAuth | AuthContext>
+export async function resolveC8yAuth(): Promise<C8yAuth | AuthContext>
+export async function resolveC8yAuth(input?: unknown): Promise<C8yAuth | AuthContext> {
+  const executionEnvironment = globalThis.executionEnvironment
+
+  if (executionEnvironment === 'server') {
+    const auth = useAuth()
+
+    if (!auth) {
+      throw new Error('No authentication context available')
+    }
+
+    return auth
+  }
+
+  const parsed = v.safeParse(tenantUrlSchema, input)
+  if (!parsed.success) {
+    throw new Error('tenantUrl is required in CLI mode')
+  }
+
+  return globalThis._getCredentialsByTenantUrl(parsed.output.tenantUrl)
+}
+
+export function createC8yAuthHeaders(auth: C8yAuth | AuthContext): Record<string, string> {
+  if ('authorizationHeader' in auth) {
+    return {
+      Authorization: auth.authorizationHeader,
+    }
+  }
+
+  if ('token' in auth && auth.token) {
+    return {
+      Authorization: `Bearer ${auth.token}`,
+    }
+  }
+
+  if ('user' in auth && 'password' in auth && 'tenantId' in auth && auth.user && auth.password && auth.tenantId) {
+    const credentials = Buffer.from(`${auth.tenantId}/${auth.user}:${auth.password}`).toString('base64')
+    return {
+      Authorization: `Basic ${credentials}`,
+    }
+  }
+
+  throw new Error('Invalid authentication credentials')
+}
 
 /**
  * Get an authenticated Cumulocity client.
@@ -21,49 +69,22 @@ const tenantUrlSchema = v.object({
 export async function getAuthenticatedClient(input: unknown): Promise<Client>
 export async function getAuthenticatedClient(): Promise<Client>
 export async function getAuthenticatedClient(input?: unknown): Promise<Client> {
-  const executionEnvironment = globalThis.executionEnvironment
+  const auth = await resolveC8yAuth(input)
 
-  if (executionEnvironment === 'server') {
-    // In server mode, get credentials from auth context
-    const auth = useAuth()
-
-    if (!auth) {
-      throw new Error('No authentication context available')
-    }
-
-    // Create client based on auth type
-    if ('token' in auth && auth.token) {
-      // Bearer token authentication
-      const client = await Client.authenticate({
-        token: auth.token,
-      }, auth.tenantUrl)
-      return client
-    } else if ('user' in auth && 'password' in auth && auth.user && auth.password) {
-      // Basic authentication
-      return Client.authenticate({
-        user: auth.user,
-        password: auth.password,
-      }, auth.tenantUrl)
-    } else {
-      throw new Error('Invalid authentication credentials in context')
-    }
+  if ('token' in auth && auth.token) {
+    const client = await Client.authenticate({
+      token: auth.token,
+    }, auth.tenantUrl)
+    return client
   }
 
-  // CLI mode - validate input and get credentials from keystore
-  const parsed = v.safeParse(tenantUrlSchema, input)
-  if (!parsed.success) {
-    throw new Error('tenantUrl is required in CLI mode')
-  }
-
-  const { tenantUrl } = parsed.output
-  const credentials = await globalThis._getCredentialsByTenantUrl(tenantUrl)
-
-  if ('user' in credentials && 'password' in credentials && credentials.user && credentials.password) {
+  if ('user' in auth && 'password' in auth && 'tenantId' in auth && auth.user && auth.password && auth.tenantId) {
     return Client.authenticate({
-      user: credentials.user,
-      password: credentials.password,
-    }, credentials.tenantUrl)
+      tenant: auth.tenantId,
+      user: auth.user,
+      password: auth.password,
+    }, auth.tenantUrl)
   }
 
-  throw new Error('Invalid credentials: user and password are required in CLI mode')
+  throw new Error('Invalid authentication credentials')
 }

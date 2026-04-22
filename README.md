@@ -4,7 +4,7 @@
 ![License](https://img.shields.io/npm/l/mc8yp)
 ![Node Version](https://img.shields.io/node/v/mc8yp)
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that provides AI agents with comprehensive access to Cumulocity IoT platform data. This enables AI-powered device management, data analysis, and operational insights through standardized tooling.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gives AI agents full access to the Cumulocity IoT platform through code execution. Instead of exposing dozens of fixed tools, the server provides two code-mode tools — `query` and `execute` — that let the agent write JavaScript to inspect the OpenAPI spec and call any API endpoint.
 
 **Two Deployment Modes:**
 
@@ -15,18 +15,12 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that pr
 
 ### CLI Mode (Local Development & Testing)
 
-The CLI mode allows you to run the MCP server locally and connect it to your AI agent (e.g., Claude Desktop). It uses STDIO transport and stores Cumulocity credentials securely in your system's native keyring.
-
 ```sh
-# Run directly with pnpm (recommended)
+# Run directly (recommended)
 pnpm dlx mc8yp
 
 # Or install globally
 npm install -g mc8yp
-mc8yp
-
-# Or with pnpm
-pnpm add -g mc8yp
 mc8yp
 ```
 
@@ -39,22 +33,18 @@ Credentials are stored using your operating system's secure credential manager:
 
 ### Microservice Mode (Production Deployment)
 
-The microservice mode is designed **exclusively for deployment on Cumulocity IoT**. The server exposes an HTTP endpoint at `/mcp` that integrates with Cumulocity's agents manager, automatically using the service user's credentials and permissions.
-
-**Deployment Steps:**
+Designed **exclusively for deployment on Cumulocity IoT**. The server exposes an HTTP endpoint at `/mcp` that integrates with Cumulocity's agents manager, automatically using the service user's credentials and permissions.
 
 1. Download the latest release package from [GitHub Releases](https://github.com/schplitt/mc8yp/releases)
-2. Upload the `.zip` file to Cumulocity via **Application Management**
+2. Upload the `.zip` to Cumulocity via **Application Management**
 3. Subscribe to the application in your tenant
 4. The MCP server will be available at: `https://<tenant>.cumulocity.com/service/mc8yp-server/mcp`
 
-The microservice uses Cumulocity's built-in service user authentication - no additional credential configuration needed.
+No additional credential configuration needed — the microservice uses Cumulocity's built-in service user authentication.
 
 ## Usage
 
-### CLI Mode: Managing Credentials
-
-Before using the CLI, you need to store your Cumulocity credentials securely:
+### Managing Credentials (CLI)
 
 ```sh
 # Add credentials (prompts for tenant URL, username, password)
@@ -67,11 +57,9 @@ pnpm dlx mc8yp creds list
 pnpm dlx mc8yp creds remove
 ```
 
-The CLI stores credentials in your system's native credential manager and automatically uses them when you connect the MCP server to your AI agent. The `list-credentials` tool is also available within MCP sessions when running in CLI mode.
+### Connecting to AI Agents
 
-### Connecting to Local Agents
-
-For local development with Claude Desktop or similar MCP clients, add to your MCP configuration:
+For Claude Desktop or any MCP client, add to your MCP configuration:
 
 ```json
 {
@@ -85,7 +73,127 @@ For local development with Claude Desktop or similar MCP clients, add to your MC
 }
 ```
 
-The server will automatically use credentials stored in your system keyring.
+With restrictions (see [API Restrictions](#api-restrictions)):
+
+```json
+{
+  "servers": {
+    "mc8yp": {
+      "type": "stdio",
+      "command": "pnpm",
+      "args": ["dlx", "mc8yp", "-r", "/alarm/**", "-r", "DELETE:/inventory/**"]
+    }
+  }
+}
+```
+
+## Tools & Prompts
+
+### Tools
+
+| Tool               | Description                                                                                                                                                                                                                                        |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `query`            | Search and inspect the Cumulocity OpenAPI spec by running a JavaScript module. The spec is injected as a top-level `spec` binding. Export the result with `export default`.                                                                        |
+| `execute`          | Execute JavaScript against the live Cumulocity API. Provide an async JavaScript function expression. A top-level `cumulocity` binding provides `cumulocity.request({ method, path, body?, headers? })`. Return the final value from that function. |
+| `list-credentials` | _(CLI mode only)_ List stored credentials from your system keyring.                                                                                                                                                                                |
+
+Both code-mode tools run in a sandboxed runtime ([secure-exec](https://github.com/nicepkg/secure-exec)).
+
+- `query` returns JSON text for easier inspection of OpenAPI data.
+- `execute` returns the successful function result in [Toon format](https://github.com/nicepkg/toon). If execution is blocked or fails, it returns a plain text message instead.
+
+### Execute Input Shape
+
+The `execute` tool expects an async function expression, not module source with `export default`.
+
+Recommended shape:
+
+```js
+async () => {
+  return await cumulocity.request({
+    method: 'GET',
+    path: '/inventory/managedObjects?pageSize=5',
+  })
+}
+```
+
+You can also perform intermediate processing before returning the final value:
+
+```js
+async () => {
+  const devices = await cumulocity.request({
+    method: 'GET',
+    path: '/inventory/managedObjects?pageSize=20&withTotalPages=true',
+  })
+
+  return devices.managedObjects?.map((device) => ({ id: device.id, name: device.name }))
+}
+```
+
+### Prompts
+
+| Prompt            | Description                                                                                                                               |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `code-mode-guide` | Full reference for the `query` and `execute` tools, including available types, examples, and restriction info for the current connection. |
+
+## API Restrictions
+
+Restrictions are deny rules that block specific API operations. They can be applied per-connection to limit what an AI agent can access.
+
+### Rule Format
+
+```
+[METHOD:]<path-pattern>
+```
+
+- **Without a method prefix** — blocks all HTTP methods for matching paths
+- **With a method prefix** — blocks only that method (e.g. `GET:`, `DELETE:`, `POST:`)
+- **Path patterns** support `*` (single segment wildcard) and `**` (recursive wildcard)
+- Query strings and fragments are not allowed in patterns
+
+### Examples
+
+| Rule                             | Effect                                              |
+| -------------------------------- | --------------------------------------------------- |
+| `/inventory/**`                  | Block all methods on all inventory paths            |
+| `DELETE:/inventory/**`           | Block only DELETE on inventory paths                |
+| `/alarm/alarms`                  | Block all methods on the exact path `/alarm/alarms` |
+| `GET:/measurement/measurements`  | Block only GET on measurements                      |
+| `POST:/inventory/managedObjects` | Block creating new managed objects                  |
+| `/user/**`                       | Block all user management                           |
+
+### CLI Mode
+
+Pass restrictions as CLI arguments. Repeat `-r` / `--restriction` for multiple rules:
+
+```sh
+# Block all inventory access
+mc8yp -r "/inventory/**"
+
+# Block deletes on inventory and all alarm access
+mc8yp -r "DELETE:/inventory/**" -r "/alarm/**"
+
+# Block everything under user management
+mc8yp --restriction "/user/**"
+```
+
+### Microservice Mode (HTTP)
+
+Pass restrictions as `restriction` query parameters on the MCP endpoint URL:
+
+```
+/mcp?restriction=/inventory/**&restriction=DELETE:/alarm/**
+```
+
+### How Restrictions Work
+
+1. **OpenAPI spec annotation**: The `query` tool annotates blocked operations in the spec with `x-mc8yp-restricted` and related `x-mc8yp-*` metadata fields. The operations remain visible so the agent understands what exists, but they are clearly marked as blocked.
+
+2. **Sandbox request enforcement**: The `execute` tool checks restrictions inside the generated sandbox request helper, where the actual HTTP method and normalized path are both available. Matching requests are blocked before any `fetch` is attempted.
+
+3. **Network boundary**: The secure-exec permission layer independently restricts network access to the configured tenant host. Other network operations are denied.
+
+When an `execute` request is blocked by MCP restrictions, the tool returns explanatory text stating that the operation was intentionally denied by MCP connection policy, no request was sent to Cumulocity, and retrying through the same connection will not help.
 
 ## Development
 
@@ -93,27 +201,29 @@ The server will automatically use credentials stored in your system keyring.
 
 - Node.js ≥22.0.0
 - pnpm
-- Access to a Cumulocity IoT tenant
 
 ### Setup
 
 ```sh
-# Install dependencies
 pnpm install
-
-# Lint code
 pnpm lint
-
-# Type check
 pnpm typecheck
-
-# Build
 pnpm build
+```
+
+### Testing
+
+```sh
+# Run tests
+pnpm test:run
+
+# Run benchmarks
+pnpm test:bench
 ```
 
 ### Run Locally
 
-Add the mc8yp server to your local MCP client configuration (e.g., Claude Desktop) with the following command:
+Add the dev server to your local MCP client configuration:
 
 ```json
 {
@@ -121,100 +231,11 @@ Add the mc8yp server to your local MCP client configuration (e.g., Claude Deskto
     "local_mc8yp": {
       "type": "stdio",
       "command": "pnpm",
-      "args": [
-        "dlx",
-        "jiti",
-        "/path/to/your/project/src/cli/index.ts"
-      ]
+      "args": ["dlx", "jiti", "/path/to/your/project/src/cli/index.ts"]
     }
   }
 }
 ```
-
-This allows you to test and develop the MCP server locally using your preferred MCP client.
-
-## Available Tools & Prompts
-
-### 🛠️ Tools (20 Total)
-
-> **Note**: In CLI mode, an additional `list-credentials` tool is available to view stored credentials from your system keyring. This tool is not available in microservice deployments.
-
-**Inventory Management** (4 tools)
-
-- `query-inventory` - Query devices, groups, and assets using OData filters
-- `get-object` - Get detailed device/group/asset information by ID
-- `list-children` - List child objects in device hierarchy
-- `get-supported-series` - Discover measurement types a device supports
-
-**Measurements** (2 tools)
-
-- `get-measurements` - Retrieve time-series measurement data
-- `get-measurement-stats` - Get min/max/avg statistics for measurements
-
-**Events** (2 tools)
-
-- `get-events` - Query device events with filters
-- `get-event-types` - Discover available event types for a device
-
-**Alarms** (2 tools)
-
-- `get-alarms` - Query alarms with filtering by severity, status, type
-- `get-alarm-counts` - Get alarm counts grouped by severity
-
-**Metadata & Administration** (10 tools)
-
-- `get-current-tenant` - Get current tenant information
-- `get-current-user` - Get current user details
-- `get-users` - List users on the tenant
-- `get-applications` - List available applications
-- `get-application` - Get specific application details
-- `get-application-versions` - Get all versions of an application
-- `get-audit` - Query audit logs
-- `get-tenant-stats` - Get tenant usage statistics
-- `get-tenant-summary` - Get tenant usage summary
-- `get-dashboards` - Get dashboards for a device or group
-
-### 💬 Prompts (17 Total)
-
-Pre-built prompt templates that guide AI agents through common IoT workflows:
-
-**Date & Time** (2 prompts)
-
-- Date/time range calculations
-- Time window guidance for queries
-
-**Inventory** (4 prompts)
-
-- Device lookup and hierarchy navigation
-- Finding devices by criteria
-- OData query syntax help
-- Device discovery workflows
-
-**Measurements** (3 prompts)
-
-- Measurement data analysis
-- Time range calculations
-- Data aggregation guidance
-
-**Events** (2 prompts)
-
-- Event type discovery
-- Event history querying
-
-**Alarms** (2 prompts)
-
-- Alarm status interpretation
-- Troubleshooting workflows
-
-**Metadata** (1 prompt)
-
-- Tenant context understanding
-
-**Tenant & Administration** (3 prompts)
-
-- Tenant configuration and settings
-- Audit log querying
-- Application management
 
 ## License
 
