@@ -52,19 +52,19 @@ jobs:
           set -eux
           TAG_NAME="${{ env.TAG_NAME }}" pnpm package:microservices
 
-      - name: Generate changelog and create release
-        run: pnpm dlx changelogithub
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Publish to npm
         run: pnpm publish --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Generate changelog and create release
+        run: pnpm dlx changelogithub
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload Cumulocity packages to release
         run: |
           set -eux
-          gh release upload "${{ env.TAG_NAME }}" "${{ env.ASSET_BASENAME }}"-*_"${{ env.TAG_NAME }}".zip --clobber
+          gh release upload "${{ env.TAG_NAME }}" "${{ env.ASSET_BASENAME }}"-*-"${{ env.TAG_NAME }}".zip --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

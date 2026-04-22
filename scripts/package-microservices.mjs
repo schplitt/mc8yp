@@ -34,6 +34,13 @@ function run(command, args, cwd = rootDir) {
   })
 }
 
+function runAndCapture(command, args, cwd = rootDir) {
+  return execFileSync(command, args, {
+    cwd,
+    encoding: 'utf8',
+  }).trim()
+}
+
 function createStageDir(version) {
   const stageDir = fs.mkdtempSync(path.join(os.tmpdir(), `mc8yp-${version}-`))
   fs.copyFileSync(dockerfilePath, path.join(stageDir, 'Dockerfile'))
@@ -50,19 +57,21 @@ for (const version of specVersions) {
   }
 
   const stageDir = createStageDir(version)
-  const imageTag = `${assetBaseName}:${releaseTag}-${version}`
   const imageTarPath = path.join(stageDir, 'image.tar')
-  const zipFileName = `${assetBaseName}-${version}_${releaseTag}.zip`
+  const zipFileName = `${assetBaseName}-${version}-${releaseTag}.zip`
   const zipFilePath = path.join(rootDir, zipFileName)
+  let imageId = ''
 
   try {
-    run('docker', ['build', '-t', imageTag, '.'], stageDir)
-    run('docker', ['save', imageTag, '-o', imageTarPath], stageDir)
+    imageId = runAndCapture('docker', ['build', '-q', '.'], stageDir)
+    run('docker', ['save', imageId, '-o', imageTarPath], stageDir)
     run('zip', ['-j', zipFilePath, imageTarPath, path.join(stageDir, 'cumulocity.json')], stageDir)
   } finally {
-    try {
-      run('docker', ['image', 'rm', imageTag])
-    } catch {
+    if (imageId) {
+      try {
+        run('docker', ['image', 'rm', imageId])
+      } catch {
+      }
     }
     fs.rmSync(stageDir, { recursive: true, force: true })
   }
