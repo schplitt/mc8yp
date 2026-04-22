@@ -3,6 +3,12 @@ import { definePrompt } from 'tmcp/prompt'
 import { prompt } from 'tmcp/utils'
 import type { C8yMcpCustomContext } from '../types/mcp-context'
 
+function getRuntimeSection(): string {
+  return globalThis.executionEnvironment === 'cli'
+    ? '## CLI Runtime\nUse `list-credentials` to see available tenants when needed. Then pass the chosen `tenantUrl` to `execute`.'
+    : '## Server Runtime\nThis deployed MCP server uses the current tenant and the service user attached to this MCP connection. Do not pass tenant-specific credentials or tenant URLs yourself.'
+}
+
 export function createCodeModeGuidePrompt(server: McpServer<undefined, C8yMcpCustomContext>) {
   return definePrompt({
     name: 'code-mode-guide',
@@ -122,8 +128,7 @@ async () => {
 }
 \`\`\`
 
-## CLI Mode
-When running in CLI mode, first use \`list-credentials\` to see available tenants. Then pass the chosen \`tenantUrl\` to \`execute\`.
+${getRuntimeSection()}
 
 ## Working Pattern
 1. Use \`query\` to find the right endpoint, parameters, and response shape.

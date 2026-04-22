@@ -6,12 +6,19 @@ import { execute, query } from '../codemode/excute'
 import type { C8yMcpCustomContext } from '../types/mcp-context'
 import { addTenantURLToSchema } from '../utils/schema'
 
+// TODO: remove
 function createCodeSchema(description: string) {
   return v.pipe(
     v.string(),
     v.minLength(1),
     v.description(description),
   )
+}
+// TODO: as compiler flag?
+function getExecuteEnvironmentNote(): string {
+  return globalThis.executionEnvironment === 'cli'
+    ? 'This MCP can access multiple tenants. Use list-credentials first if the tenant is unclear, then pass the chosen tenantUrl to this tool.'
+    : 'This deployed MCP server executes requests against the current tenant using the service user attached to this MCP connection. Do not pass tenant-specific credentials or tenant URLs yourself.'
 }
 
 export function createQueryTool(server: McpServer<undefined, C8yMcpCustomContext>) {
@@ -117,7 +124,7 @@ Tool output behavior:
 The current MCP connection may deny certain method/path combinations. Restricted routes remain visible in the spec, and \`cumulocity.request(...)\` will reject blocked calls before sending them.
 When that happens, the tool returns a plain text connection-policy message. That is not a Cumulocity API failure and retrying the same operation through the same connection will not help.
 
-In CLI mode, this MCP can access multiple tenants. Use list-credentials first if the tenant is unclear, then pass the chosen tenantUrl to this tool.
+${getExecuteEnvironmentNote()}
 
 Examples:
 async () => {
