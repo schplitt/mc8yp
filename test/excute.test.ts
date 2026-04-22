@@ -2,7 +2,7 @@
 /* eslint-disable no-new-func */
 import { encode } from '@toon-format/toon'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { buildExecutePrelude, buildExecuteScript, execute } from '../src/codemode/excute'
+import { buildExecutePrelude, buildExecuteScript, execute } from '../src/codemode/execute'
 import { parseRestrictionQuery, parseRestrictionRule } from '../src/utils/restrictions'
 import type { RestrictionRule } from '../src/utils/restrictions'
 import * as client from '../src/utils/client'

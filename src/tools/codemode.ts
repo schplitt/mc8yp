@@ -2,7 +2,7 @@ import type { McpServer } from 'tmcp'
 import { defineTool } from 'tmcp/tool'
 import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
-import { execute, query } from '../codemode/excute'
+import { execute, query } from '../codemode/execute'
 import type { C8yMcpCustomContext } from '../types/mcp-context'
 import { addTenantURLToSchema } from '../utils/schema'
 
