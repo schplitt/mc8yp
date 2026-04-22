@@ -7,8 +7,9 @@ import {
   RESTRICTION_EXTENSION_KEY,
   compileRestrictionRule,
   matchesCompiledRule,
-  type RestrictionRule,
+
 } from '../utils/restrictions'
+import type { RestrictionRule } from '../utils/restrictions'
 
 const OPENAPI_OPERATION_METHODS = ['delete', 'get', 'head', 'options', 'patch', 'post', 'put', 'trace'] as const
 

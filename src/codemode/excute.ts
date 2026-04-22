@@ -16,8 +16,9 @@ import {
   normalizeAndValidateRestrictionPath,
   normalizeRestrictionMatchPath,
   parseRestrictionRule,
-  type RestrictionRule,
+
 } from '../utils/restriction-core'
+import type { RestrictionRule } from '../utils/restriction-core'
 import {
   createNetworkPermissionDecision,
 } from '../utils/restrictions'
@@ -87,7 +88,6 @@ function createExecuteRuntime(tenantUrl: string, restrictions: readonly Restrict
     cpuTimeLimitMs: 50000,
   })
 }
-
 
 function normalizeCode(functionCode: string): string {
   let normalized = functionCode.trim()
@@ -264,7 +264,7 @@ export function buildExecuteScript(
 
 function extractDefaultExport(exportsObject: unknown): unknown {
   if ((typeof exportsObject === 'object' && exportsObject !== null) || typeof exportsObject === 'function') {
-    if (Object.prototype.hasOwnProperty.call(exportsObject, 'default')) {
+    if (Object.hasOwn(exportsObject, 'default')) {
       return (exportsObject as { default: unknown }).default
     }
   }

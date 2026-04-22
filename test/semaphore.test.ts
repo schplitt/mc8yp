@@ -12,7 +12,7 @@ describe('AsyncSemaphore', () => {
     expect(semaphore.activeCount).toBe(3)
 
     let resolved = false
-    void fourthAcquire.then(() => {
+    fourthAcquire.then(() => {
       resolved = true
     })
 
@@ -37,7 +37,7 @@ describe('AsyncSemaphore', () => {
     expect(semaphore.activeCount).toBe(1)
 
     let resolved = false
-    void secondAcquire.then(() => {
+    secondAcquire.then(() => {
       resolved = true
     })
 

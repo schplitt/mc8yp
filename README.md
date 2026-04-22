@@ -91,11 +91,11 @@ With restrictions (see [API Restrictions](#api-restrictions)):
 
 ### Tools
 
-| Tool | Description |
-|------|-------------|
-| `query` | Search and inspect the Cumulocity OpenAPI spec by running a JavaScript module. The spec is injected as a top-level `spec` binding. Export the result with `export default`. |
-| `execute` | Execute JavaScript against the live Cumulocity API. Provide an async JavaScript function expression. A top-level `cumulocity` binding provides `cumulocity.request({ method, path, body?, headers? })`. Return the final value from that function. |
-| `list-credentials` | *(CLI mode only)* List stored credentials from your system keyring. |
+| Tool               | Description                                                                                                                                                                                                                                        |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `query`            | Search and inspect the Cumulocity OpenAPI spec by running a JavaScript module. The spec is injected as a top-level `spec` binding. Export the result with `export default`.                                                                        |
+| `execute`          | Execute JavaScript against the live Cumulocity API. Provide an async JavaScript function expression. A top-level `cumulocity` binding provides `cumulocity.request({ method, path, body?, headers? })`. Return the final value from that function. |
+| `list-credentials` | _(CLI mode only)_ List stored credentials from your system keyring.                                                                                                                                                                                |
 
 Both code-mode tools run in a sandboxed runtime ([secure-exec](https://github.com/nicepkg/secure-exec)).
 
@@ -132,8 +132,8 @@ async () => {
 
 ### Prompts
 
-| Prompt | Description |
-|--------|-------------|
+| Prompt            | Description                                                                                                                               |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `code-mode-guide` | Full reference for the `query` and `execute` tools, including available types, examples, and restriction info for the current connection. |
 
 ## API Restrictions
@@ -153,14 +153,14 @@ Restrictions are deny rules that block specific API operations. They can be appl
 
 ### Examples
 
-| Rule | Effect |
-|------|--------|
-| `/inventory/**` | Block all methods on all inventory paths |
-| `DELETE:/inventory/**` | Block only DELETE on inventory paths |
-| `/alarm/alarms` | Block all methods on the exact path `/alarm/alarms` |
-| `GET:/measurement/measurements` | Block only GET on measurements |
-| `POST:/inventory/managedObjects` | Block creating new managed objects |
-| `/user/**` | Block all user management |
+| Rule                             | Effect                                              |
+| -------------------------------- | --------------------------------------------------- |
+| `/inventory/**`                  | Block all methods on all inventory paths            |
+| `DELETE:/inventory/**`           | Block only DELETE on inventory paths                |
+| `/alarm/alarms`                  | Block all methods on the exact path `/alarm/alarms` |
+| `GET:/measurement/measurements`  | Block only GET on measurements                      |
+| `POST:/inventory/managedObjects` | Block creating new managed objects                  |
+| `/user/**`                       | Block all user management                           |
 
 ### CLI Mode
 

@@ -1,10 +1,13 @@
+/* eslint-disable no-template-curly-in-string */
+/* eslint-disable no-new-func */
 import { encode } from '@toon-format/toon'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildExecutePrelude, buildExecuteScript, execute } from '../src/codemode/excute'
-import { parseRestrictionQuery, parseRestrictionRule, type RestrictionRule } from '../src/utils/restrictions'
+import { parseRestrictionQuery, parseRestrictionRule } from '../src/utils/restrictions'
+import type { RestrictionRule } from '../src/utils/restrictions'
 import * as client from '../src/utils/client'
 
-type ExecuteHarnessResult = {
+interface ExecuteHarnessResult {
   called: boolean
   method?: string
   pwned?: unknown
@@ -151,7 +154,7 @@ function expectedBlockedRequestMessage(method: string, path: string, matchingRul
   ].join('\n')
 }
 
-function expectedBlockedResult(method: string, path: string, matchingRules: readonly string[]): { status: 'blocked'; error: { message: string } } {
+function expectedBlockedResult(method: string, path: string, matchingRules: readonly string[]): { status: 'blocked', error: { message: string } } {
   return {
     status: 'blocked',
     error: {
