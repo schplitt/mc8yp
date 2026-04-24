@@ -63,6 +63,7 @@ test/
   semaphore.test.ts
 core-openapi/
   release.json               Bundled latest Cumulocity core OpenAPI snapshot
+  2026.json                  Bundled 2026 Cumulocity core OpenAPI snapshot
   2025.json                  Bundled 2025 Cumulocity core OpenAPI snapshot
   2024.json                  Bundled 2024 Cumulocity core OpenAPI snapshot
 scripts/
