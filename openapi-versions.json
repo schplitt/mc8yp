@@ -1,0 +1,25 @@
+{
+  "versions": [
+    {
+      "version": "release",
+      "label": "release (latest)",
+      "url": "https://cumulocity.com/api/core/dist/c8y-oas.json",
+      "default": true
+    },
+    {
+      "version": "2026",
+      "label": "2026",
+      "url": "https://cumulocity.com/api/core/2026/dist/c8y-oas.json"
+    },
+    {
+      "version": "2025",
+      "label": "2025",
+      "url": "https://cumulocity.com/api/core/2025/dist/c8y-oas.json"
+    },
+    {
+      "version": "2024",
+      "label": "2024",
+      "url": "https://cumulocity.com/api/core/2024/dist/c8y-oas.json"
+    }
+  ]
+}

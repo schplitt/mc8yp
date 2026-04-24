@@ -111,7 +111,7 @@
     },
     {
       "name": "Applications",
-      "description": "API methods to retrieve, create, update and delete applications.\n\n### Application names\n\nFor each tenant, Cumulocity manages the subscribed applications and provides a number of applications of various types.\nIn case you want to subscribe a tenant to an application using an API, you must use the application name in the argument (as name).\n\nRefer to the tables in [Platform administration > Standard tenant administration > Managing the ecosystem > Managing applications](https://www.cumulocity.com/docs/standard-tenant/ecosystem/#managing-applications) in the Cumulocity user documentation for the respective application name to be used.\n\n> **&#9432; Info:** The Accept header should be provided in all POST/PUT requests, otherwise an empty response body will be returned.\n"
+      "description": "API methods to retrieve, create, update and delete applications.\n\n### Application names\n\nFor each tenant, Cumulocity manages the subscribed applications and provides a number of applications of various types.\nIn case you want to subscribe a tenant to an application using an API, you must use the application name in the argument (as name).\n\nRefer to the tables in [Platform administration > Standard tenant administration > Managing the ecosystem > Managing applications](https://www.cumulocity.com/docs/standard-tenant/ecosystem/#managing-applications) in the Cumulocity user documentation for the respective application name to be used.\n\n> **&#9432; Info:** The Accept header should be provided in all POST/PUT requests, otherwise an empty response body will be returned.\n"
     },
     {
       "name": "Application versions",
@@ -7167,7 +7167,7 @@
           }
         ],
         "summary": "Create one or multiple managed objects",
-        "description": "Create a managed object, for example, a device with temperature measurements support or a binary switch.<br>\nIn general, each managed object may consist of:\n\n*  A unique identifier that references the object.\n*  The name of the object.\n*  The most specific type of the managed object.\n*  A time stamp showing the last update.\n*  Fragments with specific meanings, for example, `c8y_IsDevice`, `c8y_SupportedOperations`.\n*  Any additional custom fragments.\n\nImagine, for example, that you want to describe electric meters from different vendors. Depending on the make of the meter, one may have a relay and one may be capable to measure a single phase or three phases (for example, a three-phase electricity sensor). A fragment `c8y_ThreePhaseElectricitySensor` would identify such an electric meter. Devices' characteristics are identified by storing fragments for each of them.\n\n> **&#9432; Info:** For more details about fragments with specific meanings, refer to [Device management & connectivity > Device integration > Fragment library](https://www.cumulocity.com/docs/device-integration/fragment-library/) in the Cumulocity user documentation.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_INVENTORY_CREATE <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_CREATE\n</section>\n",
+        "description": "Create a managed object, for example, a device with temperature measurements support or a binary switch.<br>\nIn general, each managed object may consist of:\n\n*  A unique identifier that references the object.\n*  The name of the object.\n*  The most specific type of the managed object.\n*  A time stamp showing the last update.\n*  Fragments with specific meanings, for example, `c8y_IsDevice`, `c8y_SupportedOperations`.\n*  Any additional custom fragments.\n\nImagine, for example, that you want to describe electric meters from different vendors. Depending on the make of the meter, one may have a relay and one may be capable to measure a single phase or three phases (for example, a three-phase electricity sensor). A fragment `c8y_ThreePhaseElectricitySensor` would identify such an electric meter. Devices' characteristics are identified by storing fragments for each of them.\n\n> **&#9432; Info:** For more details about fragments with specific meanings, refer to [Device management & connectivity > Device integration > Fragment library](https://www.cumulocity.com/docs/device-integration/fragment-library/) in the Cumulocity user documentation.\n\nThe maximum number of managed objects that can be created in a single bulk request is 50.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_INVENTORY_CREATE <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_CREATE\n</section>\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -7294,13 +7294,13 @@
           }
         ],
         "summary": "Update multiple managed objects at once",
-        "description": "Updates multiple managed objects (for example, devices).\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> owner of the source <b>OR</b> MANAGE_OBJECT_ADMIN permission on the source\n</section>\n",
+        "description": "Updates multiple managed objects (for example, devices) by their given IDs.\n\nThe maximum number of managed objects that can be updated in a single bulk request is 50.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> owner of the source <b>OR</b> MANAGE_OBJECT_ADMIN permission on the source\n</section>\n",
         "requestBody": {
           "required": true,
           "content": {
             "application/vnd.com.nsn.cumulocity.managedobjectcollection+json": {
               "schema": {
-                "$ref": "#/components/schemas/ManagedObjectCollection"
+                "$ref": "#/components/schemas/ManagedObjectCollectionBulk"
               },
               "example": {
                 "managedObjects": [
@@ -9403,6 +9403,88 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/operationNotAuthorized"
+          }
+        }
+      }
+    },
+    "/identity/search": {
+      "post": {
+        "operationId": "postIdentitySearch",
+        "tags": [
+          "Identity API"
+        ],
+        "security": [
+          {
+            "Basic": []
+          },
+          {
+            "OAI-Secure": []
+          },
+          {
+            "SSO": []
+          }
+        ],
+        "summary": "Lookup global identifiers matching given external identifiers.",
+        "description": "Given a list of external identifiers, returns their mapping to internal identifiers.\n\n<section><h5>Required roles</h5>\nROLE_IDENTITY_READ\n</section>\n",
+        "x-code-samples": [
+          {
+            "lang": "cURL",
+            "source": "curl --location --request POST \"https://<TENANT_DOMAIN>/identity/search\" \\\n--header \"Authorization: Basic <AUTHORIZATION>\" \\\n--header \"Accept: application/json\" \\\n--header \"Content-Type: application/json\" \\\n--data-raw '<Payload>'\n"
+          },
+          {
+            "lang": "C#",
+            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/identity/search\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.POST);\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\nrequest.AddHeader(\"Content-Type\", \"application/json\");\nrequest.AddHeader(\"Accept\", \"application/json\");\nrequest.AddParameter(\"application/json\", \"<Payload>\", ParameterType.RequestBody);\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
+          },
+          {
+            "lang": "Java",
+            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.post(\"https://<TENANT_DOMAIN>/identity/search\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\")\n    .header(\"Content-Type\", \"application/json\")\n    .header(\"Accept\", \"application/json\")\n    .body(\"<Payload>\")\n    .asString();\n"
+          },
+          {
+            "lang": "Node.js",
+            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"POST\", \"https://<TENANT_DOMAIN>/identity/search\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\",\n        \"Accept\": \"application/json\",\n        \"Content-Type\": \"application/json\"\n    })\n    .send(JSON.stringify( <Payload> ))\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
+          },
+          {
+            "lang": "Python",
+            "source": "import requests\nimport json\n\nurl = \"https://<TENANT_DOMAIN>/identity/search\"\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\",\n  \"Accept\": \"application/json\",\n  \"Content-Type\": \"application/json\"\n}\nresponse = requests.request(\"POST\", url, headers = headers, data = json.dumps(<Payload>))\nprint(response.text.encode(\"utf8\"))\n"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "example": {
+                "externalIds": [
+                  {
+                    "externalId": "simulator_145074_1",
+                    "type": "c8y_Serial"
+                  }
+                ]
+              },
+              "schema": {
+                "$ref": "#/components/schemas/identitySearchCriteria"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The request has succeeded and the external ID mappings are returned in the response.",
+            "content": {
+              "application/vnd.com.nsn.cumulocity.externalidcollection+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/externalIds"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/invalidPayload"
           },
           "401": {
             "$ref": "#/components/responses/unauthorizedError"
@@ -20680,7 +20762,7 @@
       "queryParam_inventory_textPrefix": {
         "name": "text",
         "in": "query",
-        "description": "Search for managed objects where a property value is equal to the given one.\nThe following properties are examined: `id, type, name, owner, externalIds`.\n",
+        "description": "Perform full-text search on managed objects. The following properties are examined: `id`, `type`, `name`, `owner`, `externalIds`.\n\nThe search value is processed using full-text tokenization: the provided string is split into individual tokens at whitespace and certain special characters (such as `/`, `-`, `.`), and the search matches managed objects that contain **any** of those tokens in the examined properties.\n\nFor example, searching for `abc/def-ghi` produces the tokens `abc`, `def`, and `ghi`. As a result, managed objects whose examined properties contain any of these tokens will be returned, which may include unintended results.\n\nTo search for an exact phrase, wrap the value in double quotes (for example, `text=\"abc/def-ghi\"`). This restricts results to managed objects that contain the full phrase rather than any individual token.\n\n> **&#9432; Info:** If you need an exact match on a specific property, consider using the `query` parameter with an explicit filter expression instead (for example, `$filter=(name+eq+'abc/def-ghi')`).\n",
         "schema": {
           "type": "string",
           "minLength": 1,
@@ -23900,43 +23982,14 @@
         }
       },
       "application_settings": {
-        "description": "A list of settings objects for this microservice application.",
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "key": {
-              "description": "The name of the setting.",
-              "type": "string",
-              "example": "hostkey-autosave"
-            },
-            "valueSchema": {
-              "description": "The value schema determines the values that the microservice can process.",
-              "type": "object",
-              "properties": {
-                "type": {
-                  "description": "The value schema type.",
-                  "type": "string",
-                  "example": "boolean"
-                }
-              }
-            },
-            "defaultValue": {
-              "description": "The default value.",
-              "type": "string",
-              "example": "true"
-            },
-            "editable": {
-              "description": "Indicates if the value is editable.",
-              "type": "boolean",
-              "example": true
-            },
-            "inheritFromOwner": {
-              "description": "Indicated wether this setting is inherited.",
-              "type": "boolean",
-              "example": true
-            }
-          }
+        "description": "A map of settings for this microservice application.",
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "example": {
+          "hostkey-autosave": "true",
+          "jwt.cache.guava.expireInSeconds": "10"
         }
       },
       "bulkNewDeviceRequest": {
@@ -24471,6 +24524,30 @@
             }
           ],
           "self": "https://<TENANT_DOMAIN>/identity/globalIds/251982/externalIds"
+        }
+      },
+      "identitySearchCriteria": {
+        "type": "object",
+        "required": [
+          "externalIds"
+        ],
+        "properties": {
+          "externalIds": {
+            "description": "An array containing the list of external IDs to lookup.",
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/externalId"
+            }
+          }
+        },
+        "example": {
+          "externalIds": [
+            {
+              "externalId": "simulator_145074_1",
+              "type": "c8y_Serial"
+            }
+          ]
         }
       },
       "event": {
@@ -25168,6 +25245,85 @@
           },
           "connectionStatus": {
             "$ref": "#/components/schemas/c8y_AvailabilityConnectionStatus"
+          }
+        }
+      },
+      "managedObjectBulk": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "description": "Unique identifier of the object.",
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/desc_objectName"
+          },
+          "owner": {
+            "description": "Username of the device's owner.",
+            "type": "string"
+          },
+          "type": {
+            "description": "The fragment type can be interpreted as _device class_, this means, devices with the same type can receive the same types of configuration, software, firmwar>",
+            "type": "string"
+          },
+          "childAdditions": {
+            "$ref": "#/components/schemas/objectChildAdditions"
+          },
+          "childAssets": {
+            "$ref": "#/components/schemas/objectChildAssets"
+          },
+          "childDevices": {
+            "$ref": "#/components/schemas/objectChildDevices"
+          },
+          "c8y_IsDevice": {
+            "description": "A fragment which identifies this managed object as a device.",
+            "type": "object"
+          },
+          "c8y_IsDeviceGroup": {
+            "description": "A fragment which identifies this managed object as a device group.",
+            "type": "object"
+          },
+          "c8y_DeviceTypes": {
+            "type": "array",
+            "description": "This fragment must be added in order to publish sample commands for a subset of devices sharing the same device type. If the fragment is present, the list of>",
+            "items": {
+              "type": "string"
+            }
+          },
+          "c8y_SupportedOperations": {
+            "type": "array",
+            "description": "Lists the operations that are available for a particular device, so that applications can trigger the operations.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": {
+          "description": "It is possible to add an arbitrary number of additional properties as a list of key-value pairs, for example, `\"property1\": {}`, `\"property2\": \"value\"`. These properties >\n\nReview [Getting started > Technical concepts > Cumulocity's domain model > Inventory > Fragments > Naming conventions of fragments](https://www.cumulocity.com/docs/concep>\n",
+          "x-additionalPropertiesName": "customFragments"
+        },
+        "example": {
+          "id": "51994",
+          "name": "My tracking device",
+          "owner": "manga",
+          "c8y_IsDevice": {},
+          "c8y_DeviceTypes": [
+            "deviceSubsetType"
+          ],
+          "c8y_SupportedOperations": [
+            "c8y_Restart"
+          ],
+          "childAdditions": {
+            "references": []
+          },
+          "childAssets": {
+            "references": []
+          },
+          "childDevices": {
+            "references": []
           }
         }
       },
@@ -28093,6 +28249,32 @@
             "pageSize": 5,
             "currentPage": 1
           }
+        }
+      },
+      "ManagedObjectCollectionBulk": {
+        "type": "object",
+        "required": [
+          "managedObjects"
+        ],
+        "properties": {
+          "managedObjects": {
+            "description": "An array containing the managed objects to update.",
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/managedObjectBulk"
+            }
+          }
+        },
+        "example": {
+          "managedObjects": [
+            {
+              "id": "51994",
+              "name": "My tracking device",
+              "owner": "manga",
+              "c8y_IsDevice": {}
+            }
+          ]
         }
       },
       "ManagedObjectReferenceCollection": {

@@ -8,13 +8,22 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url))
 const VIRTUAL_ID = '#core-openapi'
 const RESOLVED_ID = '\0virtual:core-openapi'
 
-const VERSIONS = ['release', '2025', '2024'] as const
-type Version = typeof VERSIONS[number]
+interface OpenApiVersionEntry {
+  version: string
+  label: string
+  url: string
+  default?: boolean
+}
 
-const LABELS: Record<Version, string> = {
-  release: 'release (latest)',
-  2025: '2025',
-  2024: '2024',
+const VERSIONS_CONFIG: OpenApiVersionEntry[] = JSON.parse(
+  readFileSync(path.join(rootDir, 'openapi-versions.json'), 'utf8'),
+).versions as OpenApiVersionEntry[]
+
+type Version = string
+const VERSIONS: Version[] = VERSIONS_CONFIG.map((e) => e.version)
+
+function getLabelForVersion(version: Version): string {
+  return VERSIONS_CONFIG.find((e) => e.version === version)?.label ?? version
 }
 
 function readSpecJson(version: Version): string {
@@ -23,15 +32,16 @@ function readSpecJson(version: Version): string {
 
 function generateEntries(versions: readonly Version[]): string {
   return versions
-    .map((v) => `  { version: ${JSON.stringify(v)}, label: ${JSON.stringify(LABELS[v])}, spec: ${readSpecJson(v)} },`)
+    .map((v) => `  { version: ${JSON.stringify(v)}, label: ${JSON.stringify(getLabelForVersion(v))}, spec: ${readSpecJson(v)} },`)
     .join('\n')
 }
 
 function generateCliModule(): string {
+  const defaultVersion = VERSIONS_CONFIG.find((e) => e.default)?.version ?? VERSIONS[0] ?? 'release'
   return `export const specs = Object.freeze([
 ${generateEntries(VERSIONS)}
 ]);
-let activeVersion = "release";
+let activeVersion = ${JSON.stringify(defaultVersion)};
 export function getCoreOpenApiSpec() {
   return specs.find((entry) => entry.version === activeVersion)?.spec ?? specs[0]?.spec;
 }
@@ -64,7 +74,7 @@ export function setCoreOpenApiVersion() {
     throw new Error("This server build is locked to core OpenAPI version " + (specs[0]?.version ?? ${JSON.stringify(version)}) + ".");
 }
 export function getCoreOpenApiLabel() {
-  return specs[0]?.label ?? ${JSON.stringify(LABELS[version])};
+  return specs[0]?.label ?? ${JSON.stringify(getLabelForVersion(version))};
 }
 `
 }

@@ -14,18 +14,8 @@ const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'))
 const releaseTag = process.env.TAG_NAME ?? `v${packageJson.version}`
 const assetBaseName = packageJson.name
 
-const specVersions = fs.readdirSync(path.join(rootDir, 'core-openapi'))
-  .filter((fileName) => fileName.endsWith('.json'))
-  .map((fileName) => fileName.slice(0, -'.json'.length))
-  .sort((left, right) => {
-    if (left === 'release') {
-      return -1
-    }
-    if (right === 'release') {
-      return 1
-    }
-    return right.localeCompare(left, undefined, { numeric: true })
-  })
+const openapiVersionsConfig = JSON.parse(fs.readFileSync(path.join(rootDir, 'openapi-versions.json'), 'utf8'))
+const specVersions = openapiVersionsConfig.versions.map((entry) => entry.version)
 
 function run(command, args, cwd = rootDir) {
   execFileSync(command, args, {
