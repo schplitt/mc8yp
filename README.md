@@ -289,7 +289,7 @@ Then add to your local MCP client configuration:
     "local_mc8yp": {
       "type": "stdio",
       "command": "node",
-      "args": ["/path/to/your/project/dist/cli.js"]
+      "args": ["/path/to/your/project/dist/cli.mjs"]
     }
   }
 }
