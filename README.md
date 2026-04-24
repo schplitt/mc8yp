@@ -240,10 +240,10 @@ pnpm package:microservices
 
 That command creates one zip per bundled server variant in the repository root, for example:
 
-- `mc8yp-release_v1.2.3.zip`
-- `mc8yp-2026_v1.2.3.zip`
-- `mc8yp-2025_v1.2.3.zip`
-- `mc8yp-2024_v1.2.3.zip`
+- `mc8yp-release-v1.2.3.zip`
+- `mc8yp-2026-v1.2.3.zip`
+- `mc8yp-2025-v1.2.3.zip`
+- `mc8yp-2024-v1.2.3.zip`
 
 The GitHub release workflow uses that packaging command when building tagged releases.
 
