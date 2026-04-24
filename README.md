@@ -64,7 +64,7 @@ pnpm dlx mc8yp creds remove
 
 Use `--spec` or `-s` to choose which bundled core OpenAPI snapshot the `query` tool exposes.
 
-Supported values are currently `release`, `2025`, and `2024`.
+Supported values are `release`, `2026`, `2025`, and `2024`.
 
 ```sh
 # Default: latest bundled release snapshot
@@ -226,9 +226,9 @@ The repository bundles multiple core OpenAPI snapshots for CLI use and builds on
 `pnpm build` produces:
 
 - CLI bundle in `dist/`
-- Versioned server bundles in `.output/release/`, `.output/2025/`, and `.output/2024/`
+- Versioned server bundles in `.output/release/`, `.output/2026/`, `.output/2025/`, and `.output/2024/`
 
-Each server bundle contains only its own `core-openapi/<version>.json` snapshot.
+The versions built are driven by [`openapi-versions.json`](openapi-versions.json). Each server bundle contains only its own `core-openapi/<version>.json` snapshot.
 
 ### Release Packaging
 
@@ -241,6 +241,7 @@ pnpm package:microservices
 That command creates one zip per bundled server variant in the repository root, for example:
 
 - `mc8yp-release_v1.2.3.zip`
+- `mc8yp-2026_v1.2.3.zip`
 - `mc8yp-2025_v1.2.3.zip`
 - `mc8yp-2024_v1.2.3.zip`
 
@@ -274,15 +275,21 @@ pnpm test:bench
 
 ### Run Locally
 
-Add the dev server to your local MCP client configuration:
+Build first, then point your MCP client at the compiled CLI:
+
+```sh
+pnpm build
+```
+
+Then add to your local MCP client configuration:
 
 ```json
 {
   "servers": {
     "local_mc8yp": {
       "type": "stdio",
-      "command": "pnpm",
-      "args": ["dlx", "jiti", "/path/to/your/project/src/cli/index.ts"]
+      "command": "node",
+      "args": ["/path/to/your/project/dist/cli.js"]
     }
   }
 }
