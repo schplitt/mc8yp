@@ -1,5 +1,5 @@
 import { encode } from '@toon-format/toon'
-import openapi from '../../openapi.json' with { type: 'json' }
+import { getCoreOpenApiSpec } from '#core-openapi'
 import { NodeRuntime, createNodeDriver, createNodeRuntimeDriverFactory } from 'secure-exec'
 import { applyRestrictionsToOpenApiSpec } from './openapi-restrictions'
 import { AsyncSemaphore } from './semaphore'
@@ -101,7 +101,7 @@ function normalizeCode(functionCode: string): string {
 }
 
 function buildQueryScript(sourceCode: string, restrictions: readonly RestrictionRule[]): string {
-  const restrictedSpec = applyRestrictionsToOpenApiSpec(openapi, restrictions)
+  const restrictedSpec = applyRestrictionsToOpenApiSpec(getCoreOpenApiSpec() as Parameters<typeof applyRestrictionsToOpenApiSpec>[0], restrictions)
   const functionExpression = normalizeCode(sourceCode)
 
   return [

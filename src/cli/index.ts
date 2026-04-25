@@ -2,6 +2,7 @@ import { StdioTransport } from '@tmcp/transport-stdio'
 import { defineCommand, runMain } from 'citty'
 import consola from 'consola'
 import pkgjson from '../../package.json' with { type: 'json' }
+import { getCoreOpenApiLabel, getCoreOpenApiVersion, setCoreOpenApiVersion, specs } from '#core-openapi'
 import { createC8YMcpServer } from '../server'
 import { getCredentialsByTenantUrl, getStoredC8yAuth } from '../utils/credentials'
 import { parseRestrictionRule } from '../utils/restrictions'
@@ -18,6 +19,12 @@ const main = defineCommand({
       description: 'Restriction rule to deny API access (e.g. "GET:/inventory/**"). Can be repeated.',
       alias: 'r',
     },
+    spec: {
+      type: 'string',
+      description: `Core OpenAPI snapshot to expose to query. Available: ${specs.map((s) => `${s.version} (${s.label})`).join(', ')}.`,
+      alias: 's',
+      default: getCoreOpenApiVersion(),
+    },
   },
   setup: () => {
     globalThis.executionEnvironment = 'cli'
@@ -29,6 +36,15 @@ const main = defineCommand({
     creds: () => import('./subcommands/creds').then((m) => m.default),
   },
   run: async ({ args }) => {
+    const rawSpecVersion = Array.isArray(args.spec) ? args.spec.at(-1) : args.spec
+    const requested = rawSpecVersion ?? getCoreOpenApiVersion()
+    const selected = specs.find((s) => s.version === requested)
+    if (!selected) {
+      throw new Error(`Invalid --spec value "${requested}". Available: ${specs.map((s) => s.version).join(', ')}`)
+    }
+    setCoreOpenApiVersion(selected.version)
+    consola.info(`Using core OpenAPI snapshot: ${getCoreOpenApiLabel()}`)
+
     const raw = args.restriction
     const restrictions = (Array.isArray(raw) ? raw : raw ? [raw] : [])
       .filter(Boolean)

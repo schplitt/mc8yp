@@ -1,0 +1,106 @@
+name: Update Core OpenAPI Specs
+
+"on":
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Fetch latest OpenAPI specs
+        id: fetch
+        continue-on-error: true
+        run: node scripts/update-openapi.mjs
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet core-openapi/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push changes and create or update PR
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FETCH_RESULTS: ${{ steps.fetch.outputs.results }}
+        run: |
+          set -euo pipefail
+          BRANCH="chore/update-core-openapi-specs"
+          BASE="${{ github.event.repository.default_branch }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Build branch from current HEAD (default branch was checked out)
+          git checkout -B "$BRANCH"
+          git add core-openapi/
+
+          CHANGED_FILES=$(git diff --cached --name-only | sed 's|core-openapi/||' | sed 's|\.json$||' | tr '\n' ', ' | sed 's/,$//')
+          git commit -m "chore: update core OpenAPI specs ($CHANGED_FILES)"
+
+          git push --force origin "$BRANCH"
+
+          # Build PR body from step output
+          ERROR_COUNT=$(echo "$FETCH_RESULTS" | jq '[.[] | select(.status == "error")] | length')
+          BODY_FILE=$(mktemp)
+          {
+            echo "Automated update of bundled core OpenAPI specs from upstream Cumulocity API."
+            echo ""
+            echo "**Updated versions:** ${CHANGED_FILES}"
+            if [ "$ERROR_COUNT" -gt 0 ]; then
+              echo ""
+              echo "<details>"
+              echo "<summary>⚠️ ${ERROR_COUNT} spec(s) failed to fetch</summary>"
+              echo ""
+              echo "$FETCH_RESULTS" | jq -r '.[] | select(.status == "error") | "- `\(.version)`: \(.detail // "unknown error")"'
+              echo ""
+              echo "</details>"
+            fi
+            echo ""
+            echo "> Triggered by the nightly update workflow. Merge to include the latest spec changes in the next build."
+          } > "$BODY_FILE"
+
+          # Create a PR only if one is not already open for this branch; otherwise update existing
+          EXISTING=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
+          if [ -z "$EXISTING" ]; then
+            gh pr create \
+              --title "chore: update core OpenAPI specs ($CHANGED_FILES)" \
+              --body-file "$BODY_FILE" \
+              --head "$BRANCH" \
+              --base "$BASE"
+          else
+            echo "PR #$EXISTING already open — branch updated, updating PR body."
+            gh pr edit "$EXISTING" --body-file "$BODY_FILE"
+          fi
+
+      - name: Fail if fetch errors occurred
+        if: steps.fetch.outcome == 'failure'
+        run: |
+          echo "One or more OpenAPI specs failed to fetch. See the PR body or job logs for details."
+          exit 1

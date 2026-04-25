@@ -4,7 +4,7 @@
 ![License](https://img.shields.io/npm/l/mc8yp)
 ![Node Version](https://img.shields.io/node/v/mc8yp)
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gives AI agents full access to the Cumulocity IoT platform through code execution. Instead of exposing dozens of fixed tools, the server provides two code-mode tools — `query` and `execute` — that let the agent write JavaScript to inspect the OpenAPI spec and call any API endpoint.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gives AI agents full access to the Cumulocity IoT platform through code execution. Instead of exposing dozens of fixed tools, the server provides two code-mode tools — `query` and `execute` — that let the agent write JavaScript to inspect the core OpenAPI spec and call any API endpoint.
 
 **Two Deployment Modes:**
 
@@ -18,6 +18,9 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gi
 ```sh
 # Run directly (recommended)
 pnpm dlx mc8yp
+
+# Pick a specific core OpenAPI snapshot for query
+pnpm dlx mc8yp --spec 2025
 
 # Or install globally
 npm install -g mc8yp
@@ -57,6 +60,25 @@ pnpm dlx mc8yp creds list
 pnpm dlx mc8yp creds remove
 ```
 
+### Selecting The Core OpenAPI Snapshot (CLI)
+
+Use `--spec` or `-s` to choose which bundled core OpenAPI snapshot the `query` tool exposes.
+
+Supported values are `release`, `2026`, `2025`, and `2024`.
+
+```sh
+# Default: latest bundled release snapshot
+mc8yp
+
+# Explicitly use the 2025 core OpenAPI snapshot
+mc8yp --spec 2025
+
+# Short form
+mc8yp -s 2024
+```
+
+This only affects the `query` tool's OpenAPI view. The `execute` tool still calls the live Cumulocity API of the selected tenant or deployed service environment.
+
 ### Connecting to AI Agents
 
 For Claude Desktop or any MCP client, add to your MCP configuration:
@@ -93,7 +115,7 @@ With restrictions (see [API Restrictions](#api-restrictions)):
 
 | Tool               | Description                                                                                                                                                                                                                                        |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `query`            | Search and inspect the Cumulocity OpenAPI spec by running a JavaScript module. The spec is injected as a top-level `spec` binding. Export the result with `export default`.                                                                        |
+| `query`            | Search and inspect the bundled Cumulocity core OpenAPI spec by running a JavaScript module. The spec is injected as a top-level `spec` binding. Export the result with `export default`.                                                           |
 | `execute`          | Execute JavaScript against the live Cumulocity API. Provide an async JavaScript function expression. A top-level `cumulocity` binding provides `cumulocity.request({ method, path, body?, headers? })`. Return the final value from that function. |
 | `list-credentials` | _(CLI mode only)_ List stored credentials from your system keyring.                                                                                                                                                                                |
 
@@ -195,6 +217,36 @@ Pass restrictions as `restriction` query parameters on the MCP endpoint URL:
 
 When an `execute` request is blocked by MCP restrictions, the tool returns explanatory text stating that the operation was intentionally denied by MCP connection policy, no request was sent to Cumulocity, and retrying through the same connection will not help.
 
+## Build And Packaging
+
+The repository bundles multiple core OpenAPI snapshots for CLI use and builds one microservice server bundle per snapshot version.
+
+### Build Outputs
+
+`pnpm build` produces:
+
+- CLI bundle in `dist/`
+- Versioned server bundles in `.output/release/`, `.output/2026/`, `.output/2025/`, and `.output/2024/`
+
+The versions built are driven by [`openapi-versions.json`](openapi-versions.json). Each server bundle contains only its own `core-openapi/<version>.json` snapshot.
+
+### Release Packaging
+
+Use the dedicated packaging command after `pnpm build` to create Docker-based Cumulocity release zips:
+
+```sh
+pnpm package:microservices
+```
+
+That command creates one zip per bundled server variant in the repository root, for example:
+
+- `mc8yp-release-v1.2.3.zip`
+- `mc8yp-2026-v1.2.3.zip`
+- `mc8yp-2025-v1.2.3.zip`
+- `mc8yp-2024-v1.2.3.zip`
+
+The GitHub release workflow uses that packaging command when building tagged releases.
+
 ## Development
 
 ### Prerequisites
@@ -223,15 +275,21 @@ pnpm test:bench
 
 ### Run Locally
 
-Add the dev server to your local MCP client configuration:
+Build first, then point your MCP client at the compiled CLI:
+
+```sh
+pnpm build
+```
+
+Then add to your local MCP client configuration:
 
 ```json
 {
   "servers": {
     "local_mc8yp": {
       "type": "stdio",
-      "command": "pnpm",
-      "args": ["dlx", "jiti", "/path/to/your/project/src/cli/index.ts"]
+      "command": "node",
+      "args": ["/path/to/your/project/dist/cli.mjs"]
     }
   }
 }

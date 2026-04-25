@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "version": "Latest",
+    "version": "Release 2026",
     "title": "Cumulocity",
     "x-logo": {
       "url": "https://www.cumulocity.com/docs/images/logo-platform.svg",
@@ -111,7 +111,7 @@
     },
     {
       "name": "Applications",
-      "description": "API methods to retrieve, create, update and delete applications.\n\n### Application names\n\nFor each tenant, Cumulocity manages the subscribed applications and provides a number of applications of various types.\nIn case you want to subscribe a tenant to an application using an API, you must use the application name in the argument (as name).\n\nRefer to the tables in [Platform administration > Standard tenant administration > Managing the ecosystem > Managing applications](https://www.cumulocity.com/docs/standard-tenant/ecosystem/#managing-applications) in the Cumulocity user documentation for the respective application name to be used.\n\n> **&#9432; Info:** The Accept header should be provided in all POST/PUT requests, otherwise an empty response body will be returned.\n"
+      "description": "API methods to retrieve, create, update and delete applications.\n\n### Application names\n\nFor each tenant, Cumulocity manages the subscribed applications and provides a number of applications of various types.\nIn case you want to subscribe a tenant to an application using an API, you must use the application name in the argument (as name).\n\nRefer to the tables in [Platform administration > Standard tenant administration > Managing the ecosystem > Managing applications](https://www.cumulocity.com/docs/standard-tenant/ecosystem/#managing-applications) in the Cumulocity user documentation for the respective application name to be used.\n\n> **&#9432; Info:** The Accept header should be provided in all POST/PUT requests, otherwise an empty response body will be returned.\n"
     },
     {
       "name": "Application versions",
@@ -3026,7 +3026,7 @@
                     ]
                   },
                   {
-                    "$ref": "#/components/schemas/application_no_microservice_manifest"
+                    "$ref": "#/components/schemas/application"
                   }
                 ]
               }
@@ -3295,7 +3295,7 @@
               "schema": {
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/application_no_microservice_manifest"
+                    "$ref": "#/components/schemas/application"
                   },
                   {
                     "properties": {
@@ -3411,9 +3411,6 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/acceptHeader"
-          },
-          {
-            "$ref": "#/components/parameters/queryParam_application_clearConflictingOptions"
           }
         ],
         "tags": [
@@ -7166,12 +7163,22 @@
             "SSO": []
           }
         ],
-        "summary": "Create one or multiple managed objects",
+        "summary": "Create a managed object",
         "description": "Create a managed object, for example, a device with temperature measurements support or a binary switch.<br>\nIn general, each managed object may consist of:\n\n*  A unique identifier that references the object.\n*  The name of the object.\n*  The most specific type of the managed object.\n*  A time stamp showing the last update.\n*  Fragments with specific meanings, for example, `c8y_IsDevice`, `c8y_SupportedOperations`.\n*  Any additional custom fragments.\n\nImagine, for example, that you want to describe electric meters from different vendors. Depending on the make of the meter, one may have a relay and one may be capable to measure a single phase or three phases (for example, a three-phase electricity sensor). A fragment `c8y_ThreePhaseElectricitySensor` would identify such an electric meter. Devices' characteristics are identified by storing fragments for each of them.\n\n> **&#9432; Info:** For more details about fragments with specific meanings, refer to [Device management & connectivity > Device integration > Fragment library](https://www.cumulocity.com/docs/device-integration/fragment-library/) in the Cumulocity user documentation.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_INVENTORY_CREATE <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_CREATE\n</section>\n",
         "requestBody": {
           "required": true,
           "content": {
             "application/vnd.com.nsn.cumulocity.managedobject+json": {
+              "example": {
+                "name": "My tracking device",
+                "c8y_IsDevice": {},
+                "c8y_DeviceTypes": [
+                  "deviceSubsetType"
+                ],
+                "c8y_SupportedOperations": [
+                  "c8y_Restart"
+                ]
+              },
               "schema": {
                 "allOf": [
                   {
@@ -7184,35 +7191,6 @@
                         "readOnly": true
                       }
                     }
-                  }
-                ]
-              },
-              "example": {
-                "name": "My tracking device",
-                "c8y_IsDevice": {},
-                "c8y_DeviceTypes": [
-                  "deviceSubsetType"
-                ],
-                "c8y_SupportedOperations": [
-                  "c8y_Restart"
-                ]
-              }
-            },
-            "application/vnd.com.nsn.cumulocity.managedobjectcollection+json": {
-              "schema": {
-                "$ref": "#/components/schemas/ManagedObjectCollection"
-              },
-              "example": {
-                "managedObjects": [
-                  {
-                    "name": "My tracking device",
-                    "c8y_IsDevice": {},
-                    "c8y_DeviceTypes": [
-                      "deviceSubsetType"
-                    ],
-                    "c8y_SupportedOperations": [
-                      "c8y_Restart"
-                    ]
                   }
                 ]
               }
@@ -7249,11 +7227,6 @@
                 "schema": {
                   "$ref": "#/components/schemas/managedObject"
                 }
-              },
-              "application/vnd.com.nsn.cumulocity.managedobjectcollection+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ManagedObjectCollection"
-                }
               }
             }
           },
@@ -7265,95 +7238,6 @@
           },
           "422": {
             "$ref": "#/components/responses/invalidPayload"
-          }
-        }
-      },
-      "put": {
-        "operationId": "putManagedObjectCollectionResource",
-        "x-codegen-resource-name": "updateManagedObjects",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/acceptHeader"
-          },
-          {
-            "$ref": "#/components/parameters/processingModeHeader"
-          }
-        ],
-        "tags": [
-          "Managed objects"
-        ],
-        "security": [
-          {
-            "Basic": []
-          },
-          {
-            "OAI-Secure": []
-          },
-          {
-            "SSO": []
-          }
-        ],
-        "summary": "Update multiple managed objects at once",
-        "description": "Updates multiple managed objects (for example, devices).\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> owner of the source <b>OR</b> MANAGE_OBJECT_ADMIN permission on the source\n</section>\n",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/vnd.com.nsn.cumulocity.managedobjectcollection+json": {
-              "schema": {
-                "$ref": "#/components/schemas/ManagedObjectCollection"
-              },
-              "example": {
-                "managedObjects": [
-                  {
-                    "c8y_IsDevice": {},
-                    "name": "My tracking device"
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "x-code-samples": [
-          {
-            "lang": "cURL",
-            "source": "curl --location --request PUT \"https://<TENANT_DOMAIN>/inventory/managedObjects\" \\\n--header \"Authorization: Basic <AUTHORIZATION>\" \\\n--header \"Accept: application/json\" \\\n--header \"Content-Type: application/json\" \\\n--data-raw '<Payload>'\n"
-          },
-          {
-            "lang": "C#",
-            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/inventory/managedObjects\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.PUT);\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\nrequest.AddHeader(\"Content-Type\", \"application/json\");\nrequest.AddHeader(\"Accept\", \"application/json\");\nrequest.AddParameter(\"application/json\", \"<Payload>\",  ParameterType.RequestBody);\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
-          },
-          {
-            "lang": "Java",
-            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.put(\"https://<TENANT_DOMAIN>/inventory/managedObjects\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\")\n    .header(\"Content-Type\", \"application/json\")\n    .header(\"Accept\", \"application/json\")\n    .body(\"<Payload>\")\n    .asString();\nSystem.out.println(response);\n"
-          },
-          {
-            "lang": "Node.js",
-            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"PUT\", \"https://<TENANT_DOMAIN>/inventory/managedObjects\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\",\n        \"Accept\": \"application/json\",\n        \"Content-Type\": \"application/json\"\n    })\n    .send(JSON.stringify( <Payload> ))\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
-          },
-          {
-            "lang": "Python",
-            "source": "import requests\nimport json\n\nurl = \"https://<TENANT_DOMAIN>/inventory/managedObjects\"\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\",\n  \"Accept\": \"application/json\",\n  \"Content-Type\": \"application/json\"\n}\nresponse = requests.request(\"PUT\", url, headers=headers, data = json.dumps(<Payload>))\nprint(response.text.encode(\"utf8\"))\n"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "All managed objects were updated.",
-            "content": {
-              "application/vnd.com.nsn.cumulocity.managedobjectcollection+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ManagedObjectCollection"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/unauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/operationNotAuthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/inventoryObjectNotFound"
           }
         }
       },
@@ -7700,14 +7584,7 @@
         ],
         "responses": {
           "204": {
-            "description": "A managed object was removed.",
-            "content": {
-              "*/*": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
+            "description": "A managed object was removed."
           },
           "401": {
             "$ref": "#/components/responses/unauthorizedError"
@@ -13761,7 +13638,7 @@
           }
         ],
         "summary": "Retrieve a list of series and their values",
-        "description": "Retrieve a list of series (all or only those matching the specified names) and their values within a given period of a specific managed object (source).<br>\nA series is any fragment in measurement that contains a `value` property.\nWhen querying a series, you can retrieve aggregated data by using the aggregation parameters.  \nIf no aggregation is specified, the response contains a maximum of 5,000 values.\n\n**Aggregation Options** \n\nAggregation is configured using the `aggregationInterval` parameter, which defines a custom time interval for aggregation.\n\n**Custom Time Intervals**\n\nThe `aggregationInterval` value must consist of a positive integer from 1–999 range followed by a supported time unit:\n\n* `s` – seconds\n* `m` – minutes\n* `h` – hours\n* `d` – days\n* `w` – weeks\n* `M` – months\n* `q` – quarters\n* `y` – years\n\n***Examples:*** `300s`, `25m`, `12h`, `7d`, `4w`, `3M`, `2q`, `1y`\n\n**Aggregation Functions**\n\nThe `aggregationFunction` parameter specifies the functions calculated for each aggregation interval. Supported values:\n\n* `min`\n* `max`\n* `avg`\n* `sum`\n* `count`\n* `stdDevPop`\n* `stdDevSamp`\n\nIf not specified, the `min` and `max` functions are calculated by default.\n\nTo request multiple functions, repeat the parameter:\n\n```markup\naggregationFunction=min&aggregationFunction=max&aggregationFunction=avg\n```\n\nThe `aggregationFunction` parameter is valid only when aggregation is defined using `aggregationInterval`. Otherwise, the request returns a 400 Bad Request error.\n\n>**&#9432; Info:** Applies only to timeseries persistence. For legacy persistence, only min and max are always calculated and `aggregationFunction` parameter is ignored.\n\n> **⚠️ Important:** For correct aggregation, devices must use a consistent time zone when sending timestamps.\n\n<section><h5>Required roles</h5>\nROLE_MEASUREMENT_READ <b>OR</b> owner of the source <b>OR</b> MEASUREMENT_READ permission on the source\n</section>\n",
+        "description": "Retrieve a list of series (all or only those matching the specified names) and their values within a given period of a specific managed object (source).<br>\nA series is any fragment in measurement that contains a `value` property.\n\nIt is possible to fetch aggregated results using the `aggregationType` parameter. If the aggregation is not specified, the result will contain no more than 5000 values.\n\n> **⚠️ Important:** For the aggregation to be done correctly, a device shall always use the same time zone when it sends dates.\n\n<section><h5>Required roles</h5>\nROLE_MEASUREMENT_READ <b>OR</b> owner of the source <b>OR</b> MEASUREMENT_READ permission on the source\n</section>\n",
         "x-code-samples": [
           {
             "lang": "cURL",
@@ -15377,7 +15254,7 @@
           }
         ],
         "summary": "Subscribe to an application",
-        "description": "Subscribe a tenant (by a given ID) to an application.\n\n> **&#9432; Info:** Subscription requests are not synchronous. A ‘201’ response indicates the request was accepted, but the actual creation of Kubernetes resources may still be in progress. \n\n<section><h5>Required roles</h5>\n1. the current tenant is application owner and has the role ROLE_APPLICATION_MANAGEMENT_ADMIN <b>OR</b><br>\n2. for applications that are not microservices, the current tenant is the management tenant or the parent of the application owner tenant, and the user has one of the following roles: ROLE_TENANT_MANAGEMENT_ADMIN, ROLE_TENANT_MANAGEMENT_UPDATE <b>OR</b><br>\n3. for microservices, the current tenant is the management tenant or the parent of the application owner tenant, and the user has the role ROLE_TENANT_MANAGEMENT_ADMIN OR ROLE_TENANT_MANAGEMENT_UPDATE and one of following conditions is met:<br>\n* the microservice has no manifest<br>\n* the microservice version is supported<br>\n* the current tenant is subscribed to 'feature-privileged-microservice-hosting'\n</section>\n",
+        "description": "Subscribe a tenant (by a given ID) to an application.\n\n<section><h5>Required roles</h5>\n1. the current tenant is application owner and has the role ROLE_APPLICATION_MANAGEMENT_ADMIN <b>OR</b><br>\n2. for applications that are not microservices, the current tenant is the management tenant or the parent of the application owner tenant, and the user has one of the follwoing roles: ROLE_TENANT_MANAGEMENT_ADMIN, ROLE_TENANT_MANAGEMENT_UPDATE <b>OR</b><br>\n3. for microservices, the current tenant is the management tenant or the parent of the application owner tenant, and the user has the role ROLE_TENANT_MANAGEMENT_ADMIN OR ROLE_TENANT_MANAGEMENT_UPDATE and one of following conditions is met:<br>\n* the microservice has no manifest<br>\n* the microservice version is supported<br>\n* the current tenant is subscribed to 'feature-privileged-microservice-hosting'\n</section>\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -15470,7 +15347,7 @@
           }
         ],
         "summary": "Retrieve subscribed applications",
-        "description": "Retrieve the tenant subscribed applications by a given tenant ID.\n\n> **&#9432; Info:** The result may not reflect the current status of Kubernetes pods. After processing subscription updates \nit may take some time until the changes are effective on Kubernetes.\n\n> **&#9432; Info:** If tenantId is not valid, no error occurs. Instead there will be an empty list of applications returned \nas result.\n\n<section><h5>Required roles</h5>\n(ROLE_TENANT_MANAGEMENT_READ <b>OR</b> ROLE_TENANT_ADMIN) <b>AND</b> (the current tenant is its parent <b>OR</b> is the management tenant)\n</section>\n",
+        "description": "Retrieve the tenant subscribed applications by a given tenant ID.\n\n<section><h5>Required roles</h5>\n(ROLE_TENANT_MANAGEMENT_READ <b>OR</b> ROLE_TENANT_ADMIN) <b>AND</b> (the current tenant is its parent <b>OR</b> is the management tenant)\n</section>\n",
         "x-code-samples": [
           {
             "lang": "cURL",
@@ -15502,6 +15379,9 @@
           },
           "403": {
             "$ref": "#/components/responses/operationNotAuthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/tenantNotFound"
           }
         }
       }
@@ -15533,7 +15413,7 @@
           }
         ],
         "summary": "Unsubscribe from an application",
-        "description": "Unsubscribe a tenant (by a given tenant ID) from an application (by a given application ID).\n\n> **&#9432; Info:** Unsubscription requests are not synchronous. A ‘204’ response indicates the request was accepted, but the actual deletion of Kubernetes resources may still be in progress. \n\n<section><h5>Required roles</h5>\n(ROLE_APPLICATION_MANAGEMENT_ADMIN <b>AND</b> is the application owner <b>AND</b> is the current tenant) <b>OR</b><br>\n((ROLE_TENANT_MANAGEMENT_ADMIN <b>OR</b> ROLE_TENANT_MANAGEMENT_UPDATE) <b>AND</b> (the current tenant is its parent <b>OR</b> is the management tenant))\n</section>\n",
+        "description": "Unsubscribe a tenant (by a given tenant ID) from an application (by a given application ID).\n\n<section><h5>Required roles</h5>\n(ROLE_APPLICATION_MANAGEMENT_ADMIN <b>AND</b> is the application owner <b>AND</b> is the current tenant) <b>OR</b><br>\n((ROLE_TENANT_MANAGEMENT_ADMIN <b>OR</b> ROLE_TENANT_MANAGEMENT_UPDATE) <b>AND</b> (the current tenant is its parent <b>OR</b> is the management tenant))\n</section>\n",
         "x-code-samples": [
           {
             "lang": "cURL",
@@ -16827,7 +16707,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/deviceAccessToken"
+                  "$ref": "#/components/schemas/accessToken"
                 }
               }
             }
@@ -17894,854 +17774,6 @@
         }
       }
     },
-    "/tenant/loginOptions/{typeOrId}/accessMappings": {
-      "post": {
-        "operationId": "postAccessMappingResource",
-        "x-codegen-resource-name": "createAccessMapping",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/ssoLoginOptionTypeOrId"
-          },
-          {
-            "$ref": "#/components/parameters/queryParam_terminateUserSessions"
-          },
-          {
-            "$ref": "#/components/parameters/acceptHeader"
-          }
-        ],
-        "tags": [
-          "Login options"
-        ],
-        "security": [
-          {
-            "Basic": []
-          },
-          {
-            "OAI-Secure": []
-          },
-          {
-            "SSO": []
-          }
-        ],
-        "summary": "Create a login option access mapping",
-        "description": "Create an authentication access mapping configuration on your tenant.\n\n<section><h5>Required roles</h5>\nROLE_TENANT_ADMIN <b>OR</b> ROLE_TENANT_MANAGEMENT_ADMIN\n</section>\n",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/vnd.com.nsn.cumulocity.accessMapping+json": {
-              "example": {
-                "when": {
-                  "operator": "AND",
-                  "childPredicates": [
-                    {
-                      "operator": "EQ",
-                      "parameterPath": "group",
-                      "value": "2",
-                      "childPredicates": []
-                    }
-                  ]
-                },
-                "thenApplications": [
-                  2
-                ],
-                "thenGroups": [
-                  1,
-                  3
-                ]
-              },
-              "schema": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/accessMapping"
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "x-code-samples": [
-          {
-            "lang": "cURL",
-            "source": "curl --location --request POST \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings\\\n--header \"Authorization: Basic <AUTHORIZATION>\" \\\n--header \"Accept: application/json\" \\\n--header \"Content-Type: application/json\" \\\n--data-raw '<Payload>'\n"
-          },
-          {
-            "lang": "C#",
-            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings);\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.POST);\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\nrequest.AddHeader(\"Content-Type\", \"application/json\");\nrequest.AddHeader(\"Accept\", \"application/json\");\nrequest.AddParameter(\"application/json\", \"<Payload>\",  ParameterType.RequestBody);\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
-          },
-          {
-            "lang": "Java",
-            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.post(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\")\n    .header(\"Content-Type\", \"application/json\")\n    .header(\"Accept\", \"application/json\")\n    .body(\"<Payload>\")\n    .asString();\nSystem.out.println(response);\n"
-          },
-          {
-            "lang": "Node.js",
-            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"PUT\", \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\",\n        \"Accept\": \"application/json\",\n        \"Content-Type\": \"application/json\"\n    })\n    .send(JSON.stringify( <Payload> ))\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
-          },
-          {
-            "lang": "Python",
-            "source": "import requests\nimport json\n\nurl = \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings\"\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\",\n  \"Accept\": \"application/json\",\n  \"Content-Type\": \"application/json\"\n}\n\nresponse = requests.request(\"PUT\", url, headers=headers, data = json.dumps(<Payload>))\nprint(response.text.encode(\"utf8\"))\n"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "A login option access mapping was created.",
-            "content": {
-              "application/vnd.com.nsn.cumulocity.accessMapping+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/accessMappingWithId"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/unauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/operationNotAuthorized"
-          },
-          "422": {
-            "$ref": "#/components/responses/invalidPayload"
-          }
-        }
-      },
-      "get": {
-        "operationId": "getAccessMappingCollectionResource",
-        "x-codegen-resource-name": "getAccessMappings",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/ssoLoginOptionTypeOrId"
-          }
-        ],
-        "tags": [
-          "Login options"
-        ],
-        "security": [],
-        "summary": "Retrieve all login option access mappings",
-        "description": "Retrieve all access mappings available in the login option.\n\n<section><h5>Required roles</h5>\n((ROLE_TENANT_ADMIN <b>OR</b> ROLE_TENANT_MANAGEMENT_READ <b>OR</b> ROLE_USER_MANAGEMENT_ADMIN <b>OR</b> ROLE_USER_MANAGEMENT_CREATE)\n<b>AND</b> tenant access to login option is not restricted by management tenant)\n</section>\n",
-        "x-code-samples": [
-          {
-            "lang": "cURL",
-            "source": "curl --location --request GET \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings\"\n"
-          },
-          {
-            "lang": "C#",
-            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.GET);\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
-          },
-          {
-            "lang": "Java",
-            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.get(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings\").asString();\n"
-          },
-          {
-            "lang": "Node.js",
-            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"GET\", \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings\")\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
-          },
-          {
-            "lang": "Python",
-            "source": "import requests\n\nresponse = requests.request(\"GET\", \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings\")\nprint(response.text.encode(\"utf8\"))\n"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "A login option access mappings collection.",
-            "content": {
-              "application/vnd.com.nsn.cumulocity.accessMappingCollection+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/accessMappingCollection"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/unauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/operationNotAuthorized"
-          }
-        }
-      }
-    },
-    "/tenant/loginOptions/{typeOrId}/accessMappings/{id}": {
-      "get": {
-        "operationId": "getAccessMappingResource",
-        "x-codegen-resource-name": "getAccessMapping",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/loginOptionTypeOrId"
-          },
-          {
-            "$ref": "#/components/parameters/accessMappingId"
-          },
-          {
-            "$ref": "#/components/parameters/acceptHeader"
-          }
-        ],
-        "tags": [
-          "Login options"
-        ],
-        "security": [
-          {
-            "Basic": []
-          },
-          {
-            "OAI-Secure": []
-          },
-          {
-            "SSO": []
-          }
-        ],
-        "summary": "Retrieve a specific access mapping",
-        "description": "Retrieve a specific access mapping in the login option by the given ID.\n\n<section><h5>Required roles</h5>\n((ROLE_TENANT_ADMIN <b>OR</b> ROLE_TENANT_MANAGEMENT_READ <b>OR</b> ROLE_USER_MANAGEMENT_ADMIN <b>OR</b> ROLE_USER_MANAGEMENT_CREATE)\n<b>AND</b> tenant access to login option is not restricted by management tenant)\n</section>\n",
-        "x-code-samples": [
-          {
-            "lang": "cURL",
-            "source": "curl --location --request GET \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings/{id}\" \\\n--header \"Authorization: Basic <AUTHORIZATION>\" \\\n--header \"Accept: application/json\" \\\n"
-          },
-          {
-            "lang": "C#",
-            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings/{id}\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.GET);\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\nrequest.AddHeader(\"Accept\", \"application/json\");\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
-          },
-          {
-            "lang": "Java",
-            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.get(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings/{id}\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\")\n    .header(\"Accept\", \"application/json\")\n    .asString();\nSystem.out.println(response);\n"
-          },
-          {
-            "lang": "Node.js",
-            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"GET\", \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings/{id}\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\",\n        \"Accept\": \"application/json\"\n    })\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
-          },
-          {
-            "lang": "Python",
-            "source": "import requests\nimport json\n\nurl = \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings/{id}\"\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\",\n  \"Accept\": \"application/json\"\n}\nresponse = requests.request(\"PUT\", url, headers=headers)\nprint(response.text.encode(\"utf8\"))\n"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "A login option access mappings.",
-            "content": {
-              "application/vnd.com.nsn.cumulocity.accessMapping+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/accessMappingWithId"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/unauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/operationNotAuthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/accessMappingNotFound"
-          }
-        }
-      },
-      "put": {
-        "operationId": "putAccessMappingResource",
-        "x-codegen-resource-name": "updateAccessMapping",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/loginOptionTypeOrId"
-          },
-          {
-            "$ref": "#/components/parameters/accessMappingId"
-          },
-          {
-            "$ref": "#/components/parameters/queryParam_terminateUserSessions"
-          },
-          {
-            "$ref": "#/components/parameters/acceptHeader"
-          }
-        ],
-        "tags": [
-          "Login options"
-        ],
-        "security": [
-          {
-            "Basic": []
-          },
-          {
-            "OAI-Secure": []
-          },
-          {
-            "SSO": []
-          }
-        ],
-        "summary": "Update a specific access mapping",
-        "description": "Update a specific access mapping in the login option by a given ID.\n\n<section><h5>Required roles</h5>\n((ROLE_TENANT_ADMIN <b>OR</b> ROLE_TENANT_MANAGEMENT_ADMIN)\n<b>AND</b> tenant access to login option is not restricted by management tenant)\n</section>\n",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/vnd.com.nsn.cumulocity.accessMapping+json": {
-              "example": {
-                "id": "d7dfe6aa-6a7d-494b-9575-7e58c1651b86",
-                "when": {
-                  "operator": "AND",
-                  "childPredicates": [
-                    {
-                      "operator": "EQ",
-                      "parameterPath": "group",
-                      "value": "2",
-                      "childPredicates": []
-                    }
-                  ]
-                },
-                "thenApplications": [
-                  2
-                ],
-                "thenGroups": [
-                  1,
-                  3
-                ]
-              },
-              "schema": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/accessMappingWithId"
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "x-code-samples": [
-          {
-            "lang": "cURL",
-            "source": "curl --location --request PUT \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings/{id}\\\n--header \"Authorization: Basic <AUTHORIZATION>\" \\\n--header \"Accept: application/json\" \\\n--header \"Content-Type: application/json\" \\\n--data-raw '<Payload>'\n"
-          },
-          {
-            "lang": "C#",
-            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings/{id});\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.PUT);\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\nrequest.AddHeader(\"Content-Type\", \"application/json\");\nrequest.AddHeader(\"Accept\", \"application/json\");\nrequest.AddParameter(\"application/json\", \"<Payload>\",  ParameterType.RequestBody);\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
-          },
-          {
-            "lang": "Java",
-            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.put(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings/{id}\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\")\n    .header(\"Content-Type\", \"application/json\")\n    .header(\"Accept\", \"application/json\")\n    .body(\"<Payload>\")\n    .asString();\nSystem.out.println(response);\n"
-          },
-          {
-            "lang": "Node.js",
-            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"PUT\", \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings/{id}\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\",\n        \"Accept\": \"application/json\",\n        \"Content-Type\": \"application/json\"\n    })\n    .send(JSON.stringify( <Payload> ))\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
-          },
-          {
-            "lang": "Python",
-            "source": "import requests\nimport json\n\nurl = \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings/{id}\"\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\",\n  \"Accept\": \"application/json\",\n  \"Content-Type\": \"application/json\"\n}\n\nresponse = requests.request(\"PUT\", url, headers=headers, data = json.dumps(<Payload>))\nprint(response.text.encode(\"utf8\"))\n"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "A access mapping was updated.",
-            "content": {
-              "application/vnd.com.nsn.cumulocity.accessMapping+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/accessMappingWithId"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/unauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/operationNotAuthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/accessMappingNotFound"
-          },
-          "422": {
-            "$ref": "#/components/responses/invalidPayload"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "deleteAccessMappingResource",
-        "x-codegen-resource-name": "deleteAccessMapping",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/loginOptionTypeOrId"
-          },
-          {
-            "$ref": "#/components/parameters/accessMappingId"
-          },
-          {
-            "$ref": "#/components/parameters/queryParam_terminateUserSessions"
-          }
-        ],
-        "tags": [
-          "Login options"
-        ],
-        "security": [
-          {
-            "Basic": []
-          },
-          {
-            "OAI-Secure": []
-          },
-          {
-            "SSO": []
-          }
-        ],
-        "summary": "Delete a specific access mapping",
-        "description": "Delete a specific access mapping in the login option by a given ID.\n\n<section><h5>Required roles</h5>\n((ROLE_TENANT_ADMIN <b>OR</b> ROLE_TENANT_MANAGEMENT_ADMIN)\n<b>AND</b> tenant access to login option is not restricted by management tenant)\n</section>\n",
-        "x-code-samples": [
-          {
-            "lang": "cURL",
-            "source": "curl --location --request DELETE \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings/{id}\" \\\n--header \"Authorization: Basic <AUTHORIZATION>\" \\\n"
-          },
-          {
-            "lang": "C#",
-            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings/{id}\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.DELETE);\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
-          },
-          {
-            "lang": "Java",
-            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.delete(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings/{id}\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\")\n    .asString();\nSystem.out.println(response);\n"
-          },
-          {
-            "lang": "Node.js",
-            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"DELETE\", \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings/{id}\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\"\n    })\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
-          },
-          {
-            "lang": "Python",
-            "source": "import requests\nimport json\n\nurl = \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/accessMappings/{id}\"\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\"\n}\nresponse = requests.request(\"DELETE\", url, headers=headers)\nprint(response.text.encode(\"utf8\"))\n"
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "A access mapping was removed."
-          },
-          "401": {
-            "$ref": "#/components/responses/unauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/operationNotAuthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/accessMappingNotFound"
-          }
-        }
-      }
-    },
-    "/tenant/loginOptions/{typeOrId}/inventoryAccessMappings": {
-      "post": {
-        "operationId": "postInventoryAccessMappingResource",
-        "x-codegen-resource-name": "createInventoryAccessMapping",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/ssoLoginOptionTypeOrId"
-          },
-          {
-            "$ref": "#/components/parameters/queryParam_terminateUserSessions"
-          },
-          {
-            "$ref": "#/components/parameters/acceptHeader"
-          }
-        ],
-        "tags": [
-          "Login options"
-        ],
-        "security": [
-          {
-            "Basic": []
-          },
-          {
-            "OAI-Secure": []
-          },
-          {
-            "SSO": []
-          }
-        ],
-        "summary": "Create an inventory access mapping",
-        "description": "Create an inventory access mapping configuration on your tenant.\n\n<section><h5>Required roles</h5>\nROLE_TENANT_ADMIN <b>OR</b> ROLE_TENANT_MANAGEMENT_ADMIN\n</section>\n",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/vnd.com.nsn.cumulocity.inventoryAccessMapping+json": {
-              "example": {
-                "when": {
-                  "operator": "AND",
-                  "childPredicates": [
-                    {
-                      "childPredicates": [],
-                      "value": "2",
-                      "operator": "EQ",
-                      "parameterPath": "group"
-                    }
-                  ]
-                },
-                "thenInventoryRoles": [
-                  {
-                    "managedObject": "358104",
-                    "roleIds": [
-                      1
-                    ]
-                  }
-                ]
-              },
-              "schema": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/inventoryAccessMapping"
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "x-code-samples": [
-          {
-            "lang": "cURL",
-            "source": "curl --location --request POST \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings\\\n--header \"Authorization: Basic <AUTHORIZATION>\" \\\n--header \"Accept: application/json\" \\\n--header \"Content-Type: application/json\" \\\n--data-raw '<Payload>'\n"
-          },
-          {
-            "lang": "C#",
-            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings);\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.POST);\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\nrequest.AddHeader(\"Content-Type\", \"application/json\");\nrequest.AddHeader(\"Accept\", \"application/json\");\nrequest.AddParameter(\"application/json\", \"<Payload>\",  ParameterType.RequestBody);\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
-          },
-          {
-            "lang": "Java",
-            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.post(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\")\n    .header(\"Content-Type\", \"application/json\")\n    .header(\"Accept\", \"application/json\")\n    .body(\"<Payload>\")\n    .asString();\nSystem.out.println(response);\n"
-          },
-          {
-            "lang": "Node.js",
-            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"POST\", \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\",\n        \"Accept\": \"application/json\",\n        \"Content-Type\": \"application/json\"\n    })\n    .send(JSON.stringify( <Payload> ))\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
-          },
-          {
-            "lang": "Python",
-            "source": "import requests\nimport json\n\nurl = \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings\"\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\",\n  \"Accept\": \"application/json\",\n  \"Content-Type\": \"application/json\"\n}\npayload = json.dumps( <Payload> )\nresponse = requests.request(\"POST\", url, headers=headers, data=payload)\nprint(response.text.encode(\"utf8\"))\n"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "An inventory access mapping was created.",
-            "content": {
-              "application/vnd.com.nsn.cumulocity.inventoryAccessMapping+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/inventoryAccessMappingWithId"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/unauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/operationNotAuthorized"
-          },
-          "422": {
-            "$ref": "#/components/responses/invalidPayload"
-          }
-        }
-      },
-      "get": {
-        "operationId": "getInventoryAccessMappingCollectionResource",
-        "x-codegen-resource-name": "getInventoryAccessMappings",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/ssoLoginOptionTypeOrId"
-          }
-        ],
-        "tags": [
-          "Login options"
-        ],
-        "security": [],
-        "summary": "Retrieve all inventory access mappings",
-        "description": "Retrieve all inventory access mappings available in the login option.\n\n<section><h5>Required roles</h5>\n((ROLE_TENANT_ADMIN <b>OR</b> ROLE_TENANT_MANAGEMENT_READ <b>OR</b> ROLE_USER_MANAGEMENT_ADMIN <b>OR</b> ROLE_USER_MANAGEMENT_CREATE)\n<b>AND</b> tenant access to login option is not restricted by management tenant)\n</section>\n",
-        "x-code-samples": [
-          {
-            "lang": "cURL",
-            "source": "curl --location --request GET \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings\"\n"
-          },
-          {
-            "lang": "C#",
-            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.GET);\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
-          },
-          {
-            "lang": "Java",
-            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.get(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings\").asString();\n"
-          },
-          {
-            "lang": "Node.js",
-            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"GET\", \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings\")\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
-          },
-          {
-            "lang": "Python",
-            "source": "import requests\n\nresponse = requests.request(\"GET\", \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings\")\nprint(response.text.encode(\"utf8\"))\n"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "An inventory access mappings collection.",
-            "content": {
-              "application/vnd.com.nsn.cumulocity.inventoryAccessMappingCollection+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/inventoryAccessMappingCollection"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/unauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/operationNotAuthorized"
-          }
-        }
-      }
-    },
-    "/tenant/loginOptions/{typeOrId}/inventoryAccessMappings/{id}": {
-      "get": {
-        "operationId": "getInventoryAccessMappingResource",
-        "x-codegen-resource-name": "getInventoryAccessMapping",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/loginOptionTypeOrId"
-          },
-          {
-            "$ref": "#/components/parameters/inventoryAccessMappingId"
-          },
-          {
-            "$ref": "#/components/parameters/acceptHeader"
-          }
-        ],
-        "tags": [
-          "Login options"
-        ],
-        "security": [
-          {
-            "Basic": []
-          },
-          {
-            "OAI-Secure": []
-          },
-          {
-            "SSO": []
-          }
-        ],
-        "summary": "Retrieve a specific inventory access mapping",
-        "description": "Retrieve a specific inventory access mapping in the login option by the given ID.\n\n<section><h5>Required roles</h5>\n((ROLE_TENANT_ADMIN <b>OR</b> ROLE_TENANT_MANAGEMENT_READ <b>OR</b> ROLE_USER_MANAGEMENT_ADMIN <b>OR</b> ROLE_USER_MANAGEMENT_CREATE)\n<b>AND</b> tenant access to login option is not restricted by management tenant)\n</section>\n",
-        "x-code-samples": [
-          {
-            "lang": "cURL",
-            "source": "curl --location --request GET \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings/{id}\" \\\n--header \"Authorization: Basic <AUTHORIZATION>\" \\\n--header \"Accept: application/json\" \\\n"
-          },
-          {
-            "lang": "C#",
-            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings/{id}\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.GET);\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\nrequest.AddHeader(\"Accept\", \"application/json\");\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
-          },
-          {
-            "lang": "Java",
-            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.get(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings/{id}\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\")\n    .header(\"Accept\", \"application/json\")\n    .asString();\nSystem.out.println(response);\n"
-          },
-          {
-            "lang": "Node.js",
-            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"GET\", \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings/{id}\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\",\n        \"Accept\": \"application/json\"\n    })\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
-          },
-          {
-            "lang": "Python",
-            "source": "import requests\nimport json\n\nurl = \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings/{id}\"\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\",\n  \"Accept\": \"application/json\"\n}\nresponse = requests.request(\"GET\", url, headers=headers)\nprint(response.text.encode(\"utf8\"))\n"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "An inventory access mapping.",
-            "content": {
-              "application/vnd.com.nsn.cumulocity.inventoryAccessMapping+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/inventoryAccessMappingWithId"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/unauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/operationNotAuthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/inventoryAccessMappingNotFound"
-          }
-        }
-      },
-      "put": {
-        "operationId": "putInventoryAccessMappingResource",
-        "x-codegen-resource-name": "updateInventoryAccessMapping",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/loginOptionTypeOrId"
-          },
-          {
-            "$ref": "#/components/parameters/inventoryAccessMappingId"
-          },
-          {
-            "$ref": "#/components/parameters/queryParam_terminateUserSessions"
-          },
-          {
-            "$ref": "#/components/parameters/acceptHeader"
-          }
-        ],
-        "tags": [
-          "Login options"
-        ],
-        "security": [
-          {
-            "Basic": []
-          },
-          {
-            "OAI-Secure": []
-          },
-          {
-            "SSO": []
-          }
-        ],
-        "summary": "Update a specific inventory access mapping",
-        "description": "Update a specific inventory access mapping in the login option by a given ID.\n\n<section><h5>Required roles</h5>\n((ROLE_TENANT_ADMIN <b>OR</b> ROLE_TENANT_MANAGEMENT_ADMIN)\n<b>AND</b> tenant access to login option is not restricted by management tenant)\n</section>\n",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/vnd.com.nsn.cumulocity.inventoryAccessMapping+json": {
-              "example": {
-                "id": "5e7b7568-1f85-4e89-ae98-d7fbf4852fad",
-                "when": {
-                  "operator": "AND",
-                  "childPredicates": [
-                    {
-                      "childPredicates": [],
-                      "value": "2",
-                      "operator": "EQ",
-                      "parameterPath": "group"
-                    }
-                  ]
-                },
-                "thenInventoryRoles": [
-                  {
-                    "managedObject": "358104",
-                    "roleIds": [
-                      1
-                    ]
-                  }
-                ]
-              },
-              "schema": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/inventoryAccessMappingWithId"
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "x-code-samples": [
-          {
-            "lang": "cURL",
-            "source": "curl --location --request PUT \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings/{id}\\\n--header \"Authorization: Basic <AUTHORIZATION>\" \\\n--header \"Accept: application/json\" \\\n--header \"Content-Type: application/json\" \\\n--data-raw '<Payload>'\n"
-          },
-          {
-            "lang": "C#",
-            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings/{id});\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.PUT);\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\nrequest.AddHeader(\"Content-Type\", \"application/json\");\nrequest.AddHeader(\"Accept\", \"application/json\");\nrequest.AddParameter(\"application/json\", \"<Payload>\",  ParameterType.RequestBody);\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
-          },
-          {
-            "lang": "Java",
-            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.put(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings/{id}\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\")\n    .header(\"Content-Type\", \"application/json\")\n    .header(\"Accept\", \"application/json\")\n    .body(\"<Payload>\")\n    .asString();\nSystem.out.println(response);\n"
-          },
-          {
-            "lang": "Node.js",
-            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"PUT\", \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings/{id}\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\",\n        \"Accept\": \"application/json\",\n        \"Content-Type\": \"application/json\"\n    })\n    .send(JSON.stringify( <Payload> ))\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
-          },
-          {
-            "lang": "Python",
-            "source": "import requests\nimport json\n\nurl = \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings/{id}\"\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\",\n  \"Accept\": \"application/json\",\n  \"Content-Type\": \"application/json\"\n}\npayload = json.dumps( <Payload> )\nresponse = requests.request(\"PUT\", url, headers=headers, data=payload)\nprint(response.text.encode(\"utf8\"))\n"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "An inventory access mapping was updated.",
-            "content": {
-              "application/vnd.com.nsn.cumulocity.inventoryAccessMapping+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/inventoryAccessMappingWithId"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/unauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/operationNotAuthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/inventoryAccessMappingNotFound"
-          },
-          "422": {
-            "$ref": "#/components/responses/invalidPayload"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "deleteInventoryAccessMappingResource",
-        "x-codegen-resource-name": "deleteInventoryAccessMapping",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/loginOptionTypeOrId"
-          },
-          {
-            "$ref": "#/components/parameters/inventoryAccessMappingId"
-          },
-          {
-            "$ref": "#/components/parameters/queryParam_terminateUserSessions"
-          }
-        ],
-        "tags": [
-          "Login options"
-        ],
-        "security": [
-          {
-            "Basic": []
-          },
-          {
-            "OAI-Secure": []
-          },
-          {
-            "SSO": []
-          }
-        ],
-        "summary": "Delete a specific inventory access mapping",
-        "description": "Delete a specific inventory access mapping in the login option by a given ID.\n\n<section><h5>Required roles</h5>\n((ROLE_TENANT_ADMIN <b>OR</b> ROLE_TENANT_MANAGEMENT_ADMIN)\n<b>AND</b> tenant access to login option is not restricted by management tenant)\n</section>\n",
-        "x-code-samples": [
-          {
-            "lang": "cURL",
-            "source": "curl --location --request DELETE \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings/{id}\" \\\n--header \"Authorization: Basic <AUTHORIZATION>\" \\\n"
-          },
-          {
-            "lang": "C#",
-            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings/{id}\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.DELETE);\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
-          },
-          {
-            "lang": "Java",
-            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.delete(\"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings/{id}\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\")\n    .asString();\nSystem.out.println(response);\n"
-          },
-          {
-            "lang": "Node.js",
-            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"DELETE\", \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings/{id}\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\"\n    })\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
-          },
-          {
-            "lang": "Python",
-            "source": "import requests\nimport json\n\nurl = \"https://<TENANT_DOMAIN>/tenant/loginOptions/{typeOrId}/inventoryAccessMappings/{id}\"\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\"\n}\nresponse = requests.request(\"DELETE\", url, headers=headers)\nprint(response.text.encode(\"utf8\"))\n"
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "An inventory access mapping was removed."
-          },
-          "401": {
-            "$ref": "#/components/responses/unauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/operationNotAuthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/inventoryAccessMappingNotFound"
-          }
-        }
-      }
-    },
     "/tenant/loginOptions/{typeOrId}/restrict": {
       "put": {
         "operationId": "putAccessLoginOptionResource",
@@ -19695,7 +18727,7 @@
           }
         ],
         "summary": "Create Certificate Authority(CA) for a tenant with CN as tenantID",
-        "description": "Create a key pair and self-sign a certificate with <tenantID> as the Common Name (CN).\nStore the private key in an encrypted tenant option.\nStore the certificate in the trusted certificate repository with auto-registration checked by default. The devices can be registered automatically.\nIf the CA certificate is removed from the trusted certificate list, corresponding public and private key removed automatically from the database collection.\nIf a CA is already present, return a message indicating the CA is already present.\n\n<section><h5>Required roles</h5>\nROLE_TENANT_MANAGEMENT_ADMIN\nROLE_TENANT_ADMIN\n</section>\n",
+        "description": "Create a key pair and self-sign a certificate with <tenantID> as the Common Name (CN).\nStore the private key in an encrypted tenant option.\nStore the certificate in the trusted certificate repository with auto-registration checked by default. The devices can be registered automatically.\nIf the CA certificate is removed from the trusted certificate list, corresponding public and private key removed automatically from the database collection.\nIf a CA is already present, return a message indicating the CA is already present.\n\n> **⚠️ Important:** Note that it is possible to call this endpoint without the ROLE_TENANT_MANAGEMENT_ADMIN or ROLE_TENANT_ADMIN role. Otherwise, if the the user does not have the required role, an HTTP response 403 will be returned.\n        <section><h5>Required roles</h5>\n        ROLE_TENANT_MANAGEMENT_ADMIN\n        ROLE_TENANT_ADMIN\n        </section>\n",
         "x-code-samples": [
           {
             "lang": "cURL",
@@ -19785,7 +18817,7 @@
           }
         ],
         "summary": "Renew Certificate Authority(CA) for a tenant with existing public and private keys.",
-        "description": "Renew the Certificate Authority (CA) for a tenant using existing public and private keys.\nThe renewal will fail if either the public or private key is missing.\nIf no CA exists, or if the current CA has more than 18 months remaining before expiration, a message will be returned indicating that the CA is either not present or not eligible for renewal.\n\n<section><h5>Required roles</h5>\nROLE_TENANT_MANAGEMENT_ADMIN\nROLE_TENANT_ADMIN\n</section>\n",
+        "description": "Renew the Certificate Authority (CA) for a tenant using existing public and private keys.\nThe renewal will fail if either the public or private key is missing.\nIf no CA exists, or if the current CA has more than 18 months remaining before expiration, a message will be returned indicating that the CA is either not present or not eligible for renewal.\n\n> **⚠️ Important:** Note that it is possible to call this endpoint without the ROLE_TENANT_MANAGEMENT_ADMIN or ROLE_TENANT_ADMIN role. Otherwise, if the the user does not have the required role, an HTTP response 403 will be returned.\n        <section><h5>Required roles</h5>\n        ROLE_TENANT_MANAGEMENT_ADMIN\n        ROLE_TENANT_ADMIN\n        </section>\n",
         "x-code-samples": [
           {
             "lang": "cURL",
@@ -20463,39 +19495,6 @@
           "example": "OAUTH2"
         }
       },
-      "ssoLoginOptionTypeOrId": {
-        "name": "typeOrId",
-        "in": "path",
-        "description": "The type or ID of the login option. The type's value is case insensitive and should be `OAUTH2`.",
-        "required": true,
-        "schema": {
-          "type": "string",
-          "minLength": 1,
-          "example": "OAUTH2"
-        }
-      },
-      "accessMappingId": {
-        "name": "id",
-        "in": "path",
-        "description": "Unique identifier of the access mapping.",
-        "required": true,
-        "schema": {
-          "type": "string",
-          "minLength": 1,
-          "example": "d7dfe6aa-6a7d-494b-9575-7e58c1651b86"
-        }
-      },
-      "inventoryAccessMappingId": {
-        "name": "id",
-        "in": "path",
-        "description": "Unique identifier of the inventory access mapping.",
-        "required": true,
-        "schema": {
-          "type": "string",
-          "minLength": 1,
-          "example": "5e7b7568-1f85-4e89-ae98-d7fbf4852fad"
-        }
-      },
       "featureKey": {
         "name": "featureKey",
         "description": "A unique key of the feature toggle.",
@@ -21035,16 +20034,6 @@
           "type": "string",
           "minLength": 1,
           "example": "tag1"
-        }
-      },
-      "queryParam_application_clearConflictingOptions": {
-        "name": "clearConflictingOptions",
-        "in": "query",
-        "description": "If set to true and a tenant option category conflict is detected during microservice upload (i.e., the microservice attempts to use a category that already contains existing tenant options), all tenant options within the specified category will be removed prior to persisting the application. Tenant option conflicts are always validated during upload, regardless of the flag value.",
-        "schema": {
-          "type": "boolean",
-          "default": false,
-          "example": true
         }
       },
       "queryParam_audit_application": {
@@ -22743,36 +21732,6 @@
           }
         }
       },
-      "accessMappingNotFound": {
-        "description": "Access mapping not found.",
-        "content": {
-          "application/vnd.com.nsn.cumulocity.error+json": {
-            "schema": {
-              "$ref": "#/components/schemas/error"
-            },
-            "example": {
-              "error": "tenants/Not Found",
-              "message": "Cannot find mapping with id d7dfe6aa-6a7d-494b-9575-7e58c1651b86",
-              "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting"
-            }
-          }
-        }
-      },
-      "inventoryAccessMappingNotFound": {
-        "description": "Inventory access mapping not found.",
-        "content": {
-          "application/vnd.com.nsn.cumulocity.error+json": {
-            "schema": {
-              "$ref": "#/components/schemas/error"
-            },
-            "example": {
-              "error": "tenants/Not Found",
-              "message": "Cannot find inventory access mapping with id 5e7b7568-1f85-4e89-ae98-d7fbf4852fad",
-              "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting"
-            }
-          }
-        }
-      },
       "optionCollectionResourceFound": {
         "description": "The request has succeeded and the options are sent in the response.",
         "content": {
@@ -23455,124 +22414,6 @@
                 "$ref": "#/components/schemas/web_application_manifest"
               }
             ]
-          },
-          "roles": {
-            "$ref": "#/components/schemas/application_roles"
-          },
-          "requiredRoles": {
-            "$ref": "#/components/schemas/application_required_roles"
-          },
-          "breadcrumbs": {
-            "description": "A flag to indicate if the application has a breadcrumbs navigation on the UI.\n> **&#9432; Info:** This property is specific to the web application type.\n",
-            "type": "boolean"
-          },
-          "contentSecurityPolicy": {
-            "description": "The content security policy of the application.\n> **&#9432; Info:** This property is specific to the web application type.\n",
-            "type": "string"
-          },
-          "dynamicOptionsUrl": {
-            "description": "A URL to a JSON object with dynamic content options.\n> **&#9432; Info:** This property is specific to the web application type.\n",
-            "type": "string",
-            "example": "/apps/public/public-options/options.json"
-          },
-          "globalTitle": {
-            "description": "The global title of the application.\n> **&#9432; Info:** This property is specific to the web application type.\n",
-            "type": "string",
-            "example": "Cumulocity"
-          },
-          "legacy": {
-            "description": "A flag that shows if the application is a legacy application or not.\n> **&#9432; Info:** This property is specific to the web application type.\n",
-            "type": "boolean"
-          },
-          "rightDrawer": {
-            "description": "A flag to indicate if the application uses the UI context menu on the right side.\n> **&#9432; Info:** This property is specific to the web application type.\n",
-            "type": "boolean"
-          },
-          "upgrade": {
-            "description": "A flag that shows if the application is hybrid and using Angular and AngularJS simultaneously.\n> **&#9432; Info:** This property is specific to the web application type.\n",
-            "type": "boolean"
-          },
-          "activeVersionId": {
-            "description": "The active version ID of the application. For microservice applications the active version ID is the microservice manifest version ID.",
-            "type": "string",
-            "readOnly": true
-          },
-          "resourcesUrl": {
-            "description": "URL to the application base directory hosted on an external server. Only present in legacy hosted applications.",
-            "type": "string",
-            "deprecated": true,
-            "readOnly": true
-          }
-        },
-        "example": {
-          "availability": "PRIVATE",
-          "contextPath": "myapplication",
-          "id": "20200301",
-          "key": "my-application-key",
-          "name": "my-application",
-          "owner": {
-            "self": "https://<TENANT_DOMAIN>/tenant/tenants/t07007007",
-            "tenant": {
-              "id": "t07007007"
-            }
-          },
-          "self": "https://<TENANT_DOMAIN>/application/applications/20200301",
-          "type": "HOSTED"
-        }
-      },
-      "application_no_microservice_manifest": {
-        "type": "object",
-        "properties": {
-          "availability": {
-            "description": "Application access level for other tenants.",
-            "type": "string",
-            "enum": [
-              "MARKET",
-              "PRIVATE"
-            ],
-            "default": "PRIVATE"
-          },
-          "contextPath": {
-            "description": "The context path in the URL makes the application accessible. Mandatory when the type of the application is `HOSTED`.",
-            "type": "string",
-            "minLength": 1
-          },
-          "description": {
-            "description": "Description of the application.",
-            "type": "string"
-          },
-          "id": {
-            "description": "Unique identifier of the application.",
-            "type": "string",
-            "readOnly": true
-          },
-          "key": {
-            "description": "Applications, regardless of their form, are identified by an application key.",
-            "type": "string",
-            "minLength": 1
-          },
-          "name": {
-            "description": "Name of the application.",
-            "type": "string",
-            "minLength": 1
-          },
-          "owner": {
-            "$ref": "#/components/schemas/application_owner"
-          },
-          "self": {
-            "$ref": "#/components/schemas/desc_self"
-          },
-          "type": {
-            "description": "The type of the application.",
-            "type": "string",
-            "enum": [
-              "EXTERNAL",
-              "HOSTED",
-              "MICROSERVICE"
-            ]
-          },
-          "manifest": {
-            "$ref": "#/components/schemas/web_application_manifest"
           },
           "roles": {
             "$ref": "#/components/schemas/application_roles"
@@ -26505,198 +25346,6 @@
           }
         }
       },
-      "accessMappingCollection": {
-        "description": "All available access mappings in the login option.",
-        "type": "object",
-        "properties": {
-          "accessMappings": {
-            "description": "An array containing the available access mappings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/accessMappingWithId"
-            }
-          },
-          "self": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/desc_self"
-              }
-            ],
-            "example": "https://<TENANT_DOMAIN>/tenant/loginOptions/OAUTH2/accessMappings"
-          }
-        }
-      },
-      "accessMappingWithId": {
-        "allOf": [
-          {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string",
-                "description": "Unique identifier of this access mapping."
-              }
-            },
-            "example": {
-              "id": "d7dfe6aa-6a7d-494b-9575-7e58c1651b86"
-            }
-          },
-          {
-            "$ref": "#/components/schemas/accessMapping"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "self": {
-                "$ref": "#/components/schemas/desc_self"
-              }
-            },
-            "example": {
-              "self": "https://<TENANT_DOMAIN>/tenant/loginOptions/OAUTH2/accessMappings/d7dfe6aa-6a7d-494b-9575-7e58c1651b86"
-            }
-          }
-        ]
-      },
-      "accessMapping": {
-        "description": "Represents information of mapping access to groups and applications.",
-        "type": "object",
-        "properties": {
-          "when": {
-            "description": "Defines the condition that must be satisfied for this access mapping to apply.",
-            "type": "object",
-            "properties": {
-              "operator": {
-                "description": "Logical operator used to combine all child predicates (e.g. AND, OR).",
-                "type": "string",
-                "example": "AND"
-              },
-              "childPredicates": {
-                "description": "List of predicates that are evaluated and combined using the operator.",
-                "type": "object",
-                "$ref": "#/components/schemas/JSONPredicateRepresentation"
-              }
-            }
-          },
-          "thenApplications": {
-            "description": "List of the applications' identifiers.",
-            "type": "array",
-            "items": {
-              "type": "integer"
-            },
-            "example": [
-              2
-            ]
-          },
-          "thenGroups": {
-            "description": "List of the groups' identifiers.",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "example": [
-                1,
-                3
-              ]
-            }
-          }
-        }
-      },
-      "inventoryAccessMappingCollection": {
-        "description": "All available inventory access mappings in the login option.",
-        "type": "object",
-        "properties": {
-          "inventoryAccessMappings": {
-            "description": "An array containing the available inventory access mappings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/inventoryAccessMappingWithId"
-            }
-          },
-          "self": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/desc_self"
-              }
-            ],
-            "example": "https://<TENANT_DOMAIN>/tenant/loginOptions/OAUTH2/inventoryAccessMappings"
-          }
-        }
-      },
-      "inventoryAccessMappingWithId": {
-        "allOf": [
-          {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string",
-                "description": "Unique identifier of this inventory mapping."
-              }
-            },
-            "example": {
-              "id": "5e7b7568-1f85-4e89-ae98-d7fbf4852fad"
-            }
-          },
-          {
-            "$ref": "#/components/schemas/inventoryAccessMapping"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "self": {
-                "$ref": "#/components/schemas/desc_self"
-              }
-            },
-            "example": {
-              "self": "https://<TENANT_DOMAIN>/tenant/loginOptions/OAUTH2/inventoryAccessMappings/5e7b7568-1f85-4e89-ae98-d7fbf4852fad"
-            }
-          }
-        ]
-      },
-      "inventoryAccessMapping": {
-        "description": "Represents information of mapping access to inventory roles.",
-        "type": "object",
-        "properties": {
-          "when": {
-            "description": "Defines the condition that must be satisfied for this access mapping to apply.",
-            "type": "object",
-            "properties": {
-              "operator": {
-                "description": "Logical operator used to combine all child predicates (e.g. AND, OR).",
-                "type": "string",
-                "example": "AND"
-              },
-              "childPredicates": {
-                "description": "List of predicates that are evaluated and combined using the operator.",
-                "type": "object",
-                "$ref": "#/components/schemas/JSONPredicateRepresentation"
-              }
-            }
-          },
-          "thenInventoryRoles": {
-            "description": "List of the OAuth inventory assignments.",
-            "type": "array",
-            "items": {
-              "description": "Represents inventory roles for a specific device group.",
-              "type": "object",
-              "properties": {
-                "managedObject": {
-                  "description": "A unique identifier for the managed object for which the roles are assigned.",
-                  "type": "string",
-                  "example": "358104"
-                },
-                "roleIds": {
-                  "description": "List of the inventory roles' identifiers.",
-                  "type": "array",
-                  "items": {
-                    "type": "integer"
-                  },
-                  "example": [
-                    1
-                  ]
-                }
-              }
-            }
-          }
-        }
-      },
       "authConfig": {
         "description": "Parameters determining the authentication process.",
         "type": "object",
@@ -26816,14 +25465,61 @@
                     "description": "Represents rules used to assign groups and applications.",
                     "type": "array",
                     "items": {
-                      "$ref": "#/components/schemas/accessMappingWithId"
+                      "description": "Represents information of mapping access to groups and applications.",
+                      "type": "object",
+                      "properties": {
+                        "when": {
+                          "$ref": "#/components/schemas/JSONPredicateRepresentation"
+                        },
+                        "thenApplications": {
+                          "description": "List of the applications' identifiers.",
+                          "type": "array",
+                          "items": {
+                            "type": "integer"
+                          }
+                        },
+                        "thenGroups": {
+                          "description": "List of the groups' identifiers.",
+                          "type": "array",
+                          "items": {
+                            "type": "integer"
+                          }
+                        }
+                      }
                     }
                   },
                   "inventoryMappings": {
                     "description": "Represents rules used to assign inventory roles.",
                     "type": "array",
                     "items": {
-                      "$ref": "#/components/schemas/inventoryAccessMappingWithId"
+                      "description": "Represents information of mapping access to inventory roles.",
+                      "type": "object",
+                      "properties": {
+                        "when": {
+                          "$ref": "#/components/schemas/JSONPredicateRepresentation"
+                        },
+                        "thenInventoryRoles": {
+                          "description": "List of the OAuth inventory assignments.",
+                          "type": "array",
+                          "items": {
+                            "description": "Represents inventory roles for a specific device group.",
+                            "type": "object",
+                            "properties": {
+                              "managedObject": {
+                                "description": "A unique identifier for the managed object for which the roles are assigned.",
+                                "type": "string"
+                              },
+                              "roleIds": {
+                                "description": "List of the inventory roles' identifiers.",
+                                "type": "array",
+                                "items": {
+                                  "type": "integer"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
                     }
                   }
                 }
@@ -26968,8 +25664,7 @@
             "description": "SSO specific. Points to the field in the obtained JWT access token that should be used as the username in the Cumulocity platform.",
             "properties": {
               "constantValue": {
-                "description": "Used only if `useConstantValue` is set to `true`. It cannot contain whitespace, slashes nor any of `+$:` characters.",
-                "maxLength": 1000,
+                "description": "Used only when `useConstantValue` is set to `true`.",
                 "type": "string"
               },
               "jwtField": {
@@ -27007,8 +25702,7 @@
                 "type": "object",
                 "properties": {
                   "constantValue": {
-                    "description": "Used only if `useConstantValue` is set to `true`. It cannot contain whitespace, slashes nor any of `+$:` characters.",
-                    "maxLength": 1000,
+                    "description": "Used only if `useConstantValue` is set to `true`.",
                     "type": "string"
                   },
                   "jwtField": {
@@ -27121,7 +25815,7 @@
               "AND",
               "OR"
             ],
-            "example": "EQ"
+            "example": "AND"
           },
           "parameterPath": {
             "description": "Path to the claim from the JWT access token from the external authorization server.",
@@ -29706,33 +28400,6 @@
             "description": "Access token generated by the Cumulocity platform.",
             "type": "string",
             "example": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJhZGY0ODI3Yi00ZjZjLTRiMTktYTJmYy0x...S-04HPk3G5OezjCP8oQUAIG87wd-fHyJ2oKSuetWFWpUSBPzJzl_73_3yauIlplHorlSoQ"
-          }
-        }
-      },
-      "deviceAccessToken": {
-        "description": "OAI-Secure access token for devices.",
-        "type": "object",
-        "properties": {
-          "accessToken": {
-            "description": "Access token generated by the Cumulocity platform.",
-            "type": "string",
-            "example": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJhZGY0ODI3Yi00ZjZjLTRiMTktYTJmYy0x...S-04HPk3G5OezjCP8oQUAIG87wd-fHyJ2oKSuetWFWpUSBPzJzl_73_3yauIlplHorlSoQ"
-          },
-          "idToken": {
-            "type": "string",
-            "example": null
-          },
-          "expiresIn": {
-            "type": "integer",
-            "example": null
-          },
-          "refreshToken": {
-            "type": "string",
-            "example": null
-          },
-          "info": {
-            "type": "object",
-            "example": null
           }
         }
       },

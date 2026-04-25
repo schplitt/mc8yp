@@ -1,12 +1,17 @@
 import type { McpServer } from 'tmcp'
 import { definePrompt } from 'tmcp/prompt'
 import { prompt } from 'tmcp/utils'
+import { getCoreOpenApiLabel } from '#core-openapi'
 import type { C8yMcpCustomContext } from '../types/mcp-context'
 
 function getRuntimeSection(): string {
   return globalThis.executionEnvironment === 'cli'
     ? '## CLI Runtime\nUse `list-credentials` to see available tenants when needed. Then pass the chosen `tenantUrl` to `execute`.'
     : '## Server Runtime\nThis deployed MCP server uses the current tenant and the service user attached to this MCP connection. Do not pass tenant-specific credentials or tenant URLs yourself.'
+}
+
+function getCoreOpenApiSection(): string {
+  return `## Core OpenAPI Snapshot\nThe query tool currently exposes the ${getCoreOpenApiLabel()} core OpenAPI snapshot.`
 }
 
 export function createCodeModeGuidePrompt(server: McpServer<undefined, C8yMcpCustomContext>) {
@@ -25,7 +30,7 @@ export function createCodeModeGuidePrompt(server: McpServer<undefined, C8yMcpCus
 You have exactly two MCP tools available.
 
 ## query
-Use \`query\` when you need to inspect the OpenAPI spec.
+Use \`query\` when you need to inspect the core OpenAPI spec.
 
 - Input: a JavaScript function expression
 - The top-level binding \`spec\` is available automatically
@@ -131,6 +136,8 @@ async () => {
 \`\`\`
 
 ${getRuntimeSection()}
+
+${getCoreOpenApiSection()}
 
 ## Working Pattern
 1. Use \`query\` to find the right endpoint, parameters, and response shape.
