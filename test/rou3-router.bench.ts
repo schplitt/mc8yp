@@ -1,5 +1,5 @@
 /**
- * Benchmark: rou3 router vs naive scan for OpenAPI path matching
+ * Benchmark: rou3 router vs custom segment matcher vs naive scan for OpenAPI path matching
  *
  * Background
  * ----------
@@ -10,18 +10,24 @@
  *
  * The question this benchmark answers
  * ------------------------------------
- * Is the "build router once, do many fast lookups" strategy with rou3 worth it,
- * or is a naive per-lookup scan competitive enough?
+ * Is the "build router once, do many fast lookups" strategy with rou3 worth it
+ * compared to the repo's own custom segment matcher?  Or is a naive scan
+ * competitive enough?
  *
  * Scenarios
  * ---------
- *   rou3 router build from spec     — setup cost: build a fresh rou3 router from
- *                                     all spec routes each iteration
- *   rou3 prebuilt router lookup     — hot-path lookup against an already-built router
- *   naive scan per lookup           — iterate all spec paths on every lookup,
- *                                     re-derive a regex from each pattern on the fly
- *   precompiled patterns lookup     — iterate all spec paths on every lookup,
- *                                     but patterns are compiled to regexes upfront
+ *   rou3 router build from spec          — setup cost: build a fresh rou3 router
+ *                                          from all spec routes each iteration
+ *   rou3 prebuilt router lookup          — hot-path lookup against an already-built
+ *                                          router
+ *   custom segment matcher (repo)        — uses the repo's own compileRestrictionRule /
+ *                                          matchesCompiledRule from restriction-core,
+ *                                          with OpenAPI {param} converted to * segments,
+ *                                          rules compiled once and reused
+ *   naive scan per lookup                — iterate all spec paths on every lookup,
+ *                                          re-derive a regex from each pattern on the fly
+ *   precompiled patterns lookup          — iterate all spec paths on every lookup,
+ *                                          but patterns are compiled to regexes upfront
  *
  * How to run
  * ----------
@@ -29,16 +35,22 @@
  *
  * Interpreting results
  * --------------------
- * If "rou3 prebuilt router lookup" is significantly faster than both scan
- * approaches, the "build once, match many" strategy pays off for workloads
- * with many lookups.  If the scan approaches are competitive, a router may
- * be unnecessary complexity for this spec size.
+ * If "rou3 prebuilt router lookup" is significantly faster than the custom matcher
+ * and scan approaches, the "build once, match many" router strategy clearly pays off.
+ * If the custom segment matcher is competitive, the existing code may already be
+ * good enough for this spec size.
  */
 
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { bench, describe } from 'vitest'
 import { addRoute, createRouter, findRoute } from 'rou3'
+import {
+  compileRestrictionRule,
+  matchesCompiledRule,
+  normalizeRestrictionMatchPath,
+} from '../src/utils/restriction-core'
+import type { CompiledRestrictionRule } from '../src/utils/restriction-core'
 
 // ---------------------------------------------------------------------------
 // Load the real bundled Cumulocity OpenAPI spec
@@ -98,6 +110,42 @@ function buildRou3Router() {
 const PREBUILT_ROUTER = buildRou3Router()
 
 // ---------------------------------------------------------------------------
+// Custom segment matcher (repo's restriction-core) adapted for OpenAPI lookup
+//
+// OpenAPI {param} segments are converted to the wildcard character "*" so the
+// existing compileRestrictionSegment / matchCompiledSegments logic can match
+// concrete path segments against parameterised patterns.
+// ---------------------------------------------------------------------------
+
+type CustomMatcherEntry = {
+  method: string
+  compiled: CompiledRestrictionRule
+  path: string
+  op: OpenApiOperation
+}
+
+function openApiPathToRestrictionPattern(openApiPath: string): string {
+  return openApiPath.replace(/\{[^}]+\}/g, '*').split('?')[0] ?? ''
+}
+
+function buildCustomMatcherIndex(): CustomMatcherEntry[] {
+  const index: CustomMatcherEntry[] = []
+  for (const [path, pathItem] of Object.entries(SPEC.paths)) {
+    const pattern = openApiPathToRestrictionPattern(path)
+    for (const method of OPENAPI_METHODS) {
+      const op = pathItem[method]
+      if (op && typeof op === 'object') {
+        const rule = { method: method.toUpperCase(), pathPattern: pattern, source: pattern }
+        index.push({ method: method.toUpperCase(), compiled: compileRestrictionRule(rule), path, op })
+      }
+    }
+  }
+  return index
+}
+
+const CUSTOM_MATCHER_INDEX = buildCustomMatcherIndex()
+
+// ---------------------------------------------------------------------------
 // Pre-compile path patterns for the scan-based baseline
 // ---------------------------------------------------------------------------
 
@@ -146,7 +194,7 @@ const LOOKUP_CASES: { method: string, path: string }[] = [
 // Benchmarks
 // ---------------------------------------------------------------------------
 
-describe('rou3 router vs naive scan — OpenAPI path matching', () => {
+describe('rou3 router vs custom segment matcher vs naive scan — OpenAPI path matching', () => {
   bench('rou3 router build from spec (setup cost)', () => {
     buildRou3Router()
   })
@@ -154,6 +202,18 @@ describe('rou3 router vs naive scan — OpenAPI path matching', () => {
   bench('rou3 prebuilt router lookup (hot path)', () => {
     for (const { method, path } of LOOKUP_CASES) {
       findRoute(PREBUILT_ROUTER, method, path)
+    }
+  })
+
+  bench('custom segment matcher — repo restriction-core (prebuilt index)', () => {
+    for (const { method, path } of LOOKUP_CASES) {
+      const normalizedPath = normalizeRestrictionMatchPath(path)
+      const segments = normalizedPath === '/' ? [] : normalizedPath.slice(1).split('/')
+      for (const entry of CUSTOM_MATCHER_INDEX) {
+        if (entry.method === method && matchesCompiledRule(entry.compiled, method, segments)) {
+          break
+        }
+      }
     }
   })
 
