@@ -67,6 +67,7 @@
     "@schplitt/eslint-config": "^1.4.0",
     "@types/node": "^24.12.2",
     "eslint": "^9.39.4",
+    "rou3": "catalog:",
     "tsdown": "^0.21.9",
     "typescript": "^5.9.3",
     "vitest": "^4.1.4"
