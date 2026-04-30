@@ -1,14 +1,13 @@
-
+catalog:
+  rou3: 0.8.1
 catalogMode: prefer
-
-shellEmulator: true
-
-
-trustPolicy: no-downgrade
-
 
 onlyBuiltDependencies:
   - better-sqlite3
   - cbor-extract
   - esbuild
   - isolated-vm
+
+shellEmulator: true
+
+trustPolicy: no-downgrade
