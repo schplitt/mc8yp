@@ -87,10 +87,7 @@ export function parseRestrictionRule(input: string): RestrictionRule {
 }
 
 export function matchesRestrictionPath(path: string, pattern: string): boolean {
-  if (matchesGlob(path, pattern)) return true
-  // matchesGlob requires at least one path segment after /**; also check with
-  // a trailing slash so that patterns like /foo/** match /foo itself.
-  return pattern.endsWith('/**') && matchesGlob(`${path}/`, pattern)
+  return matchesGlob(path, pattern)
 }
 
 export function parseRestrictionSources(restrictionSources: readonly string[]): RestrictionRule[] {

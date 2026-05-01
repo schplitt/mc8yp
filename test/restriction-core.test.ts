@@ -71,11 +71,11 @@ const MATCH_CASES = [
     expected: false,
   },
   {
-    description: 'methodless recursive wildcard matches the top-level inventory path',
+    description: 'methodless recursive wildcard does not match the top-level inventory path without a trailing segment',
     rule: '/inventory/**',
     method: 'DELETE',
     path: '/inventory',
-    expected: true,
+    expected: false,
   },
   {
     description: 'method-specific rules only match the configured method',
@@ -194,8 +194,18 @@ describe('restriction core helpers', () => {
     expect(matchesRestrictionPath('/inventory/managedObjects', '/inventory/m*')).toBe(true)
     expect(matchesRestrictionPath('/inventory/events', '/inventory/m*')).toBe(false)
     expect(matchesRestrictionPath('/inventory/managedObjects/123', '/inventory/**')).toBe(true)
-    expect(matchesRestrictionPath('/inventory', '/inventory/**')).toBe(true)
+    expect(matchesRestrictionPath('/inventory', '/inventory/**')).toBe(false)
     expect(matchesRestrictionPath('/inventory/child', '/inventory/**/child')).toBe(true)
+  })
+
+  it('matches exact-path and descendant-path rules separately under standard glob semantics', () => {
+    const rules = parseRestrictionSources([
+      '/inventory',
+      '/inventory/**',
+    ])
+
+    expect(findBlockedRestriction(rules, 'GET', '/inventory')?.source).toBe('/inventory')
+    expect(findBlockedRestriction(rules, 'GET', '/inventory/managedObjects')?.source).toBe('/inventory/**')
   })
 
   it('matches wildcard rules using Node.js path.matchesGlob semantics', () => {

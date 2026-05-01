@@ -170,15 +170,17 @@ Restrictions are deny rules that block specific API operations. They can be appl
 
 - **Without a method prefix** — blocks all HTTP methods for matching paths
 - **With a method prefix** — blocks only that method (e.g. `GET:`, `DELETE:`, `POST:`)
-- **Path patterns** support `*` (single segment wildcard) and `**` (recursive wildcard)
+- **Path patterns** use standard Node.js `path.matchesGlob()` semantics
+- `*` matches within a single path segment; `**` matches descendant paths
+- `/inventory/**` matches `/inventory/...` but **not** `/inventory` itself; use both `/inventory` and `/inventory/**` when you need the base path and all descendants
 - Query strings and fragments are not allowed in patterns
 
 ### Examples
 
 | Rule                             | Effect                                              |
 | -------------------------------- | --------------------------------------------------- |
-| `/inventory/**`                  | Block all methods on all inventory paths            |
-| `DELETE:/inventory/**`           | Block only DELETE on inventory paths                |
+| `/inventory/**`                  | Block all methods on descendant inventory paths     |
+| `DELETE:/inventory/**`           | Block only DELETE on descendant inventory paths     |
 | `/alarm/alarms`                  | Block all methods on the exact path `/alarm/alarms` |
 | `GET:/measurement/measurements`  | Block only GET on measurements                      |
 | `POST:/inventory/managedObjects` | Block creating new managed objects                  |
@@ -189,8 +191,8 @@ Restrictions are deny rules that block specific API operations. They can be appl
 Pass restrictions as CLI arguments. Repeat `-r` / `--restriction` for multiple rules:
 
 ```sh
-# Block all inventory access
-mc8yp -r "/inventory/**"
+# Block the inventory base path and everything below it
+mc8yp -r "/inventory" -r "/inventory/**"
 
 # Block deletes on inventory and all alarm access
 mc8yp -r "DELETE:/inventory/**" -r "/alarm/**"

@@ -152,7 +152,7 @@ describe('buildExecuteScript', () => {
     const script = buildExecuteScript('async () => null', 'https://tenant.example.com', { Authorization: 'Bearer test' }, [parseRestrictionRule('GET:/inventory/**')])
 
     expect(script).toContain('import { matchesGlob } from "node:path";')
-    expect(script).toContain('matches(pathname, r.pathPattern)')
+    expect(script).toContain('matchesGlob(pathname, r.pathPattern)')
     expect(script).toContain('Request blocked by MCP connection policy.')
     expect(script).toContain('const __mc8ypExecute = (async () => null);')
     expect(script).toContain('status: "success"')

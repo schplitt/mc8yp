@@ -132,9 +132,9 @@ The restriction system is implemented in two places:
 - `src/codemode/openapi-restrictions.ts` annotates blocked OpenAPI operations with `x-mc8yp-*` metadata.
 - `src/utils/restrictions.ts` and `src/utils/restriction-core.ts` enforce matching rules for live requests and query parsing.
 
-Path matching uses Node.js `path.matchesGlob` (available from Node.js 22+). The `matchesRestrictionPath` helper adds one edge-case workaround: patterns ending with `/**` also match the base path (e.g. `/inventory/**` matches `/inventory`), which `matchesGlob` on older Node builds does not do natively.
+Path matching uses Node.js `path.matchesGlob` (available from Node.js 22+), with no additional custom interpretation layered on top.
 
-The sandbox prelude injected by `buildExecuteScript` uses `matchesGlob` from the Node.js `node:path` module via a top-level ESM `import`. A small inline `matches` helper in the prelude applies the same `/**` edge-case fix.
+The sandbox prelude injected by `buildExecuteScript` uses `matchesGlob` from the Node.js `node:path` module via a top-level ESM `import`.
 
 Restriction evaluation uses **first-match semantics** (`findBlockedRestriction` returns the first matching rule). When a request is blocked, the error message contains only the method and path — not the full list of matching rules. This is intentional: agents do not need to know which specific restriction fired.
 
@@ -257,7 +257,7 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 - `#core-openapi` is a virtual module synthesized by a tsdown plugin; consumers must not import the JSON snapshots directly.
 - The CLI build inlines all `core-openapi/*.json` snapshots; each server build inlines exactly one.
 - Restrictions are both discoverability metadata and enforcement logic; both layers matter.
-- Path matching uses `path.matchesGlob` from `node:path`. The `matchesRestrictionPath` helper wraps it with a `/**` edge-case fix.
+- Path matching uses `path.matchesGlob` from `node:path` directly; restriction semantics should stay aligned with standard Node.js glob behavior.
 - The sandbox prelude imports `matchesGlob` via a top-level ESM `import` added by `buildExecuteScript`. The test harness injects it as a `new Function` parameter.
 - Restriction evaluation is **first-match**: `findBlockedRestriction` returns the first matching rule. `evaluateRestrictions` returns a `matchingRule` (single, not array).
 - Server-mode auth must stay request-local.

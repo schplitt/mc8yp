@@ -49,6 +49,14 @@ describe('restriction matching', () => {
     expect(evaluation.matchingRule?.source).toBe('/inventory/**')
   })
 
+  it('does not treat descendant globs as matching the base path itself', () => {
+    expect(evaluateRestrictions(rules, 'GET', '/inventory').matchingRule).toBeUndefined()
+    expect(evaluateRestrictions([
+      parseRestrictionRule('/inventory'),
+      parseRestrictionRule('/inventory/**'),
+    ], 'GET', '/inventory').matchingRule?.source).toBe('/inventory')
+  })
+
   it('keeps method-specific rules scoped to that method', () => {
     expect(evaluateRestrictions(rules, 'GET', '/alarm/alarms').matchingRule).toBeUndefined()
     expect(evaluateRestrictions(rules, 'POST', '/alarm/alarms').matchingRule?.source).toBe('POST:/alarm/**')
