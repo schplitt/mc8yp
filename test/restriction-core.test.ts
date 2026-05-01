@@ -182,6 +182,11 @@ describe('restriction core helpers', () => {
     })
   })
 
+  it('rejects restriction paths with empty segments instead of rewriting them', () => {
+    expect(() => validateRestrictionPath('/inventory//managedObjects')).toThrow('Restriction path pattern must not contain empty segments.')
+    expect(() => validateRestrictionPath('/inventory/managedObjects/')).toThrow('Restriction path pattern must not contain empty segments.')
+  })
+
   it('accepts explicit wildcard method prefixes', () => {
     expect(parseRestrictionRule('*:/inventory/**')).toEqual({
       method: '*',
