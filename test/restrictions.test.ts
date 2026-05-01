@@ -46,19 +46,19 @@ describe('restriction matching', () => {
 
   it('blocks every method when no method prefix is provided', () => {
     const evaluation = evaluateRestrictions(rules, 'GET', '/inventory/managedObjects?pageSize=5')
-    expect(evaluation.matchingRules.map((rule) => rule.source)).toEqual(['/inventory/**'])
+    expect(evaluation.matchingRule?.source).toBe('/inventory/**')
   })
 
   it('keeps method-specific rules scoped to that method', () => {
-    expect(evaluateRestrictions(rules, 'GET', '/alarm/alarms').matchingRules).toEqual([])
-    expect(evaluateRestrictions(rules, 'POST', '/alarm/alarms').matchingRules.map((rule) => rule.source)).toEqual(['POST:/alarm/**'])
+    expect(evaluateRestrictions(rules, 'GET', '/alarm/alarms').matchingRule).toBeUndefined()
+    expect(evaluateRestrictions(rules, 'POST', '/alarm/alarms').matchingRule?.source).toBe('POST:/alarm/**')
   })
 
-  it('reports the normalized method, path, and matching rules', () => {
+  it('reports the normalized method, path, and matching rule', () => {
     expect(evaluateRestrictions(rules, 'DELETE', '/inventory/managedObjects/123')).toEqual({
       method: 'DELETE',
       path: '/inventory/managedObjects/123',
-      matchingRules: [parseRestrictionRule('/inventory/**')],
+      matchingRule: parseRestrictionRule('/inventory/**'),
     })
   })
 
@@ -66,7 +66,7 @@ describe('restriction matching', () => {
     expect(evaluateRestrictions(rules, 'GET', 'https://tenant.example.com/inventory/managedObjects?pageSize=5')).toEqual({
       method: 'GET',
       path: '/inventory/managedObjects',
-      matchingRules: [parseRestrictionRule('/inventory/**')],
+      matchingRule: parseRestrictionRule('/inventory/**'),
     })
   })
 

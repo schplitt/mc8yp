@@ -5,8 +5,7 @@ import {
   RESTRICTED_OPERATION_RULES,
   RESTRICTED_OPERATION_TYPE,
   RESTRICTION_EXTENSION_KEY,
-  compileRestrictionRule,
-  matchesCompiledRule,
+  matchesRestrictionPath,
 
 } from '../utils/restrictions'
 import type { RestrictionRule } from '../utils/restrictions'
@@ -34,12 +33,10 @@ export function applyRestrictionsToOpenApiSpec<TSpec extends OpenApiSpec>(spec: 
     return spec
   }
 
-  const compiledRules = rules.map(compileRestrictionRule)
   let nextPaths: OpenApiPaths | undefined
 
   for (const [path, pathItem] of Object.entries(spec.paths)) {
     let nextPathItem: OpenApiPathItem | undefined
-    const pathSegments = path === '/' ? [] : path.slice(1).split('/')
 
     for (const method of OPENAPI_OPERATION_METHODS) {
       const operation = pathItem[method]
@@ -47,7 +44,9 @@ export function applyRestrictionsToOpenApiSpec<TSpec extends OpenApiSpec>(spec: 
         continue
       }
 
-      const matchingRules = compiledRules.filter((rule) => matchesCompiledRule(rule, method.toUpperCase(), pathSegments))
+      const matchingRules = rules.filter(
+        rule => (rule.method === '*' || rule.method === method.toUpperCase()) && matchesRestrictionPath(path, rule.pathPattern),
+      )
       if (matchingRules.length === 0) {
         continue
       }

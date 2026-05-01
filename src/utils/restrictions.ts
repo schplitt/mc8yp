@@ -2,12 +2,12 @@ import type { createNodeDriver } from 'secure-exec'
 import { parseURL } from 'ufo'
 import {
   HTTP_METHODS,
-  compileRestrictionRule,
-  matchesCompiledRule,
+  findBlockedRestriction,
+  matchesRestrictionPath,
   parseRestrictionRule,
 
 } from './restriction-core'
-import type { CompiledRestrictionRule, HttpMethod, RestrictionMethod, RestrictionRule } from './restriction-core'
+import type { HttpMethod, RestrictionMethod, RestrictionRule } from './restriction-core'
 
 export const RESTRICTION_EXTENSION_KEY = 'x-mc8yp-restrictions'
 export const RESTRICTED_OPERATION_FLAG = 'x-mc8yp-restricted'
@@ -18,10 +18,9 @@ export const RESTRICTED_AGENT_NOTE = 'x-mc8yp-agentNote'
 
 export {
   HTTP_METHODS,
-  compileRestrictionRule,
-  matchesCompiledRule,
+  findBlockedRestriction,
+  matchesRestrictionPath,
   parseRestrictionRule,
-  type CompiledRestrictionRule,
   type HttpMethod,
   type RestrictionMethod,
   type RestrictionRule,
@@ -32,7 +31,7 @@ const HTTP_METHOD_SET: ReadonlySet<string> = new Set(HTTP_METHODS)
 export interface RestrictionMatch {
   method: HttpMethod
   path: string
-  matchingRules: RestrictionRule[]
+  matchingRule: RestrictionRule | undefined
 }
 
 type NetworkPermissionDecider = NonNullable<NonNullable<NonNullable<Parameters<typeof createNodeDriver>[0]>['permissions']>['network']>
@@ -41,7 +40,7 @@ type NetworkPermissionRequest = Parameters<NetworkPermissionDecider>[0]
 
 type NetworkPermissionDecision = ReturnType<NetworkPermissionDecider>
 
-// --- internals (3 functions: path norm, method norm, recursive segment match) ---
+// --- internals (path norm, method norm) ---
 
 function normalizePath(value: string): string {
   let raw = value.trim()
@@ -72,11 +71,10 @@ export function parseRestrictionQuery(url: string): RestrictionRule[] {
 export function evaluateRestrictions(rules: readonly RestrictionRule[], method: string, path: string): RestrictionMatch {
   const m = normalizeMethod(method)
   const p = normalizePath(path)
-  const segs = p === '/' ? [] : p.slice(1).split('/')
   return {
     method: m,
     path: p,
-    matchingRules: rules.filter((rule) => matchesCompiledRule(compileRestrictionRule(rule), m, segs)),
+    matchingRule: findBlockedRestriction(rules, m, p),
   }
 }
 
@@ -98,11 +96,11 @@ export function createNetworkPermissionDecision(tenantUrl: string, request: Netw
     const requestPath = typeof request.url === 'string'
       ? new URL(request.url).pathname
       : '/'
-    const restrictionMatch = evaluateRestrictions(rules, request.method, requestPath)
-    if (restrictionMatch.matchingRules.length > 0) {
+    const blockedRule = findBlockedRestriction(rules, request.method, requestPath)
+    if (blockedRule) {
       return {
         allow: false,
-        reason: `Network connect blocked by MCP restrictions: ${restrictionMatch.matchingRules.map((rule) => rule.source).join(', ')}`,
+        reason: `Network connect blocked by MCP restrictions: ${blockedRule.source}`,
       }
     }
   }

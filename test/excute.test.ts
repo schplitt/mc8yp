@@ -1,5 +1,6 @@
 /* eslint-disable no-template-curly-in-string */
 /* eslint-disable no-new-func */
+import { matchesGlob } from 'node:path'
 import { encode } from '@toon-format/toon'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildExecutePrelude, buildExecuteScript, execute } from '../src/codemode/execute'
@@ -71,7 +72,9 @@ async function runGeneratedExecuteScript(
 ): Promise<ExecuteHarnessResult> {
   resetTestGlobals()
 
-  const run = new Function([
+  // matchesGlob is injected as a parameter because the prelude references it
+  // as a free variable (supplied by the ESM import in the real sandbox runtime).
+  const run = new Function('matchesGlob', [
     buildExecutePrelude('https://tenant.example.com', headers, restrictions),
     `const __mc8ypExecute = (${sourceCode});`,
     'globalThis.__done = (async () => {',
@@ -101,10 +104,10 @@ async function runGeneratedExecuteScript(
     '  result: globalThis.__result,',
     '  url: globalThis.__url,',
     '}));',
-  ].join('\n')) as () => Promise<ExecuteHarnessResult>
+  ].join('\n')) as (matchesGlob: typeof import('node:path').matchesGlob) => Promise<ExecuteHarnessResult>
 
   try {
-    return await run()
+    return await run(matchesGlob)
   } finally {
     resetTestGlobals()
   }
@@ -135,30 +138,11 @@ afterEach(() => {
   resetTestGlobals()
 })
 
-function expectedBlockedRequestMessage(method: string, path: string, matchingRules: readonly string[]): string {
-  return [
-    'Request blocked by MCP connection policy.',
-    '',
-    'This operation is intentionally denied by the current MCP connection configuration.',
-    'It did not fail at the Cumulocity API and it was not executed against the tenant.',
-    'Retrying or trying the same operation again through this connection will not succeed.',
-    '',
-    'Report this to the user as a connection-level access restriction.',
-    'If the operation is needed, the MCP restrictions for this connection must be updated by whoever manages that configuration.',
-    '',
-    'Blocked operation:',
-    `Method: ${method}`,
-    `Path: ${path}`,
-    'Matching restrictions:',
-    ...matchingRules.map((rule) => `- ${rule}`),
-  ].join('\n')
-}
-
-function expectedBlockedResult(method: string, path: string, matchingRules: readonly string[]): { status: 'blocked', error: { message: string } } {
+function expectedBlockedResult(method: string, path: string): { status: 'blocked', error: { message: string } } {
   return {
     status: 'blocked',
     error: {
-      message: expectedBlockedRequestMessage(method, path, matchingRules),
+      message: `Request blocked by MCP connection policy.\n\nMethod: ${method}\nPath: ${path}`,
     },
   }
 }
@@ -167,8 +151,8 @@ describe('buildExecuteScript', () => {
   it('embeds restriction enforcement in the generated request wrapper', () => {
     const script = buildExecuteScript('async () => null', 'https://tenant.example.com', { Authorization: 'Bearer test' }, [parseRestrictionRule('GET:/inventory/**')])
 
-    expect(script).toContain('const compiledRestrictions = compileRestrictionSources(restrictionSources);')
-    expect(script).toContain('const blockedRules = getBlockedCompiledRestrictions(compiledRestrictions, init.method, resolvedUrl.pathname);')
+    expect(script).toContain('import { matchesGlob } from "node:path";')
+    expect(script).toContain('matches(pathname, r.pathPattern)')
     expect(script).toContain('Request blocked by MCP connection policy.')
     expect(script).toContain('const __mc8ypExecute = (async () => null);')
     expect(script).toContain('status: "success"')
@@ -202,7 +186,7 @@ describe('buildExecuteScript', () => {
     ].join('\n'), [parseRestrictionRule('GET:/inventory/**')])
 
     expect(result.called).toBe(false)
-    expect(result.result).toEqual(expectedBlockedResult('GET', '/inventory/managedObjects', ['GET:/inventory/**']))
+    expect(result.result).toEqual(expectedBlockedResult('GET', '/inventory/managedObjects'))
   })
 
   it('allows safe requests when valid restrictions are present', async () => {
@@ -241,7 +225,7 @@ describe('buildExecuteScript', () => {
     ].join('\n'), restrictions)
 
     expect(result.called).toBe(false)
-    expect(result.result).toEqual(expectedBlockedResult('GET', '/inventory/managedObjects', ['GET:/inventory/**']))
+    expect(result.result).toEqual(expectedBlockedResult('GET', '/inventory/managedObjects'))
   })
 
   it.each(OUT_OF_ORIGIN_REQUEST_PATHS)('rejects $description before fetch is called', async ({ path }) => {

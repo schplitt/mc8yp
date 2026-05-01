@@ -1,3 +1,5 @@
+import { matchesGlob } from 'node:path'
+
 export const HTTP_METHODS = ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE'] as const
 
 export type HttpMethod = (typeof HTTP_METHODS)[number]
@@ -9,10 +11,6 @@ export interface RestrictionRule {
   method: RestrictionMethod
   pathPattern: string
   source: string
-}
-
-export interface CompiledRestrictionRule extends RestrictionRule {
-  segments: ('**' | RegExp)[]
 }
 
 export function normalizeRestrictionMatchPath(value: string): string {
@@ -88,71 +86,25 @@ export function parseRestrictionRule(input: string): RestrictionRule {
   }
 }
 
-export function escapeRestrictionRegex(value: string): string {
-  let escaped = ''
-  for (const char of value) {
-    escaped += '\\^$.*+?()[]{}|'.includes(char) ? `\\${char}` : char
-  }
-  return escaped
+export function matchesRestrictionPath(path: string, pattern: string): boolean {
+  if (matchesGlob(path, pattern)) return true
+  // matchesGlob requires at least one path segment after /**; also check with
+  // a trailing slash so that patterns like /foo/** match /foo itself.
+  return pattern.endsWith('/**') && matchesGlob(`${path}/`, pattern)
 }
 
-export function compileRestrictionSegment(segment: string): '**' | RegExp {
-  if (segment === '**') {
-    return '**'
-  }
-  if (segment.includes('**')) {
-    throw new Error(`Invalid restriction segment "${segment}". "**" must be its own path segment.`)
-  }
-  return new RegExp(`^${escapeRestrictionRegex(segment).split('\\*').join('[^/]*')}$`)
+export function parseRestrictionSources(restrictionSources: readonly string[]): RestrictionRule[] {
+  return restrictionSources.map(parseRestrictionRule)
 }
 
-export function matchCompiledSegments(pattern: ('**' | RegExp)[], path: string[], pi = 0, si = 0): boolean {
-  while (pi < pattern.length) {
-    const seg = pattern[pi]
-    if (seg === '**') {
-      if (pi === pattern.length - 1) {
-        return true
-      }
-      for (let i = si; i <= path.length; i++) {
-        if (matchCompiledSegments(pattern, path, pi + 1, i)) {
-          return true
-        }
-      }
-      return false
-    }
-    if (si >= path.length || !(seg instanceof RegExp) || !seg.test(path[si]!)) {
-      return false
-    }
-    pi++
-    si++
-  }
-
-  return si === path.length
-}
-
-export function compileRestrictionRule(rule: RestrictionRule): CompiledRestrictionRule {
-  return {
-    ...rule,
-    segments: rule.pathPattern === '/' ? [] : rule.pathPattern.slice(1).split('/').map(compileRestrictionSegment),
-  }
-}
-
-export function matchesCompiledRule(rule: CompiledRestrictionRule, method: string, pathSegments: string[]): boolean {
-  return (rule.method === '*' || rule.method === method) && matchCompiledSegments(rule.segments, pathSegments)
-}
-
-export function compileRestrictionSources(restrictionSources: readonly string[]): CompiledRestrictionRule[] {
-  return restrictionSources.map(parseRestrictionRule).map(compileRestrictionRule)
-}
-
-export function getBlockedCompiledRestrictions(
-  compiledRestrictions: readonly CompiledRestrictionRule[],
+export function findBlockedRestriction(
+  rules: readonly RestrictionRule[],
   method: string | undefined,
   pathname: string,
-): CompiledRestrictionRule[] {
+): RestrictionRule | undefined {
   const normalizedMethod = String(method ?? 'GET').trim().toUpperCase() || 'GET'
   const normalizedPath = normalizeRestrictionMatchPath(pathname)
-  const pathSegments = normalizedPath === '/' ? [] : normalizedPath.slice(1).split('/')
-
-  return compiledRestrictions.filter((rule) => matchesCompiledRule(rule, normalizedMethod, pathSegments))
+  return rules.find(
+    rule => (rule.method === '*' || rule.method === normalizedMethod) && matchesRestrictionPath(normalizedPath, rule.pathPattern),
+  )
 }
