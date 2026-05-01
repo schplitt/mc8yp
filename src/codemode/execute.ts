@@ -6,8 +6,6 @@ import { AsyncSemaphore } from './semaphore'
 import { createC8yAuthHeaders, resolveC8yAuth } from '../utils/client'
 import {
   HTTP_METHODS,
-  parseRestrictionRule,
-
 } from '../utils/restriction-core'
 import type { RestrictionRule } from '../utils/restriction-core'
 import {
@@ -36,13 +34,7 @@ type ExecuteEnvelope = ExecuteSuccessEnvelope | ExecuteErrorEnvelope
 
 function serializeExecuteConfig(tenantUrl: string, headers: Record<string, string>, restrictions: readonly RestrictionRule[]): string {
   const normalizedTenantUrl = new URL(tenantUrl).toString()
-  const serializedRestrictions = restrictions.map((rule) => {
-    const parsedRule = parseRestrictionRule(rule.source)
-    if (parsedRule.method !== rule.method || parsedRule.pathPattern !== rule.pathPattern) {
-      throw new TypeError(`Restriction source "${rule.source}" does not match its parsed shape.`)
-    }
-    return { method: parsedRule.method, pathPattern: parsedRule.pathPattern }
-  })
+  const serializedRestrictions = restrictions.map(({ method, pathPattern }) => ({ method, pathPattern }))
 
   return JSON.stringify({
     tenantUrl: normalizedTenantUrl,

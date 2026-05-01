@@ -41,6 +41,7 @@ const INVALID_RESTRICTION_QUERY_PAYLOADS = [
   '/inventory/managedObjects#frag',
   'BAD:/inventory/managedObjects',
   'GET:inventory/managedObjects',
+  '/inventory//managedObjects/',
 ] as const
 
 const OUT_OF_ORIGIN_REQUEST_PATHS = [

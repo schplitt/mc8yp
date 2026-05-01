@@ -23,17 +23,16 @@ export function normalizeRestrictionMatchPath(value: string): string {
   return raw.length > 1 && raw.endsWith('/') ? raw.slice(0, -1) : raw || '/'
 }
 
-export function normalizeAndValidateRestrictionPath(rawPath: string): string {
+export function validateRestrictionPath(rawPath: string): string {
   const segmentPattern = /^[A-Za-z0-9._~*-]+$/
+  const pathPattern = rawPath.trim()
 
-  if (rawPath.includes('?') || rawPath.includes('#')) {
+  if (pathPattern.includes('?') || pathPattern.includes('#')) {
     throw new Error(`Restriction pattern "${rawPath}" must not include query strings or fragments.`)
   }
-  if (!rawPath.startsWith('/')) {
+  if (!pathPattern.startsWith('/')) {
     throw new Error('Restriction path pattern must start with "/".')
   }
-
-  const pathPattern = normalizeRestrictionMatchPath(rawPath)
   const segments = pathPattern === '/' ? [] : pathPattern.slice(1).split('/')
 
   for (const segment of segments) {
@@ -71,14 +70,14 @@ export function parseRestrictionRule(input: string): RestrictionRule {
 
     return {
       method: (!rawMethod || rawMethod === '*') ? '*' : rawMethod as HttpMethod,
-      pathPattern: normalizeAndValidateRestrictionPath(rawPath),
+      pathPattern: validateRestrictionPath(rawPath),
       source,
     }
   }
 
   return {
     method: '*',
-    pathPattern: normalizeAndValidateRestrictionPath(source),
+    pathPattern: validateRestrictionPath(source),
     source,
   }
 }

@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest'
 import {
   findBlockedRestriction,
   matchesRestrictionPath,
-  normalizeAndValidateRestrictionPath,
   normalizeRestrictionMatchPath,
   parseRestrictionRule,
   parseRestrictionSources,
+  validateRestrictionPath,
 } from '../src/utils/restriction-core'
 
 const INVALID_RESTRICTION_PAYLOADS = [
@@ -23,6 +23,7 @@ const INVALID_RESTRICTION_PAYLOADS = [
   '/inventory/managedObjects#frag',
   'BAD:/inventory/managedObjects',
   'GET:inventory/managedObjects',
+  '/inventory//managedObjects/',
 ] as const
 
 const MATCH_CASES = [
@@ -162,8 +163,8 @@ describe('restriction core helpers', () => {
     expect(normalizeRestrictionMatchPath('/inventory//managedObjects/')).toBe('/inventory/managedObjects')
   })
 
-  it('validates and normalizes safe restriction paths', () => {
-    expect(normalizeAndValidateRestrictionPath('/inventory//managedObjects/')).toBe('/inventory/managedObjects')
+  it('validates restriction paths without rewriting them', () => {
+    expect(validateRestrictionPath('/inventory/managedObjects')).toBe('/inventory/managedObjects')
     expect(parseRestrictionRule('get:/inventory/*/child')).toEqual({
       method: 'GET',
       pathPattern: '/inventory/*/child',
