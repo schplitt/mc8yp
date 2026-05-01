@@ -22,8 +22,6 @@ const INVALID_RESTRICTION_PAYLOADS = [
   '/inventory/managedObjects?x=1',
   '/inventory/managedObjects#frag',
   'BAD:/inventory/managedObjects',
-  '/inventory/**evil',
-  'POST:/inventory/**evil',
   'GET:inventory/managedObjects',
 ] as const
 
@@ -176,6 +174,11 @@ describe('restriction core helpers', () => {
       pathPattern: '/inventory/managedObjects*/**/evil',
       source: '/inventory/managedObjects*/**/evil',
     })
+    expect(parseRestrictionRule('/inventory**')).toEqual({
+      method: '*',
+      pathPattern: '/inventory**',
+      source: '/inventory**',
+    })
   })
 
   it('accepts explicit wildcard method prefixes', () => {
@@ -195,6 +198,8 @@ describe('restriction core helpers', () => {
     expect(matchesRestrictionPath('/inventory/events', '/inventory/m*')).toBe(false)
     expect(matchesRestrictionPath('/inventory/managedObjects/123', '/inventory/**')).toBe(true)
     expect(matchesRestrictionPath('/inventory', '/inventory/**')).toBe(false)
+    expect(matchesRestrictionPath('/inventory', '/inventory**')).toBe(true)
+    expect(matchesRestrictionPath('/inventory/managedObjects', '/inventory**')).toBe(false)
     expect(matchesRestrictionPath('/inventory/child', '/inventory/**/child')).toBe(true)
   })
 

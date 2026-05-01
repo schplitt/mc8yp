@@ -40,8 +40,6 @@ const INVALID_RESTRICTION_QUERY_PAYLOADS = [
   '/inventory/managedObjects?x=1',
   '/inventory/managedObjects#frag',
   'BAD:/inventory/managedObjects',
-  '/inventory/**evil',
-  'POST:/inventory/**evil',
   'GET:inventory/managedObjects',
 ] as const
 

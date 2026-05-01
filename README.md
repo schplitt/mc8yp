@@ -172,6 +172,7 @@ Restrictions are deny rules that block specific API operations. They can be appl
 - **With a method prefix** — blocks only that method (e.g. `GET:`, `DELETE:`, `POST:`)
 - **Path patterns** use standard Node.js `path.matchesGlob()` semantics
 - `*` matches within a single path segment; `**` matches descendant paths
+- `/inventory**` is a same-segment prefix glob, so it matches `/inventory` and `/inventoryX`, but not `/inventory/...`
 - `/inventory/**` matches `/inventory/...` but **not** `/inventory` itself; use both `/inventory` and `/inventory/**` when you need the base path and all descendants
 - Query strings and fragments are not allowed in patterns
 

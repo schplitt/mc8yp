@@ -43,9 +43,6 @@ export function normalizeAndValidateRestrictionPath(rawPath: string): string {
     if (segment === '**') {
       continue
     }
-    if (segment.includes('**')) {
-      throw new Error(`Invalid restriction segment "${segment}". "**" must be its own path segment.`)
-    }
     if (!segmentPattern.test(segment)) {
       throw new Error(`Restriction segment "${segment}" contains unsupported characters.`)
     }
