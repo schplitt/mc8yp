@@ -25,17 +25,18 @@ export function normalizeRestrictionMatchPath(value: string): string {
 
 export function validateRestrictionPath(rawPath: string): string {
   const segmentPattern = /^[A-Za-z0-9._~*-]+$/
-  const pathPattern = rawPath.trim()
+  const trimmedPath = rawPath.trim()
 
-  if (!pathPattern) {
+  if (!trimmedPath) {
     throw new Error('Restriction path pattern must not be empty.')
   }
-  if (pathPattern.includes('?') || pathPattern.includes('#')) {
-    throw new Error(`Restriction pattern "${pathPattern}" must not include query strings or fragments.`)
+  if (trimmedPath.includes('?') || trimmedPath.includes('#')) {
+    throw new Error(`Restriction pattern "${trimmedPath}" must not include query strings or fragments.`)
   }
-  if (!pathPattern.startsWith('/')) {
+  if (!trimmedPath.startsWith('/')) {
     throw new Error('Restriction path pattern must start with "/".')
   }
+  const pathPattern = trimmedPath
   const segments = pathPattern === '/' ? [] : pathPattern.slice(1).split('/')
   if (segments.some(segment => segment.length === 0)) {
     throw new Error('Restriction path pattern must not contain empty segments.')
