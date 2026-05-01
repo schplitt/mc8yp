@@ -31,7 +31,7 @@ export function validateRestrictionPath(rawPath: string): string {
     throw new Error('Restriction path pattern must not be empty.')
   }
   if (pathPattern.includes('?') || pathPattern.includes('#')) {
-    throw new Error(`Restriction pattern "${rawPath}" must not include query strings or fragments.`)
+    throw new Error(`Restriction pattern "${pathPattern}" must not include query strings or fragments.`)
   }
   if (!pathPattern.startsWith('/')) {
     throw new Error('Restriction path pattern must start with "/".')
