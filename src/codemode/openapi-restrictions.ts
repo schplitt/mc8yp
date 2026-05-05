@@ -2,13 +2,12 @@ import {
   RESTRICTED_AGENT_NOTE,
   RESTRICTED_OPERATION_FLAG,
   RESTRICTED_OPERATION_MESSAGE,
-  RESTRICTED_OPERATION_RULES,
   RESTRICTED_OPERATION_TYPE,
   RESTRICTION_EXTENSION_KEY,
-  matchesRestrictionPath,
 
 } from '../utils/restrictions'
 import type { RestrictionRule } from '../utils/restrictions'
+import { matchesGlob } from 'node:path'
 
 const OPENAPI_OPERATION_METHODS = ['delete', 'get', 'head', 'options', 'patch', 'post', 'put', 'trace'] as const
 
@@ -17,12 +16,11 @@ type OpenApiPathItem = Record<string, unknown>
 type OpenApiPaths = Record<string, OpenApiPathItem>
 type OpenApiSpec = Record<string, unknown> & { paths?: OpenApiPaths }
 
-function annotateRestrictedOperation(operation: OpenApiOperation, matchingRules: readonly RestrictionRule[]): OpenApiOperation {
+function annotateRestrictedOperation(operation: OpenApiOperation): OpenApiOperation {
   return {
     ...operation,
     [RESTRICTED_OPERATION_FLAG]: true,
     [RESTRICTED_OPERATION_TYPE]: 'deny',
-    [RESTRICTED_OPERATION_RULES]: matchingRules.map((rule) => rule.source),
     [RESTRICTED_OPERATION_MESSAGE]: 'This operation is blocked by the current MCP connection restrictions.',
     [RESTRICTED_AGENT_NOTE]: 'The route exists, but it is intentionally restricted for this MCP connection.',
   }
@@ -44,15 +42,15 @@ export function applyRestrictionsToOpenApiSpec<TSpec extends OpenApiSpec>(spec: 
         continue
       }
 
-      const matchingRules = rules.filter(
-        rule => (rule.method === '*' || rule.method === method.toUpperCase()) && matchesRestrictionPath(path, rule.pathPattern),
+      const isRestricted = rules.some(
+        (rule) => (rule.method === '*' || rule.method === method.toUpperCase()) && matchesGlob(path, rule.pathPattern),
       )
-      if (matchingRules.length === 0) {
+      if (!isRestricted) {
         continue
       }
 
       nextPathItem ??= { ...pathItem }
-      nextPathItem[method] = annotateRestrictedOperation(operation as OpenApiOperation, matchingRules)
+      nextPathItem[method] = annotateRestrictedOperation(operation as OpenApiOperation)
     }
 
     if (nextPathItem) {

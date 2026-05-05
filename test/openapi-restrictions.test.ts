@@ -3,7 +3,6 @@ import { applyRestrictionsToOpenApiSpec } from '../src/codemode/openapi-restrict
 import {
   RESTRICTED_OPERATION_FLAG,
   RESTRICTED_OPERATION_MESSAGE,
-  RESTRICTED_OPERATION_RULES,
   RESTRICTION_EXTENSION_KEY,
   parseRestrictionRule,
 } from '../src/utils/restrictions'
@@ -32,7 +31,7 @@ describe('applyRestrictionsToOpenApiSpec', () => {
   }
 
   it('preserves summary and description while annotating restricted operations', () => {
-    const restrictedSpec = applyRestrictionsToOpenApiSpec(spec, [parseRestrictionRule('GET:/inventory/**')])
+    const restrictedSpec = applyRestrictionsToOpenApiSpec(spec, parseRestrictionRule('GET:/inventory/**').parsedRules)
     const restrictedOperation = restrictedSpec.paths['/inventory/managedObjects'].get
 
     expect(restrictedOperation.summary).toBe('List managed objects')
@@ -40,13 +39,11 @@ describe('applyRestrictionsToOpenApiSpec', () => {
     // @ts-expect-error - check for added metadata properties
     expect(restrictedOperation[RESTRICTED_OPERATION_FLAG]).toBe(true)
     // @ts-expect-error - check for added metadata properties
-    expect(restrictedOperation[RESTRICTED_OPERATION_RULES]).toEqual(['GET:/inventory/**'])
-    // @ts-expect-error - check for added metadata properties
     expect(restrictedOperation[RESTRICTED_OPERATION_MESSAGE]).toContain('blocked')
   })
 
   it('leaves unrelated operations unchanged and adds top-level metadata', () => {
-    const restrictedSpec = applyRestrictionsToOpenApiSpec(spec, [parseRestrictionRule('/inventory/**')])
+    const restrictedSpec = applyRestrictionsToOpenApiSpec(spec, parseRestrictionRule('/inventory/**').parsedRules)
 
     expect(restrictedSpec.paths['/alarm/alarms']).toBe(spec.paths['/alarm/alarms'])
     // @ts-expect-error - check for added metadata properties

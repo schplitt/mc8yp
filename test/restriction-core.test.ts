@@ -1,12 +1,9 @@
 /* eslint-disable no-template-curly-in-string */
+import { matchesGlob } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  findBlockedRestriction,
-  matchesRestrictionPath,
-  normalizeRestrictionMatchPath,
+  findBlockingRestrictions,
   parseRestrictionRule,
-  parseRestrictionSources,
-  validateRestrictionPath,
 } from '../src/utils/restriction-core'
 
 const INVALID_RESTRICTION_PAYLOADS = [
@@ -159,91 +156,126 @@ const BLOCKED_RULE_CASES = [
 ] as const
 
 describe('restriction core helpers', () => {
-  it('normalizes slash-only path matching consistently', () => {
-    expect(normalizeRestrictionMatchPath('/inventory//managedObjects/')).toBe('/inventory/managedObjects')
-  })
-
-  it('validates restriction paths without rewriting them', () => {
-    expect(validateRestrictionPath('/inventory/managedObjects')).toBe('/inventory/managedObjects')
+  it('parses valid restriction paths without rewriting them', () => {
     expect(parseRestrictionRule('get:/inventory/*/child')).toEqual({
-      method: 'GET',
-      pathPattern: '/inventory/*/child',
-      source: 'get:/inventory/*/child',
+      parsedRules: [{
+        method: 'GET',
+        pathPattern: '/inventory/*/child',
+        source: 'get:/inventory/*/child',
+      }],
+      failedRules: [],
     })
     expect(parseRestrictionRule('/inventory/managedObjects*/**/evil')).toEqual({
-      method: '*',
-      pathPattern: '/inventory/managedObjects*/**/evil',
-      source: '/inventory/managedObjects*/**/evil',
+      parsedRules: [{
+        method: '*',
+        pathPattern: '/inventory/managedObjects*/**/evil',
+        source: '/inventory/managedObjects*/**/evil',
+      }],
+      failedRules: [],
     })
     expect(parseRestrictionRule('/inventory**')).toEqual({
-      method: '*',
-      pathPattern: '/inventory**',
-      source: '/inventory**',
+      parsedRules: [{
+        method: '*',
+        pathPattern: '/inventory**',
+        source: '/inventory**',
+      }],
+      failedRules: [],
     })
-  })
-
-  it('rejects restriction paths with empty segments instead of rewriting them', () => {
-    expect(() => validateRestrictionPath('/inventory//managedObjects')).toThrow('Restriction path pattern must not contain empty segments.')
-    expect(() => validateRestrictionPath('/inventory/managedObjects/')).toThrow('Restriction path pattern must not contain empty segments.')
   })
 
   it('accepts explicit wildcard method prefixes', () => {
     expect(parseRestrictionRule('*:/inventory/**')).toEqual({
-      method: '*',
-      pathPattern: '/inventory/**',
-      source: '*:/inventory/**',
+      parsedRules: [{
+        method: '*',
+        pathPattern: '/inventory/**',
+        source: '*:/inventory/**',
+      }],
+      failedRules: [],
     })
   })
 
-  it.each(INVALID_RESTRICTION_PAYLOADS)('rejects invalid restriction payload: %s', (payload) => {
-    expect(() => parseRestrictionRule(payload)).toThrow()
+  it.each(INVALID_RESTRICTION_PAYLOADS)('collects invalid restriction payload: %s', (payload) => {
+    expect(parseRestrictionRule(payload)).toEqual({
+      parsedRules: [],
+      failedRules: [{
+        rule: payload,
+        reason: expect.any(String),
+      }],
+    })
   })
 
-  it('matchesRestrictionPath uses Node.js path.matchesGlob semantics', () => {
-    expect(matchesRestrictionPath('/inventory/managedObjects', '/inventory/m*')).toBe(true)
-    expect(matchesRestrictionPath('/inventory/events', '/inventory/m*')).toBe(false)
-    expect(matchesRestrictionPath('/inventory/managedObjects/123', '/inventory/**')).toBe(true)
-    expect(matchesRestrictionPath('/inventory', '/inventory/**')).toBe(false)
-    expect(matchesRestrictionPath('/inventory', '/inventory**')).toBe(true)
-    expect(matchesRestrictionPath('/inventory/managedObjects', '/inventory**')).toBe(false)
-    expect(matchesRestrictionPath('/inventory/child', '/inventory/**/child')).toBe(true)
+  it('uses Node.js path.matchesGlob semantics directly', () => {
+    expect(matchesGlob('/inventory/managedObjects', '/inventory/m*')).toBe(true)
+    expect(matchesGlob('/inventory/events', '/inventory/m*')).toBe(false)
+    expect(matchesGlob('/inventory/managedObjects/123', '/inventory/**')).toBe(true)
+    expect(matchesGlob('/inventory', '/inventory/**')).toBe(false)
+    expect(matchesGlob('/inventory', '/inventory**')).toBe(true)
+    expect(matchesGlob('/inventory/managedObjects', '/inventory**')).toBe(false)
+    expect(matchesGlob('/inventory/child', '/inventory/**/child')).toBe(true)
   })
 
   it('matches exact-path and descendant-path rules separately under standard glob semantics', () => {
-    const rules = parseRestrictionSources([
+    const { parsedRules: rules } = parseRestrictionRule([
       '/inventory',
       '/inventory/**',
     ])
 
-    expect(findBlockedRestriction(rules, 'GET', '/inventory')?.source).toBe('/inventory')
-    expect(findBlockedRestriction(rules, 'GET', '/inventory/managedObjects')?.source).toBe('/inventory/**')
+    expect(findBlockingRestrictions(rules, 'GET', '/inventory')[0]?.source).toBe('/inventory')
+    expect(findBlockingRestrictions(rules, 'GET', '/inventory/managedObjects')[0]?.source).toBe('/inventory/**')
   })
 
   it('matches wildcard rules using Node.js path.matchesGlob semantics', () => {
-    const rule = parseRestrictionRule('GET:/inventory/*/child')
-    expect(findBlockedRestriction([rule], 'GET', '/inventory/device-1/child')).toBeDefined()
-    expect(findBlockedRestriction([rule], 'POST', '/inventory/device-1/child')).toBeUndefined()
-    expect(findBlockedRestriction([rule], 'GET', '/inventory/device-1/sibling')).toBeUndefined()
+    const rule = parseRestrictionRule('GET:/inventory/*/child').parsedRules[0]
+    expect(findBlockingRestrictions([rule], 'GET', '/inventory/device-1/child')[0]).toBeDefined()
+    expect(findBlockingRestrictions([rule], 'POST', '/inventory/device-1/child')[0]).toBeUndefined()
+    expect(findBlockingRestrictions([rule], 'GET', '/inventory/device-1/sibling')[0]).toBeUndefined()
   })
 
   it('finds the first blocked restriction rule', () => {
-    const rules = parseRestrictionSources([
+    const { parsedRules: rules } = parseRestrictionRule([
       'GET:/inventory/**',
       '/alarm/*',
     ])
 
-    expect(findBlockedRestriction(rules, 'GET', '/inventory/managedObjects/123')?.source).toBe('GET:/inventory/**')
-    expect(findBlockedRestriction(rules, 'POST', '/alarm/alarms')?.source).toBe('/alarm/*')
-    expect(findBlockedRestriction(rules, 'POST', '/event/events')).toBeUndefined()
+    expect(findBlockingRestrictions(rules, 'GET', '/inventory/managedObjects/123')[0]?.source).toBe('GET:/inventory/**')
+    expect(findBlockingRestrictions(rules, 'POST', '/alarm/alarms')[0]?.source).toBe('/alarm/*')
+    expect(findBlockingRestrictions(rules, 'POST', '/event/events')[0]).toBeUndefined()
   })
 
   it.each(MATCH_CASES)('$description', ({ rule, method, path, expected }) => {
-    const result = findBlockedRestriction([parseRestrictionRule(rule)], method, path)
+    const result = findBlockingRestrictions(parseRestrictionRule(rule).parsedRules, method, path)[0]
     expect(result !== undefined).toBe(expected)
   })
 
   it.each(BLOCKED_RULE_CASES)('$description', ({ rules, method, path, expected }) => {
-    const parsedRules = parseRestrictionSources(rules)
-    expect(findBlockedRestriction(parsedRules, method, path)?.source).toBe(expected)
+    const { parsedRules } = parseRestrictionRule(rules)
+    expect(findBlockingRestrictions(parsedRules, method, path)[0]?.source).toBe(expected)
+  })
+
+  it('returns valid and invalid restriction parse results without throwing', () => {
+    expect(parseRestrictionRule([
+      '/inventory/**',
+      'BAD:/alarm/**',
+      'POST:/event/events',
+    ])).toEqual({
+      parsedRules: [
+        {
+          method: '*',
+          pathPattern: '/inventory/**',
+          source: '/inventory/**',
+        },
+        {
+          method: 'POST',
+          pathPattern: '/event/events',
+          source: 'POST:/event/events',
+        },
+      ],
+      failedRules: [
+        {
+          rule: 'BAD:/alarm/**',
+          reason: 'Unsupported restriction method "BAD".',
+        },
+      ],
+    })
   })
 })

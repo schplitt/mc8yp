@@ -1,91 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   createNetworkPermissionDecision,
-  evaluateRestrictions,
-  parseRestrictionQuery,
   parseRestrictionRule,
 } from '../src/utils/restrictions'
 
-describe('restriction parsing', () => {
-  it('parses methodless restrictions as all-method deny rules', () => {
-    expect(parseRestrictionRule('/inventory/**')).toEqual({
-      method: '*',
-      pathPattern: '/inventory/**',
-      source: '/inventory/**',
-    })
-  })
-
-  it('parses method-scoped restrictions', () => {
-    expect(parseRestrictionRule('get:/inventory/**')).toEqual({
-      method: 'GET',
-      pathPattern: '/inventory/**',
-      source: 'get:/inventory/**',
-    })
-  })
-
-  it('extracts repeated query parameters', () => {
-    expect(parseRestrictionQuery('https://example.test/mcp?restriction=/inventory/**&restriction=POST:/alarm/**')).toEqual([
-      { method: '*', pathPattern: '/inventory/**', source: '/inventory/**' },
-      { method: 'POST', pathPattern: '/alarm/**', source: 'POST:/alarm/**' },
-    ])
-  })
-
-  it('extracts repeated query parameters from server-relative MCP URLs', () => {
-    expect(parseRestrictionQuery('/mcp?restriction=/inventory/**&restriction=DELETE:/alarm/**')).toEqual([
-      { method: '*', pathPattern: '/inventory/**', source: '/inventory/**' },
-      { method: 'DELETE', pathPattern: '/alarm/**', source: 'DELETE:/alarm/**' },
-    ])
-  })
-})
-
-describe('restriction matching', () => {
-  const rules = [
-    parseRestrictionRule('/inventory/**'),
-    parseRestrictionRule('POST:/alarm/**'),
-  ]
-
-  it('blocks every method when no method prefix is provided', () => {
-    const evaluation = evaluateRestrictions(rules, 'GET', '/inventory/managedObjects?pageSize=5')
-    expect(evaluation.matchingRule?.source).toBe('/inventory/**')
-  })
-
-  it('does not treat descendant globs as matching the base path itself', () => {
-    expect(evaluateRestrictions(rules, 'GET', '/inventory').matchingRule).toBeUndefined()
-    expect(evaluateRestrictions([
-      parseRestrictionRule('/inventory'),
-      parseRestrictionRule('/inventory/**'),
-    ], 'GET', '/inventory').matchingRule?.source).toBe('/inventory')
-  })
-
-  it('keeps method-specific rules scoped to that method', () => {
-    expect(evaluateRestrictions(rules, 'GET', '/alarm/alarms').matchingRule).toBeUndefined()
-    expect(evaluateRestrictions(rules, 'POST', '/alarm/alarms').matchingRule?.source).toBe('POST:/alarm/**')
-  })
-
-  it('reports the normalized method, path, and matching rule', () => {
-    expect(evaluateRestrictions(rules, 'DELETE', '/inventory/managedObjects/123')).toEqual({
-      method: 'DELETE',
-      path: '/inventory/managedObjects/123',
-      matchingRule: parseRestrictionRule('/inventory/**'),
-    })
-  })
-
-  it('matches absolute URLs using only the normalized pathname', () => {
-    expect(evaluateRestrictions(rules, 'GET', 'https://tenant.example.com/inventory/managedObjects?pageSize=5')).toEqual({
-      method: 'GET',
-      path: '/inventory/managedObjects',
-      matchingRule: parseRestrictionRule('/inventory/**'),
-    })
-  })
-
-  it('rejects unsupported HTTP methods', () => {
-    expect(() => evaluateRestrictions(rules, 'MERGE', '/inventory/managedObjects')).toThrow('Unsupported HTTP method "MERGE".')
-  })
-})
-
 describe('network permission decisions', () => {
   const tenantUrl = 'https://tenant.example.com'
-  const rules = [parseRestrictionRule('/inventory/**')]
+  const rules = parseRestrictionRule('/inventory/**').parsedRules
 
   it('allows connect requests to the configured tenant host when no method is available', () => {
     expect(createNetworkPermissionDecision(tenantUrl, {
@@ -105,6 +26,21 @@ describe('network permission decisions', () => {
     }, rules)).toEqual({
       allow: false,
       reason: 'Network connect blocked by MCP restrictions: /inventory/**',
+    })
+  })
+
+  it('includes all matching restriction rules in the blocked reason', () => {
+    expect(createNetworkPermissionDecision(tenantUrl, {
+      op: 'connect',
+      hostname: 'tenant.example.com',
+      method: 'GET',
+      url: 'https://tenant.example.com/inventory/managedObjects?pageSize=5',
+    }, [
+      parseRestrictionRule('/inventory/**').parsedRules[0],
+      parseRestrictionRule('GET:/inventory/**').parsedRules[0],
+    ])).toEqual({
+      allow: false,
+      reason: 'Network connect blocked by MCP restrictions: /inventory/**, GET:/inventory/**',
     })
   })
 

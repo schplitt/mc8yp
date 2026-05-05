@@ -258,6 +258,7 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 - The CLI build inlines all `core-openapi/*.json` snapshots; each server build inlines exactly one.
 - Restrictions are both discoverability metadata and enforcement logic; both layers matter.
 - Path matching uses `path.matchesGlob` from `node:path` directly; restriction semantics should stay aligned with standard Node.js glob behavior.
+- In restriction handling, normalize or validate once at the entry boundary and then pass the resulting values through; do not add repeated normalization helpers, re-checking layers, or thin wrapper utilities around `matchesGlob` unless a call site truly needs its own behavior.
 - The sandbox prelude imports `matchesGlob` via a top-level ESM `import` added by `buildExecuteScript`. The test harness injects it as a `new Function` parameter.
 - Restriction evaluation is **first-match**: `findBlockedRestriction` returns the first matching rule. `evaluateRestrictions` returns a `matchingRule` (single, not array).
 - Server-mode auth must stay request-local.

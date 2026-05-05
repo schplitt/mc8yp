@@ -1,12 +1,12 @@
 import { bench, describe } from 'vitest'
 import { applyRestrictionsToOpenApiSpec } from '../src/codemode/openapi-restrictions'
-import { evaluateRestrictions, parseRestrictionRule } from '../src/utils/restrictions'
+import { findBlockingRestrictions, parseRestrictionRule } from '../src/utils/restrictions'
 
-const rules = [
-  parseRestrictionRule('/inventory/**'),
-  parseRestrictionRule('GET:/alarm/**'),
-  parseRestrictionRule('POST:/devicecontrol/**'),
-]
+const rules = parseRestrictionRule([
+  '/inventory/**',
+  'GET:/alarm/**',
+  'POST:/devicecontrol/**',
+]).parsedRules
 
 const spec = {
   openapi: '3.0.0',
@@ -31,8 +31,8 @@ const spec = {
 }
 
 describe('restriction performance', () => {
-  bench('evaluateRestrictions hot path', () => {
-    evaluateRestrictions(rules, 'GET', '/inventory/managedObjects/123?foo=bar')
+  bench('findBlockingRestrictions hot path', () => {
+    findBlockingRestrictions(rules, 'GET', '/inventory/managedObjects/123')[0]
   })
 
   bench('applyRestrictionsToOpenApiSpec one-pass rewrite', () => {

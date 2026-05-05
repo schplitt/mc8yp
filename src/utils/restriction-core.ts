@@ -13,98 +13,158 @@ export interface RestrictionRule {
   source: string
 }
 
-export function normalizeRestrictionMatchPath(value: string): string {
-  let raw = value.trim()
-  if (!raw) {
-    return '/'
-  }
-  raw = raw.startsWith('/') ? raw : `/${raw}`
-  raw = raw.replace(/\/{2,}/g, '/')
-  return raw.length > 1 && raw.endsWith('/') ? raw.slice(0, -1) : raw || '/'
+export interface InvalidRestrictionRule {
+  rule: string
+  reason: string
 }
 
-export function validateRestrictionPath(rawPath: string): string {
+export interface RestrictionParseResult {
+  parsedRules: RestrictionRule[]
+  failedRules: InvalidRestrictionRule[]
+}
+
+export function parseRestrictionRule(input: string | readonly string[]): RestrictionParseResult {
   const segmentPattern = /^[A-Za-z0-9._~*-]+$/
-  const trimmedPath = rawPath.trim()
+  const inputs = typeof input === 'string' ? [input] : input
+  const parsedRules: RestrictionRule[] = []
+  const failedRules: InvalidRestrictionRule[] = []
 
-  if (!trimmedPath) {
-    throw new Error('Restriction path pattern must not be empty.')
-  }
-  if (trimmedPath.includes('?') || trimmedPath.includes('#')) {
-    throw new Error(`Restriction pattern "${trimmedPath}" must not include query strings or fragments.`)
-  }
-  if (!trimmedPath.startsWith('/')) {
-    throw new Error('Restriction path pattern must start with "/".')
-  }
-  const pathPattern = trimmedPath
-  const segments = pathPattern === '/' ? [] : pathPattern.slice(1).split('/')
-  if (segments.some(segment => segment.length === 0)) {
-    throw new Error('Restriction path pattern must not contain empty segments.')
-  }
-
-  for (const segment of segments) {
-    if (segment === '.' || segment === '..') {
-      throw new Error(`Restriction segment "${segment}" is not allowed.`)
-    }
-    if (segment === '**') {
+  for (const source of inputs) {
+    if (!source) {
+      failedRules.push({
+        rule: source,
+        reason: 'Restriction value must not be empty.',
+      })
       continue
     }
-    if (!segmentPattern.test(segment)) {
-      throw new Error(`Restriction segment "${segment}" contains unsupported characters.`)
+
+    const sep = source.indexOf(':')
+    if (sep > 0 && !source.startsWith('/')) {
+      const rawMethod = source.slice(0, sep).toUpperCase()
+      const rawPath = source.slice(sep + 1)
+
+      if (!rawPath) {
+        failedRules.push({
+          rule: source,
+          reason: 'Restriction path pattern must not be empty.',
+        })
+        continue
+      }
+      if (rawMethod && rawMethod !== '*' && !HTTP_METHOD_SET.has(rawMethod)) {
+        failedRules.push({
+          rule: source,
+          reason: `Unsupported restriction method "${source.slice(0, sep)}".`,
+        })
+        continue
+      }
+
+      if (rawPath.includes('?') || rawPath.includes('#')) {
+        failedRules.push({
+          rule: source,
+          reason: `Restriction pattern "${rawPath}" must not include query strings or fragments.`,
+        })
+        continue
+      }
+      if (!rawPath.startsWith('/')) {
+        failedRules.push({
+          rule: source,
+          reason: 'Restriction path pattern must start with "/".',
+        })
+        continue
+      }
+      const rawPathSegments = rawPath === '/' ? [] : rawPath.slice(1).split('/')
+      if (rawPathSegments.some((segment) => segment.length === 0)) {
+        failedRules.push({
+          rule: source,
+          reason: 'Restriction path pattern must not contain empty segments.',
+        })
+        continue
+      }
+      const invalidRawPathSegment = rawPathSegments.find((segment) => {
+        if (segment === '**') {
+          return false
+        }
+
+        return segment === '.' || segment === '..' || !segmentPattern.test(segment)
+      })
+      if (invalidRawPathSegment) {
+        failedRules.push({
+          rule: source,
+          reason: invalidRawPathSegment === '.' || invalidRawPathSegment === '..'
+            ? `Restriction segment "${invalidRawPathSegment}" is not allowed.`
+            : `Restriction segment "${invalidRawPathSegment}" contains unsupported characters.`,
+        })
+        continue
+      }
+
+      parsedRules.push({
+        method: (!rawMethod || rawMethod === '*') ? '*' : rawMethod as HttpMethod,
+        pathPattern: rawPath,
+        source,
+      })
+      continue
     }
-  }
 
-  return pathPattern
-}
-
-export function parseRestrictionRule(input: string): RestrictionRule {
-  const source = input.trim()
-  if (!source) {
-    throw new Error('Restriction value must not be empty.')
-  }
-
-  const sep = source.indexOf(':')
-  if (sep > 0 && !source.startsWith('/')) {
-    const rawMethod = source.slice(0, sep).trim().toUpperCase()
-    const rawPath = source.slice(sep + 1).trim()
-
-    if (!rawPath) {
-      throw new Error('Restriction path pattern must not be empty.')
+    if (source.includes('?') || source.includes('#')) {
+      failedRules.push({
+        rule: source,
+        reason: `Restriction pattern "${source}" must not include query strings or fragments.`,
+      })
+      continue
     }
-    if (rawMethod && rawMethod !== '*' && !HTTP_METHOD_SET.has(rawMethod)) {
-      throw new Error(`Unsupported restriction method "${source.slice(0, sep)}".`)
+    if (!source.startsWith('/')) {
+      failedRules.push({
+        rule: source,
+        reason: 'Restriction path pattern must start with "/".',
+      })
+      continue
+    }
+    const sourceSegments = source === '/' ? [] : source.slice(1).split('/')
+    if (sourceSegments.some((segment) => segment.length === 0)) {
+      failedRules.push({
+        rule: source,
+        reason: 'Restriction path pattern must not contain empty segments.',
+      })
+      continue
+    }
+    const invalidSourceSegment = sourceSegments.find((segment) => {
+      if (segment === '**') {
+        return false
+      }
+
+      return segment === '.' || segment === '..' || !segmentPattern.test(segment)
+    })
+    if (invalidSourceSegment) {
+      failedRules.push({
+        rule: source,
+        reason: invalidSourceSegment === '.' || invalidSourceSegment === '..'
+          ? `Restriction segment "${invalidSourceSegment}" is not allowed.`
+          : `Restriction segment "${invalidSourceSegment}" contains unsupported characters.`,
+      })
+      continue
     }
 
-    return {
-      method: (!rawMethod || rawMethod === '*') ? '*' : rawMethod as HttpMethod,
-      pathPattern: validateRestrictionPath(rawPath),
+    parsedRules.push({
+      method: '*',
+      pathPattern: source,
       source,
-    }
+    })
   }
 
   return {
-    method: '*',
-    pathPattern: validateRestrictionPath(source),
-    source,
+    parsedRules,
+    failedRules,
   }
 }
 
-export function matchesRestrictionPath(path: string, pattern: string): boolean {
-  return matchesGlob(path, pattern)
-}
-
-export function parseRestrictionSources(restrictionSources: readonly string[]): RestrictionRule[] {
-  return restrictionSources.map(parseRestrictionRule)
-}
-
-export function findBlockedRestriction(
+export function findBlockingRestrictions(
   rules: readonly RestrictionRule[],
   method: string | undefined,
   pathname: string,
-): RestrictionRule | undefined {
-  const normalizedMethod = String(method ?? 'GET').trim().toUpperCase() || 'GET'
-  const normalizedPath = normalizeRestrictionMatchPath(pathname)
-  return rules.find(
-    rule => (rule.method === '*' || rule.method === normalizedMethod) && matchesRestrictionPath(normalizedPath, rule.pathPattern),
+): RestrictionRule[] {
+  const normalizedMethod = String(method ?? 'GET').toUpperCase() || 'GET'
+
+  return rules.filter(
+    (rule) => (rule.method === '*' || rule.method === normalizedMethod) && matchesGlob(pathname, rule.pathPattern),
   )
 }

@@ -38,7 +38,6 @@ function serializeExecuteConfig(tenantUrl: string, headers: Record<string, strin
 
   return JSON.stringify({
     tenantUrl: normalizedTenantUrl,
-    tenantOrigin: new URL(normalizedTenantUrl).origin,
     authHeaders: headers,
     restrictions: serializedRestrictions,
   })
@@ -99,6 +98,10 @@ function buildQueryScript(sourceCode: string, restrictions: readonly Restriction
   ].join('\n\n')
 }
 
+export function addExecutionScriptImports(): string {
+  return 'import * as path from "path";'
+}
+
 export function buildExecutePrelude(tenantUrl: string, headers: Record<string, string>, restrictions: readonly RestrictionRule[] = []): string {
   const serializedConfig = JSON.stringify(serializeExecuteConfig(tenantUrl, headers, restrictions))
 
@@ -108,18 +111,15 @@ export function buildExecutePrelude(tenantUrl: string, headers: Record<string, s
     '  if (!config || typeof config !== "object") {',
     '    throw new TypeError("Invalid execute configuration.");',
     '  }',
-    '  const { tenantUrl, tenantOrigin, authHeaders, restrictions } = config;',
-    '  if (typeof tenantUrl !== "string" || typeof tenantOrigin !== "string") {',
-    '    throw new TypeError("Execute configuration must contain string tenant values.");',
+    '  const { tenantUrl, authHeaders, restrictions } = config;',
+    '  if (typeof tenantUrl !== "string") {',
+    '    throw new TypeError("Execute configuration must contain a string tenant URL.");',
     '  }',
     '  if (!Array.isArray(restrictions) || restrictions.some((r) => typeof r.method !== "string" || typeof r.pathPattern !== "string")) {',
     '    throw new TypeError("Execute configuration must contain valid restriction rules.");',
     '  }',
     '  const resolveUrl = (descriptor) => {',
     '    const resolved = new URL(descriptor, tenantUrl.endsWith("/") ? tenantUrl : tenantUrl + "/");',
-    '    if (resolved.origin !== tenantOrigin) {',
-    '      throw new Error("Cumulocity requests must target the configured tenant origin.");',
-    '    }',
     '    return resolved;',
     '  };',
     '  const normalizeRequest = (options) => {',
@@ -132,7 +132,7 @@ export function buildExecutePrelude(tenantUrl: string, headers: Record<string, s
     `  const HTTP_METHOD_SET = new Set(${JSON.stringify(HTTP_METHODS)});`,
     '  const isBlocked = (method, pathname) => {',
     '    const m = String(method ?? "GET").trim().toUpperCase() || "GET";',
-    '    return restrictions.some((r) => (r.method === "*" || r.method === m) && matchesGlob(pathname, r.pathPattern));',
+    '    return restrictions.some((r) => (r.method === "*" || r.method === m) && path.matchesGlob(pathname, r.pathPattern));',
     '  };',
     '  const normalizeBody = (headers, body) => {',
     '    if (body == null || typeof body === "string") {',
@@ -200,7 +200,7 @@ export function buildExecuteScript(
   const functionExpression = normalizeCode(sourceCode)
 
   return [
-    'import { matchesGlob } from "node:path";',
+    addExecutionScriptImports(),
     '',
     buildExecutePrelude(tenantUrl, headers, restrictions),
     `const __mc8ypExecute = (${functionExpression});`,
