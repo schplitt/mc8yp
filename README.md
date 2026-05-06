@@ -195,27 +195,27 @@ Supported wildcards:
 
 ### Path Pattern Examples
 
-| Pattern            | Matches                                                  | Does not match                          |
-| ------------------ | -------------------------------------------------------- | --------------------------------------- |
-| `/inventory`       | `/inventory`                                             | `/inventory/managedObjects`             |
-| `/inventory/**`    | `/inventory`, `/inventory/managedObjects`, `/inventory/x/y` | `/alarm/alarms`                         |
-| `/i*`              | `/inventory`, `/identity`, `/i`                          | `/inventory/managedObjects`             |
-| `/i*/**`           | `/inventory`, `/inventory/managedObjects`, `/identity/x` | `/alarm/alarms`                         |
-| `/inventory/m*`    | `/inventory/managedObjects`, `/inventory/measurements`   | `/inventory/events`, `/inventory/m/x`   |
-| `/inventory/*/child` | `/inventory/device-1/child`, `/inventory/x/child`     | `/inventory/child`, `/inventory/a/b/child` |
-| `/inventory/**/child` | `/inventory/child`, `/inventory/a/b/child`           | `/inventory/a/b/sibling`                |
+| Pattern               | Matches                                                     | Does Not Match                             |
+| --------------------- | ----------------------------------------------------------- | ------------------------------------------ |
+| `/inventory`          | `/inventory`                                                | `/inventory/managedObjects`                |
+| `/inventory/**`       | `/inventory`, `/inventory/managedObjects`, `/inventory/x/y` | `/alarm/alarms`                            |
+| `/i*`                 | `/inventory`, `/identity`, `/i`                             | `/inventory/managedObjects`                |
+| `/i*/**`              | `/inventory`, `/inventory/managedObjects`, `/identity/x`    | `/alarm/alarms`                            |
+| `/inventory/m*`       | `/inventory/managedObjects`, `/inventory/measurements`      | `/inventory/events`, `/inventory/m/x`      |
+| `/inventory/*/child`  | `/inventory/device-1/child`, `/inventory/x/child`           | `/inventory/child`, `/inventory/a/b/child` |
+| `/inventory/**/child` | `/inventory/child`, `/inventory/a/b/child`                  | `/inventory/a/b/sibling`                   |
 
 ### Common Rule Examples
 
-| Rule                             | Effect                                                           |
-| -------------------------------- | ---------------------------------------------------------------- |
-| `/inventory/**`                  | Block all methods on `/inventory` and everything below it        |
-| `DELETE:/inventory/**`           | Block only DELETE on `/inventory` and everything below it        |
-| `/alarm/alarms`                  | Block all methods on the exact path `/alarm/alarms`              |
-| `GET:/measurement/measurements`  | Block only GET on the exact path `/measurement/measurements`     |
-| `POST:/inventory/managedObjects` | Block creating new managed objects                               |
-| `/i*/**`                         | Block all routes whose first path segment starts with `i`        |
-| `/user/**`                       | Block all user management paths                                  |
+| Rule                             | Effect                                                       |
+| -------------------------------- | ------------------------------------------------------------ |
+| `/inventory/**`                  | Block all methods on `/inventory` and everything below it    |
+| `DELETE:/inventory/**`           | Block only DELETE on `/inventory` and everything below it    |
+| `/alarm/alarms`                  | Block all methods on the exact path `/alarm/alarms`          |
+| `GET:/measurement/measurements`  | Block only GET on the exact path `/measurement/measurements` |
+| `POST:/inventory/managedObjects` | Block creating new managed objects                           |
+| `/i*/**`                         | Block all routes whose first path segment starts with `i`    |
+| `/user/**`                       | Block all user management paths                              |
 
 ### Important Notes
 
@@ -226,7 +226,7 @@ Supported wildcards:
 
 ### CLI Mode
 
-Pass restrictions as CLI arguments. Repeat `-r` / `--restriction` for multiple rules:
+Pass restrictions as CLI arguments. Repeat `-r`, `--restrict`, or `--restriction` for multiple rules:
 
 ```sh
 # Block all inventory access
@@ -237,14 +237,18 @@ mc8yp -r "DELETE:/inventory/**" -r "/alarm/**"
 
 # Block everything under user management
 mc8yp --restriction "/user/**"
+
+# Same thing using the long alias
+mc8yp --restrict "/user/**"
 ```
 
 ### Microservice Mode (HTTP)
 
-Pass restrictions as `restriction` query parameters on the MCP endpoint URL:
+Pass restrictions as `restriction`, `restrict`, or `r` query parameters on the MCP endpoint URL:
 
 ```
-/mcp?restriction=/inventory/**&restriction=DELETE:/alarm/**
+/mcp?restriction=/inventory/**&restrict=DELETE:/alarm/**
+/mcp?r=/inventory/**&r=DELETE:/alarm/**
 ```
 
 ### How Restrictions Work

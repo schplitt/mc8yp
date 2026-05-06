@@ -17,7 +17,7 @@ const main = defineCommand({
     restriction: {
       type: 'string',
       description: 'Restriction rule to deny API access (e.g. "GET:/inventory/**"). Can be repeated.',
-      alias: 'r',
+      alias: ['r', 'restrict'],
     },
     spec: {
       type: 'string',
