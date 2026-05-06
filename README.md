@@ -164,25 +164,65 @@ Restrictions are deny rules that block specific API operations. They can be appl
 
 ### Rule Format
 
+A restriction can be written in either of these forms:
+
+```txt
+<path-pattern>
+<method>:<path-pattern>
 ```
-[METHOD:]<path-pattern>
-```
+
+A restriction is always a deny rule.
 
 - **Without a method prefix** — blocks all HTTP methods for matching paths
-- **With a method prefix** — blocks only that method (e.g. `GET:`, `DELETE:`, `POST:`)
-- **Path patterns** support `*` (single segment wildcard) and `**` (recursive wildcard)
-- Query strings and fragments are not allowed in patterns
+- **With a method prefix** — blocks only that method (for example `GET:`, `DELETE:`, `POST:`)
+- **The `:` separator is only present when a method prefix is provided**
+- **Supported methods** — `DELETE`, `GET`, `HEAD`, `OPTIONS`, `PATCH`, `POST`, `PUT`, `TRACE`, or `*`
+- Method names are case-insensitive when parsed (`get:/inventory/**` becomes `GET:/inventory/**`)
 
-### Examples
+### Path Pattern Syntax
 
-| Rule                             | Effect                                              |
-| -------------------------------- | --------------------------------------------------- |
-| `/inventory/**`                  | Block all methods on all inventory paths            |
-| `DELETE:/inventory/**`           | Block only DELETE on inventory paths                |
-| `/alarm/alarms`                  | Block all methods on the exact path `/alarm/alarms` |
-| `GET:/measurement/measurements`  | Block only GET on measurements                      |
-| `POST:/inventory/managedObjects` | Block creating new managed objects                  |
-| `/user/**`                       | Block all user management                           |
+Patterns are matched against the request **pathname**.
+
+- Query strings and fragments are **not allowed in restriction patterns**
+- Incoming request query strings are ignored for matching, so `/inventory/**` also matches requests such as `/inventory?pageSize=5`
+- Patterns must start with `/`
+- Matching is path-segment aware: `/` separates segments
+
+Supported wildcards:
+
+- `*` — wildcard **inside a single path segment**. It matches any characters except `/`
+- `**` — recursive wildcard across **zero or more whole path segments**. `**` must be its own complete segment
+
+### Path Pattern Examples
+
+| Pattern            | Matches                                                  | Does not match                          |
+| ------------------ | -------------------------------------------------------- | --------------------------------------- |
+| `/inventory`       | `/inventory`                                             | `/inventory/managedObjects`             |
+| `/inventory/**`    | `/inventory`, `/inventory/managedObjects`, `/inventory/x/y` | `/alarm/alarms`                         |
+| `/i*`              | `/inventory`, `/identity`, `/i`                          | `/inventory/managedObjects`             |
+| `/i*/**`           | `/inventory`, `/inventory/managedObjects`, `/identity/x` | `/alarm/alarms`                         |
+| `/inventory/m*`    | `/inventory/managedObjects`, `/inventory/measurements`   | `/inventory/events`, `/inventory/m/x`   |
+| `/inventory/*/child` | `/inventory/device-1/child`, `/inventory/x/child`     | `/inventory/child`, `/inventory/a/b/child` |
+| `/inventory/**/child` | `/inventory/child`, `/inventory/a/b/child`           | `/inventory/a/b/sibling`                |
+
+### Common Rule Examples
+
+| Rule                             | Effect                                                           |
+| -------------------------------- | ---------------------------------------------------------------- |
+| `/inventory/**`                  | Block all methods on `/inventory` and everything below it        |
+| `DELETE:/inventory/**`           | Block only DELETE on `/inventory` and everything below it        |
+| `/alarm/alarms`                  | Block all methods on the exact path `/alarm/alarms`              |
+| `GET:/measurement/measurements`  | Block only GET on the exact path `/measurement/measurements`     |
+| `POST:/inventory/managedObjects` | Block creating new managed objects                               |
+| `/i*/**`                         | Block all routes whose first path segment starts with `i`        |
+| `/user/**`                       | Block all user management paths                                  |
+
+### Important Notes
+
+- `/inventory/**` already matches `/inventory` itself, so you do **not** need both `/inventory` and `/inventory/**`
+- `/i**` is **not valid** because `**` must be its own segment. Use `/i*/**` if you want to match a first segment starting with `i` and everything below it
+- `*:/inventory/**` is allowed and means the same thing as `/inventory/**`
+- Restriction patterns may not contain empty segments (`//`), `.` or `..` segments, query strings, or fragments
 
 ### CLI Mode
 
