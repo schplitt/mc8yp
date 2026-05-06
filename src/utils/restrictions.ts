@@ -37,13 +37,6 @@ export interface AllowParseResult {
   failedRules: InvalidAllowRule[]
 }
 
-export const RESTRICTION_EXTENSION_KEY = 'x-mc8yp-restrictions'
-export const RESTRICTED_OPERATION_FLAG = 'x-mc8yp-restricted'
-export const RESTRICTED_OPERATION_MESSAGE = 'x-mc8yp-restrictionMessage'
-export const RESTRICTED_OPERATION_RULES = 'x-mc8yp-restrictionRules'
-export const RESTRICTED_OPERATION_TYPE = 'x-mc8yp-restrictionType'
-export const RESTRICTED_AGENT_NOTE = 'x-mc8yp-agentNote'
-
 export function parseRestrictionRule(input: string | readonly string[]): RestrictionParseResult {
   const inputs = typeof input === 'string' ? [input] : input
   const parsedRules: RestrictionRule[] = []

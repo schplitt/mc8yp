@@ -1,7 +1,6 @@
 import { encode } from '@toon-format/toon'
 import { getCoreOpenApiSpec } from '#core-openapi'
 import { NodeRuntime, createNodeDriver, createNodeRuntimeDriverFactory } from 'secure-exec'
-import { applyRestrictionsToOpenApiSpec } from './openapi-restrictions'
 import { AsyncSemaphore } from './semaphore'
 import { createNetworkPermissionDecision } from './network-permissions'
 import { createC8yAuthHeaders, resolveC8yAuth } from '../utils/client'
@@ -98,18 +97,14 @@ function normalizeCode(functionCode: string): string {
 
 function buildQueryScript(
   sourceCode: string,
-  restrictions: readonly RestrictionRule[],
-  allowRules: readonly AllowRule[],
+  _restrictions: readonly RestrictionRule[],
+  _allowRules: readonly AllowRule[],
 ): string {
-  const restrictedSpec = applyRestrictionsToOpenApiSpec(
-    getCoreOpenApiSpec() as Parameters<typeof applyRestrictionsToOpenApiSpec>[0],
-    restrictions,
-    allowRules,
-  )
+  const spec = getCoreOpenApiSpec()
   const functionExpression = normalizeCode(sourceCode)
 
   return [
-    `const spec = ${JSON.stringify(restrictedSpec)};`,
+    `const spec = ${JSON.stringify(spec)};`,
     `const __mc8ypQuery = (${functionExpression});`,
     '',
     'if (typeof __mc8ypQuery !== "function") {',
