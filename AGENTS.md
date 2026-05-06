@@ -34,7 +34,6 @@ src/
   codemode/
     execute.ts                Sandboxed query/execute runtime generation
     network-permissions.ts    Secure-exec network permission decisions for execute mode
-    openapi-restrictions.ts   OpenAPI restriction annotation
     semaphore.ts              Concurrency limiter for sandbox execution
   ctx/
     auth.ts                   Per-request auth context for server mode
@@ -57,7 +56,6 @@ src/
     schema.ts                 Shared schema helpers
 test/
   excute.test.ts
-  openapi-restrictions.test.ts
   restriction-core.test.ts
   restrictions.test.ts
   restrictions.bench.ts
@@ -137,12 +135,11 @@ Restrictions and allow rules both use the format `[METHOD:]<path-pattern>`.
 
 The restriction system is implemented in two places:
 
-- `src/codemode/openapi-restrictions.ts` annotates blocked OpenAPI operations with `x-mc8yp-*` metadata.
 - `src/utils/restrictions.ts` parses both deny rules and allow rules and handles CLI/query input.
 - `src/utils/restriction-matcher.ts` owns rule compilation, path matching, and restriction-vs-allow precedence.
 - `src/codemode/network-permissions.ts` enforces secure-exec network decisions for live execute requests.
 
-This dual behavior is intentional: agents can still inspect restricted operations for context, but cannot execute them through the same MCP connection.
+The OpenAPI view exposed by `query` is the raw bundled snapshot. Connection policy is enforced at execution time rather than by rewriting the spec.
 
 ## Authentication And Credentials
 
@@ -206,10 +203,10 @@ pnpm prerelease    # lint + typecheck + build
 
 - If a change affects tool behavior, inspect both the tool definition and the codemode runtime.
 - If a change affects core OpenAPI selection, update the `#core-openapi` plugin in `tsdown.config.ts` and the ambient declaration in `src/core-openapi.d.ts`.
-- If a change affects restrictions or allow rules, verify both spec annotation behavior and live request blocking.
+- If a change affects restrictions or allow rules, verify both policy messaging and live request blocking.
 - If a change affects auth, verify the CLI and server paths separately.
 - If a change affects public MCP behavior, update `README.md` as well as this file.
-- Prefer running ESLint autofix (`pnpm lint:fix` or `eslint --fix` on targeted files) before manually fixing simple lint issues by hand.
+- Strongly prefer running ESLint autofix first (`pnpm lint:fix` or targeted `eslint --fix`) to save time. If the linter can fix an issue automatically, that is preferred over manually fixing the same issue by hand. For validation, prefer this exact order: `pnpm test:run` → `pnpm lint:fix` → `pnpm typecheck`.
 - Do not introduce tiny one-line helper/utility functions for trivial logic; inline that logic directly where it is used instead.
 
 ## Testing
@@ -218,14 +215,13 @@ pnpm prerelease    # lint + typecheck + build
 - Use `*.test.ts` for tests and `*.bench.ts` for benchmarks
 - Prefer adding targeted tests near the affected behavior:
   - restriction/allow parsing or matching changes: `test/restriction-core.test.ts` or `test/restrictions.test.ts`
-  - OpenAPI annotation changes: `test/openapi-restrictions.test.ts`
   - codemode runtime changes: `test/excute.test.ts`
   - concurrency behavior: `test/semaphore.test.ts`
 
 Run these before finishing meaningful changes:
 
 1. `pnpm test:run`
-2. `pnpm lint`
+2. `pnpm lint:fix`
 3. `pnpm typecheck`
 
 ## Maintaining Documentation
@@ -241,8 +237,8 @@ When working on this project:
 
 1. Start from the actual controlling surface. For most feature work that is `src/tools/`, `src/prompts/`, `src/codemode/execute.ts`, or restriction/auth utilities.
 2. Treat CLI mode and microservice mode as separate execution environments with different auth and tool availability.
-3. Run focused tests first when changing a narrow subsystem, then run the full validation set if the change is broader.
-4. Do not remove blocked-operation annotations from the OpenAPI view just because execution is blocked; visibility and enforcement are intentionally separate for both restrictions and allow lists.
+3. Run focused tests first when changing a narrow subsystem, then run the full validation set if the change is broader. Use this exact validation order: `pnpm test:run`, then `pnpm lint:fix`, then `pnpm typecheck`.
+4. The `query` tool exposes the raw bundled OpenAPI snapshot; restrictions and allow lists are enforced when requests are executed, not by rewriting the spec.
 5. Keep public MCP tool and prompt descriptions aligned with actual runtime behavior.
 6. Preserve the current sandbox limits and request boundary logic unless the task explicitly changes them.
 7. Record recurring project-specific lessons in the section below when they are likely to prevent future mistakes.

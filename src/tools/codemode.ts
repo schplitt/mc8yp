@@ -69,8 +69,8 @@ Recommended shapes:
 
 If your function returns a string, it is returned as-is. Otherwise the result is returned as JSON text.
 
-The current MCP connection may mark blocked operations with \`x-mc8yp-restricted\` and related \`x-mc8yp-*\` fields. These operations are intentionally unavailable even though they still exist in the OpenAPI spec.
-Treat those annotations as a hard connection-level access policy: use them to understand what exists, but do not plan to call those operations with \`execute\`.
+The spec exposed by \`query\` is the raw bundled OpenAPI snapshot. It is not rewritten for the current MCP connection policy.
+The current MCP connection may still block \`execute\` calls through restrictions and/or an allow list, so do not assume every operation visible in the spec is executable on this connection.
 
 Examples:
 () => {
@@ -138,7 +138,8 @@ Tool output behavior:
 - On success, the actual function result is returned in Toon format.
 - On blocked or failed execution, the tool returns a plain text message.
 
-The current MCP connection may deny certain method/path combinations and may also use an allow list. Restricted or non-allowed routes remain visible in the spec, and \`cumulocity.request(...)\` will reject blocked calls before sending them.
+The current MCP connection may deny certain method/path combinations and may also use an allow list.
+The \`query\` tool does not annotate or filter the OpenAPI spec for that policy, and \`cumulocity.request(...)\` will reject blocked calls before sending them.
 When that happens, the tool returns a plain text connection-policy message. That is not a Cumulocity API failure and retrying the same operation through the same connection will not help.
 
 ${getExecuteEnvironmentNote()}

@@ -286,13 +286,13 @@ Pass allow rules as `allowed`, `allow`, or `a` query parameters.
 
 ### How Access Policy Works
 
-1. **OpenAPI spec annotation**: The `query` tool annotates blocked operations in the spec with `x-mc8yp-restricted` and related `x-mc8yp-*` metadata fields. The operations remain visible so the agent understands what exists, but they are clearly marked as blocked. This includes both deny-rule matches and operations outside a configured allow list.
+1. **Query visibility**: The `query` tool exposes the raw bundled OpenAPI snapshot for the current MCP connection. It does not annotate or filter operations based on restrictions or allow rules.
 
 2. **Sandbox request enforcement**: The `execute` tool checks restrictions and allow rules inside the generated sandbox request helper, where the actual HTTP method and normalized path are both available. Matching deny rules block first. If any allow rules are configured, requests must also match at least one allow rule.
 
 3. **Network boundary**: The secure-exec permission layer independently restricts network access to the configured tenant host. Other network operations are denied.
 
-When an `execute` request is blocked by MCP connection policy, the tool returns explanatory text stating that the operation was intentionally denied or not allow-listed, no request was sent to Cumulocity, and retrying through the same connection will not help.
+When an `execute` request is blocked by MCP connection policy, the tool returns explanatory text stating whether the operation was denied by a restriction or blocked because it is outside the configured allow list, no request was sent to Cumulocity, and retrying through the same connection will not help.
 
 ## Build And Packaging
 

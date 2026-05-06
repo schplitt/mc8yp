@@ -26,7 +26,7 @@ export function createCodeModeGuidePrompt(server: McpServer<undefined, C8yMcpCus
       ...allowRules.map((rule) => `- allow: \`${rule.source}\``),
     ]
     const restrictionSection = policyLines.length > 0
-      ? `\n## Current Connection Access Policy\n${policyLines.join('\n')}\n\nBlocked operations stay visible in the spec and are annotated with \`x-mc8yp-restricted\` and related \`x-mc8yp-*\` fields.\n`
+      ? `\n## Current Connection Access Policy\n${policyLines.join('\n')}\n\nThe \`query\` tool still shows the raw bundled OpenAPI spec. These rules are enforced when requests are executed, not by rewriting the spec.\n`
       : ''
 
     return prompt.message(
@@ -42,8 +42,8 @@ Use \`query\` when you need to inspect the core OpenAPI spec.
 - Return the exact value you want back from that function
 - Sync and async functions are both supported
 - Strings are returned as-is; other results are returned as JSON text
-- Blocked operations stay visible and are annotated with \`x-mc8yp-restricted\` and related \`x-mc8yp-*\` fields
-- Treat operations marked with \`x-mc8yp-restricted\` as intentionally unavailable on this MCP connection; inspect them for context, but do not plan to execute them
+- The \`query\` tool shows the raw bundled OpenAPI spec for the selected snapshot
+- The current MCP connection may still block \`execute\` requests through deny rules and/or an allow list even when an operation exists in the spec
 
 ### Available Shape
 \`\`\`ts
