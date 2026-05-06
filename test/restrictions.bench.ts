@@ -1,11 +1,23 @@
 import { bench, describe } from 'vitest'
 import { applyRestrictionsToOpenApiSpec } from '../src/codemode/openapi-restrictions'
-import { evaluateRestrictions, parseRestrictionRule } from '../src/utils/restrictions'
+import { findBlockingRestrictions } from '../src/utils/restriction-matcher'
+import { parseRestrictionRule } from '../src/utils/restrictions'
+
+function parseSingleRule(input: string) {
+  const result = parseRestrictionRule([input])
+  const rule = result.parsedRules[0]
+
+  if (!rule || result.failedRules.length > 0) {
+    throw new Error(`Expected a valid restriction rule: ${input}`)
+  }
+
+  return rule
+}
 
 const rules = [
-  parseRestrictionRule('/inventory/**'),
-  parseRestrictionRule('GET:/alarm/**'),
-  parseRestrictionRule('POST:/devicecontrol/**'),
+  parseSingleRule('/inventory/**'),
+  parseSingleRule('GET:/alarm/**'),
+  parseSingleRule('POST:/devicecontrol/**'),
 ]
 
 const spec = {
@@ -31,8 +43,8 @@ const spec = {
 }
 
 describe('restriction performance', () => {
-  bench('evaluateRestrictions hot path', () => {
-    evaluateRestrictions(rules, 'GET', '/inventory/managedObjects/123?foo=bar')
+  bench('findBlockingRestrictions hot path', () => {
+    findBlockingRestrictions(rules, 'GET', '/inventory/managedObjects/123')
   })
 
   bench('applyRestrictionsToOpenApiSpec one-pass rewrite', () => {

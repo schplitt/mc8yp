@@ -5,10 +5,11 @@ import {
   RESTRICTED_OPERATION_RULES,
   RESTRICTED_OPERATION_TYPE,
   RESTRICTION_EXTENSION_KEY,
+} from '../utils/restrictions'
+import {
   compileRestrictionRule,
   matchesCompiledRule,
-
-} from '../utils/restrictions'
+} from '../utils/restriction-matcher'
 import type { RestrictionRule } from '../utils/restrictions'
 
 const OPENAPI_OPERATION_METHODS = ['delete', 'get', 'head', 'options', 'patch', 'post', 'put', 'trace'] as const

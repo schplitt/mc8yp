@@ -8,6 +8,17 @@ import {
   parseRestrictionRule,
 } from '../src/utils/restrictions'
 
+function parseSingleRule(input: string) {
+  const result = parseRestrictionRule([input])
+  const rule = result.parsedRules[0]
+
+  if (!rule || result.failedRules.length > 0) {
+    throw new Error(`Expected a valid restriction rule: ${input}`)
+  }
+
+  return rule
+}
+
 describe('applyRestrictionsToOpenApiSpec', () => {
   const spec = {
     openapi: '3.0.0',
@@ -32,7 +43,7 @@ describe('applyRestrictionsToOpenApiSpec', () => {
   }
 
   it('preserves summary and description while annotating restricted operations', () => {
-    const restrictedSpec = applyRestrictionsToOpenApiSpec(spec, [parseRestrictionRule('GET:/inventory/**')])
+    const restrictedSpec = applyRestrictionsToOpenApiSpec(spec, [parseSingleRule('GET:/inventory/**')])
     const restrictedOperation = restrictedSpec.paths['/inventory/managedObjects'].get
 
     expect(restrictedOperation.summary).toBe('List managed objects')
@@ -46,7 +57,7 @@ describe('applyRestrictionsToOpenApiSpec', () => {
   })
 
   it('leaves unrelated operations unchanged and adds top-level metadata', () => {
-    const restrictedSpec = applyRestrictionsToOpenApiSpec(spec, [parseRestrictionRule('/inventory/**')])
+    const restrictedSpec = applyRestrictionsToOpenApiSpec(spec, [parseSingleRule('/inventory/**')])
 
     expect(restrictedSpec.paths['/alarm/alarms']).toBe(spec.paths['/alarm/alarms'])
     // @ts-expect-error - check for added metadata properties
