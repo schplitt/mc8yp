@@ -3,6 +3,11 @@ catalogMode: prefer
 shellEmulator: true
 
 trustPolicy: no-downgrade
+trustPolicyExclude:
+  - cached-factory@0.1.0
+  - undici-types@6.21.0
+
+
 catalog:
   '@c8y/client': ^1023.68.7
   '@napi-rs/keyring': ^1.2.0
