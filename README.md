@@ -234,6 +234,10 @@ The versions built are driven by [`openapi-versions.json`](openapi-versions.json
 
 Use the dedicated packaging command after `pnpm build` to create Docker-based Cumulocity release zips:
 
+The packaging step writes a temporary generated Dockerfile under `.c8y/`, copies the selected versioned server bundle into `/app/server/`, and installs production dependencies inside the Linux image with pnpm before copying them into the runtime stage. This avoids cross-platform native optional dependency issues when release artifacts are built on macOS but deployed as `linux/amd64` microservices.
+
+The deployed HTTP transport uses POST-only streamable HTTP (`GET /mcp` intentionally returns `405`) because some reverse proxies and microservice ingress layers do not keep the optional long-lived SSE notification channel stable enough for reliable MCP tool calls.
+
 ```sh
 pnpm package:microservices
 ```
@@ -251,7 +255,7 @@ The GitHub release workflow uses that packaging command when building tagged rel
 
 ### Prerequisites
 
-- Node.js ≥22.0.0
+- Node.js ≥24.0.0
 - pnpm
 
 ### Setup

@@ -11,7 +11,10 @@ globalThis.executionEnvironment = 'server'
 
 const server = createC8YMcpServer()
 
-const transport = new HttpTransport(server)
+const transport = new HttpTransport(server, {
+  path: '/mcp',
+  disableSse: true,
+})
 
 const app = new H3().all('/mcp', async (event) => {
   // Extract authentication from request headers

@@ -89,6 +89,7 @@ src/core-openapi.d.ts         Ambient type declarations for the `#core-openapi` 
 2. It sets `globalThis.executionEnvironment = 'server'`.
 3. It extracts auth from request headers and restrictions from query parameters.
 4. It stores auth in request-local context and forwards the request to the shared MCP server.
+5. It configures the HTTP transport in POST-only mode (`disableSse: true`) because the optional long-lived GET/SSE channel proved unstable behind Cumulocity microservice ingress.
 
 #### Shared MCP surface
 
@@ -116,6 +117,8 @@ src/core-openapi.d.ts         Ambient type declarations for the `#core-openapi` 
 - Types for the virtual module live in `src/core-openapi.d.ts` (ambient `declare module '#core-openapi'`); no `tsconfig.paths` entry is needed.
 - `tsdown.config.ts` emits one server bundle per supported core OpenAPI version into `.output/<version>/`.
 - `scripts/package-microservices.mjs` turns those built server outputs into one Docker-based zip per version for releases.
+- The packaging script writes a temporary generated Dockerfile under `.c8y/`, builds from the repository root, copies the selected `.output/<version>/` bundle into `/app/server/`, and installs production dependencies inside the Linux image with pnpm before copying them into the runtime stage.
+- The packaging script builds Docker images for `linux/amd64` by default so release zips created on Apple Silicon remain deployable in typical Cumulocity environments; override with `DOCKER_PLATFORM` only when you intentionally need a different target.
 
 ### Query vs Execute
 
@@ -178,7 +181,9 @@ pnpm prerelease    # lint + typecheck + build
 
 - `tsdown.config.ts` builds versioned HTTP server bundles into `.output/<version>/`
 - `tsdown.config.ts` builds the CLI bundle into `dist/`
+- Server bundles intentionally keep runtime dependencies external.
 - Release zip artifacts are created in the repository root by `pnpm package:microservices`
+- `pnpm package:microservices` uses a temporary `.c8y/` staging directory, deletes old root `*.zip` artifacts before creating fresh ones, installs production dependencies inside a Linux Docker build so platform-specific optional native packages resolve correctly, and builds `linux/amd64` images unless `DOCKER_PLATFORM` is set explicitly.
 
 ## Code Style And Conventions
 
@@ -243,6 +248,7 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 - `secure-exec` is the execution boundary for both `query` and `execute`.
 - `tsdown` produces separate server and CLI bundles.
 - `@napi-rs/keyring` is used for local(cli) credential storage.
+- `secure-exec` must stay external in server builds. Bundling it into the microservice server output pulls in `node-stdlib-browser` resolution code and can crash at startup with `Cannot find module 'assert/'`.
 
 ### Patterns & Conventions
 
@@ -250,11 +256,15 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 - `query` and `execute` accept function-expression style code and normalize fenced code input before evaluation.
 - `#core-openapi` is a virtual module synthesized by a tsdown plugin; consumers must not import the JSON snapshots directly.
 - The CLI build inlines all `core-openapi/*.json` snapshots; each server build inlines exactly one.
+- Server builds should not use `noExternal: [/^.*$/]`. The microservice bundle is allowed to depend on runtime `node_modules`, and the release image must install those dependencies inside the Linux image rather than copying host `node_modules` from macOS.
+- `scripts/package-microservices.mjs` intentionally targets `linux/amd64` by default to avoid Apple Silicon release images failing with `exec format error` in Cumulocity.
 - Restrictions are both discoverability metadata and enforcement logic; both layers matter.
 - Server-mode auth must stay request-local.
+- For deployed microservice mode, prefer POST-only streamable HTTP over long-lived GET/SSE. The optional SSE channel can go inactive behind Cumulocity ingress and break later tool calls even when initialization and tool discovery succeeded.
 
 ### Common Mistakes To Avoid
 
 - Do not assume tests live in `tests/`; this repository uses `test/`.
 - Do not add tenant URL handling to server mode user flows; deployed mode derives tenant context from the environment and request auth.
 - Do not bypass `src/codemode/execute.ts` when changing execution behavior; that file is the main runtime boundary.
+- Do not rebundle `secure-exec` into the microservice server build unless you have verified the emitted server bundle starts cleanly with `node .output/<version>/server.mjs`.

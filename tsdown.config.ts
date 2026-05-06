@@ -107,9 +107,6 @@ const serverBuilds = VERSIONS.map((version) => ({
   dts: false,
   format: 'module' as const,
   plugins: [coreOpenApiPlugin({ mode: 'server', version })],
-  // mark everything as internal so that server build has no external dependencies
-  noExternal: [/^.*$/],
-  external: [],
   outDir: `.output/${version}`,
 }))
 
