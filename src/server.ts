@@ -21,7 +21,7 @@ export function createC8YMcpServer(): McpServer<undefined, C8yMcpCustomContext> 
       capabilities: {
         tools: { listChanged: true },
         prompts: { listChanged: true },
-        resources: { listChanged: false },
+        resources: { listChanged: true },
       },
     },
   ).withContext<C8yMcpCustomContext>()

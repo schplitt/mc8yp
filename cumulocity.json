@@ -2,7 +2,7 @@
   "apiVersion": "v2",
   "name": "mc8yp-server",
   "contextPath": "mc8yp-server",
-  "version": "0.0.0",
+  "version": "0.0.1235",
   "provider": {
     "name": "schplitt"
   },

@@ -3,4 +3,6 @@ node_modules
 dist
 *.tar
 .output
+.c8y
 .vscode/mcp.json
+.DS_Store
