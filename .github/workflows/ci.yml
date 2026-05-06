@@ -36,6 +36,3 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Package microservices
-        run: pnpm package:microservices
-
