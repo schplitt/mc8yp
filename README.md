@@ -154,27 +154,42 @@ async () => {
 
 ### Prompts
 
-| Prompt            | Description                                                                                                                               |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `code-mode-guide` | Full reference for the `query` and `execute` tools, including available types, examples, and restriction info for the current connection. |
+| Prompt            | Description                                                                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `code-mode-guide` | Full reference for the `query` and `execute` tools, including available types, examples, and access-policy info for the current connection. |
 
-## API Restrictions
+## API Access Policy
 
-Restrictions are deny rules that block specific API operations. They can be applied per-connection to limit what an AI agent can access.
+mc8yp supports two per-connection rule types:
+
+- **Restrictions** — deny rules that block matching API operations
+- **Allow rules** — allow-list rules that permit matching API operations and block everything else when at least one allow rule is configured
+
+If both apply to the same operation, **restrictions take priority**.
+
+Example: allowing `/inventory/**` but restricting `/inventory/managedObjects` still blocks `/inventory/managedObjects`.
+
+Both rule types use the same syntax.
+
+### Restrictions
+
+Restrictions are deny rules that block specific API operations.
+
+### Allow Rules
+
+Allow rules are the inverse of restrictions. They define what is permitted. When one or more allow rules are configured, any operation that does not match at least one allow rule is blocked.
 
 ### Rule Format
 
-A restriction can be written in either of these forms:
+A restriction or allow rule can be written in either of these forms:
 
 ```txt
 <path-pattern>
 <method>:<path-pattern>
 ```
 
-A restriction is always a deny rule.
-
-- **Without a method prefix** — blocks all HTTP methods for matching paths
-- **With a method prefix** — blocks only that method (for example `GET:`, `DELETE:`, `POST:`)
+- **Without a method prefix** — matches all HTTP methods for matching paths
+- **With a method prefix** — matches only that method (for example `GET:`, `DELETE:`, `POST:`)
 - **The `:` separator is only present when a method prefix is provided**
 - **Supported methods** — `DELETE`, `GET`, `HEAD`, `OPTIONS`, `PATCH`, `POST`, `PUT`, `TRACE`, or `*`
 - Method names are case-insensitive when parsed (`get:/inventory/**` becomes `GET:/inventory/**`)
@@ -183,7 +198,7 @@ A restriction is always a deny rule.
 
 Patterns are matched against the request **pathname**.
 
-- Query strings and fragments are **not allowed in restriction patterns**
+- Query strings and fragments are **not allowed in rule patterns**
 - Incoming request query strings are ignored for matching, so `/inventory/**` also matches requests such as `/inventory?pageSize=5`
 - Patterns must start with `/`
 - Matching is path-segment aware: `/` separates segments
@@ -207,26 +222,28 @@ Supported wildcards:
 
 ### Common Rule Examples
 
-| Rule                             | Effect                                                       |
-| -------------------------------- | ------------------------------------------------------------ |
-| `/inventory/**`                  | Block all methods on `/inventory` and everything below it    |
-| `DELETE:/inventory/**`           | Block only DELETE on `/inventory` and everything below it    |
-| `/alarm/alarms`                  | Block all methods on the exact path `/alarm/alarms`          |
-| `GET:/measurement/measurements`  | Block only GET on the exact path `/measurement/measurements` |
-| `POST:/inventory/managedObjects` | Block creating new managed objects                           |
-| `/i*/**`                         | Block all routes whose first path segment starts with `i`    |
-| `/user/**`                       | Block all user management paths                              |
+| Rule                             | Restriction Effect                                           | Allow-list Effect                                             |
+| -------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------- |
+| `/inventory/**`                  | Block all methods on `/inventory` and everything below it    | Permit all methods on `/inventory` and everything below it    |
+| `DELETE:/inventory/**`           | Block only DELETE on `/inventory` and everything below it    | Permit only DELETE on `/inventory` and everything below it    |
+| `/alarm/alarms`                  | Block all methods on the exact path `/alarm/alarms`          | Permit all methods on the exact path `/alarm/alarms`          |
+| `GET:/measurement/measurements`  | Block only GET on the exact path `/measurement/measurements` | Permit only GET on the exact path `/measurement/measurements` |
+| `POST:/inventory/managedObjects` | Block creating new managed objects                           | Permit creating new managed objects                           |
+| `/i*/**`                         | Block all routes whose first path segment starts with `i`    | Permit all routes whose first path segment starts with `i`    |
+| `/user/**`                       | Block all user management paths                              | Permit all user management paths                              |
 
 ### Important Notes
 
 - `/inventory/**` already matches `/inventory` itself, so you do **not** need both `/inventory` and `/inventory/**`
 - `/i**` is **not valid** because `**` must be its own segment. Use `/i*/**` if you want to match a first segment starting with `i` and everything below it
 - `*:/inventory/**` is allowed and means the same thing as `/inventory/**`
-- Restriction patterns may not contain empty segments (`//`), `.` or `..` segments, query strings, or fragments
+- Rule patterns may not contain empty segments (`//`), `.` or `..` segments, query strings, or fragments
 
 ### CLI Mode
 
-Pass restrictions as CLI arguments. Repeat `-r`, `--restrict`, or `--restriction` for multiple rules:
+Pass restrictions and allow rules as CLI arguments.
+
+Repeat `-r`, `--restrict`, or `--restriction` for deny rules:
 
 ```sh
 # Block all inventory access
@@ -242,24 +259,40 @@ mc8yp --restriction "/user/**"
 mc8yp --restrict "/user/**"
 ```
 
+Repeat `-a`, `--allow`, or `--allowed` for allow rules:
+
+```sh
+# Only permit inventory access
+mc8yp -a "/inventory/**"
+
+# Permit GET inventory access and POST alarms
+mc8yp --allow "GET:/inventory/**" --allowed "POST:/alarm/**"
+
+# Allow inventory broadly, but still block one path with a restriction
+mc8yp -a "/inventory/**" -r "/inventory/managedObjects"
+```
+
 ### Microservice Mode (HTTP)
 
-Pass restrictions as `restriction`, `restrict`, or `r` query parameters on the MCP endpoint URL:
+Pass restrictions as `restriction`, `restrict`, or `r` query parameters on the MCP endpoint URL.
+Pass allow rules as `allowed`, `allow`, or `a` query parameters.
 
 ```
 /mcp?restriction=/inventory/**&restrict=DELETE:/alarm/**
 /mcp?r=/inventory/**&r=DELETE:/alarm/**
+/mcp?allow=/inventory/**&allowed=POST:/alarm/**
+/mcp?a=/inventory/**&r=/inventory/managedObjects
 ```
 
-### How Restrictions Work
+### How Access Policy Works
 
-1. **OpenAPI spec annotation**: The `query` tool annotates blocked operations in the spec with `x-mc8yp-restricted` and related `x-mc8yp-*` metadata fields. The operations remain visible so the agent understands what exists, but they are clearly marked as blocked.
+1. **OpenAPI spec annotation**: The `query` tool annotates blocked operations in the spec with `x-mc8yp-restricted` and related `x-mc8yp-*` metadata fields. The operations remain visible so the agent understands what exists, but they are clearly marked as blocked. This includes both deny-rule matches and operations outside a configured allow list.
 
-2. **Sandbox request enforcement**: The `execute` tool checks restrictions inside the generated sandbox request helper, where the actual HTTP method and normalized path are both available. Matching requests are blocked before any `fetch` is attempted.
+2. **Sandbox request enforcement**: The `execute` tool checks restrictions and allow rules inside the generated sandbox request helper, where the actual HTTP method and normalized path are both available. Matching deny rules block first. If any allow rules are configured, requests must also match at least one allow rule.
 
 3. **Network boundary**: The secure-exec permission layer independently restricts network access to the configured tenant host. Other network operations are denied.
 
-When an `execute` request is blocked by MCP restrictions, the tool returns explanatory text stating that the operation was intentionally denied by MCP connection policy, no request was sent to Cumulocity, and retrying through the same connection will not help.
+When an `execute` request is blocked by MCP connection policy, the tool returns explanatory text stating that the operation was intentionally denied or not allow-listed, no request was sent to Cumulocity, and retrying through the same connection will not help.
 
 ## Build And Packaging
 

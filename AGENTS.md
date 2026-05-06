@@ -78,7 +78,7 @@ src/core-openapi.d.ts         Ambient type declarations for the `#core-openapi` 
 
 #### CLI mode
 
-1. `src/cli/index.ts` parses CLI arguments and restriction flags (`-r`, `--restrict`, and `--restriction`).
+1. `src/cli/index.ts` parses CLI arguments and access-policy flags (`-r`, `--restrict`, `--restriction`, `-a`, `--allow`, and `--allowed`).
 2. It accepts `--spec` / `-s` to select the bundled core OpenAPI snapshot exposed by `query`.
 3. It sets `globalThis.executionEnvironment = 'cli'`.
 4. It exposes credential lookup helpers on `globalThis` for tools and subcommands.
@@ -88,7 +88,7 @@ src/core-openapi.d.ts         Ambient type declarations for the `#core-openapi` 
 
 1. `src/index.ts` starts the HTTP server and exposes `/mcp` and `/health`.
 2. It sets `globalThis.executionEnvironment = 'server'`.
-3. It extracts auth from request headers and restrictions from `restriction`, `restrict`, and `r` query parameters.
+3. It extracts auth from request headers, restrictions from `restriction`, `restrict`, and `r` query parameters, and allow rules from `allowed`, `allow`, and `a` query parameters.
 4. It stores auth in request-local context and forwards the request to the shared MCP server.
 5. It configures the HTTP transport in POST-only mode (`disableSse: true`) because the optional long-lived GET/SSE channel proved unstable behind Cumulocity microservice ingress.
 
@@ -129,13 +129,17 @@ src/core-openapi.d.ts         Ambient type declarations for the `#core-openapi` 
 
 ### Restrictions
 
-Restrictions are deny rules with the format `[METHOD:]<path-pattern>`.
+Restrictions and allow rules both use the format `[METHOD:]<path-pattern>`.
+
+- Restrictions are deny rules.
+- Allow rules are allow-list entries. When any allow rule exists, requests must match at least one allow rule unless a restriction blocks them first.
+- Restrictions take priority over allow rules.
 
 The restriction system is implemented in two places:
 
 - `src/codemode/openapi-restrictions.ts` annotates blocked OpenAPI operations with `x-mc8yp-*` metadata.
-- `src/utils/restrictions.ts` enforces restriction parsing and query handling.
-- `src/utils/restriction-matcher.ts` owns restriction compilation and path matching.
+- `src/utils/restrictions.ts` parses both deny rules and allow rules and handles CLI/query input.
+- `src/utils/restriction-matcher.ts` owns rule compilation, path matching, and restriction-vs-allow precedence.
 - `src/codemode/network-permissions.ts` enforces secure-exec network decisions for live execute requests.
 
 This dual behavior is intentional: agents can still inspect restricted operations for context, but cannot execute them through the same MCP connection.
@@ -194,7 +198,7 @@ pnpm prerelease    # lint + typecheck + build
 - TypeScript strict mode enabled
 - Node.js `>=24.0.0`
 - Keep the MCP registration surface in `src/server.ts`, `src/tools/`, and `src/prompts/`
-- Keep restriction parsing and query handling logic in `src/utils/restrictions.ts`, and keep restriction compilation/matching logic in `src/utils/restriction-matcher.ts`
+- Keep restriction/allow parsing and query handling logic in `src/utils/restrictions.ts`, and keep rule compilation/matching logic in `src/utils/restriction-matcher.ts`
 - Keep sandbox/runtime behavior in `src/codemode/execute.ts` rather than duplicating execution logic in tools
 - Prefer mode-aware behavior instead of branching deep in unrelated modules
 
@@ -202,16 +206,18 @@ pnpm prerelease    # lint + typecheck + build
 
 - If a change affects tool behavior, inspect both the tool definition and the codemode runtime.
 - If a change affects core OpenAPI selection, update the `#core-openapi` plugin in `tsdown.config.ts` and the ambient declaration in `src/core-openapi.d.ts`.
-- If a change affects restrictions, verify both spec annotation behavior and live request blocking.
+- If a change affects restrictions or allow rules, verify both spec annotation behavior and live request blocking.
 - If a change affects auth, verify the CLI and server paths separately.
 - If a change affects public MCP behavior, update `README.md` as well as this file.
+- Prefer running ESLint autofix (`pnpm lint:fix` or `eslint --fix` on targeted files) before manually fixing simple lint issues by hand.
+- Do not introduce tiny one-line helper/utility functions for trivial logic; inline that logic directly where it is used instead.
 
 ## Testing
 
 - Tests live in `test/`
 - Use `*.test.ts` for tests and `*.bench.ts` for benchmarks
 - Prefer adding targeted tests near the affected behavior:
-  - restriction parsing/matching changes: `test/restriction-core.test.ts` or `test/restrictions.test.ts`
+  - restriction/allow parsing or matching changes: `test/restriction-core.test.ts` or `test/restrictions.test.ts`
   - OpenAPI annotation changes: `test/openapi-restrictions.test.ts`
   - codemode runtime changes: `test/excute.test.ts`
   - concurrency behavior: `test/semaphore.test.ts`
@@ -227,7 +233,7 @@ Run these before finishing meaningful changes:
 When making changes to the project:
 
 - **`AGENTS.md`** — Update with repo-specific architecture, workflows, conventions, and implementation notes for coding agents
-- **`README.md`** — Update for any user-facing MCP behavior changes, new prompts/tools, changed CLI usage, changed restrictions behavior, deployment changes, or credential changes
+- **`README.md`** — Update for any user-facing MCP behavior changes, new prompts/tools, changed CLI usage, changed restriction/allow behavior, deployment changes, or credential changes
 
 ## Agent Guidelines
 
@@ -236,7 +242,7 @@ When working on this project:
 1. Start from the actual controlling surface. For most feature work that is `src/tools/`, `src/prompts/`, `src/codemode/execute.ts`, or restriction/auth utilities.
 2. Treat CLI mode and microservice mode as separate execution environments with different auth and tool availability.
 3. Run focused tests first when changing a narrow subsystem, then run the full validation set if the change is broader.
-4. Do not remove restriction annotations from the OpenAPI view just because execution is blocked; visibility and enforcement are intentionally separate.
+4. Do not remove blocked-operation annotations from the OpenAPI view just because execution is blocked; visibility and enforcement are intentionally separate for both restrictions and allow lists.
 5. Keep public MCP tool and prompt descriptions aligned with actual runtime behavior.
 6. Preserve the current sandbox limits and request boundary logic unless the task explicitly changes them.
 7. Record recurring project-specific lessons in the section below when they are likely to prevent future mistakes.
@@ -264,7 +270,7 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 - The CLI build inlines all `core-openapi/*.json` snapshots; each server build inlines exactly one.
 - Server builds should not use `noExternal: [/^.*$/]`. The microservice bundle is allowed to depend on runtime `node_modules`, and the release image must install those dependencies inside the Linux image rather than copying host `node_modules` from macOS.
 - `scripts/package-microservices.mjs` intentionally targets `linux/amd64` by default to avoid Apple Silicon release images failing with `exec format error` in Cumulocity.
-- Restrictions are both discoverability metadata and enforcement logic; both layers matter.
+- Restrictions and allow rules are both discoverability metadata and enforcement logic; both layers matter.
 - When creating branches for user-requested work, prefer conventional prefixes that match the intended change type, especially `feat/`, `test/`, and `chore/`.
 - Server-mode auth must stay request-local.
 - For deployed microservice mode, prefer POST-only streamable HTTP over long-lived GET/SSE. The optional SSE channel can go inactive behind Cumulocity ingress and break later tool calls even when initialization and tool discovery succeeded.

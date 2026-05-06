@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest'
 import {
   compileRestrictionRule,
   findBlockingRestrictions,
+  findMatchingRules,
   matchesCompiledRule,
 } from '../src/utils/restriction-matcher'
-import { parseRestrictionRule } from '../src/utils/restrictions'
+import { parseAllowRule, parseRestrictionRule } from '../src/utils/restrictions'
 
 const INVALID_RESTRICTION_PAYLOADS = [
   '/inventory/managedObjects");globalThis.pwned=true;("',
@@ -168,6 +169,17 @@ function parseSingleRule(input: string) {
   return rule
 }
 
+function parseSingleAllowRule(input: string) {
+  const result = parseAllowRule([input])
+  const rule = result.parsedRules[0]
+
+  if (!rule || result.failedRules.length > 0) {
+    throw new Error(`Expected a valid allow rule: ${input}`)
+  }
+
+  return rule
+}
+
 function toPathSegments(path: string): string[] {
   return path === '/' ? [] : path.slice(1).split('/')
 }
@@ -176,6 +188,7 @@ describe('restriction core helpers', () => {
   it('parses safe restriction paths without normalization', () => {
     expect(parseRestrictionRule('get:/inventory/*/child')).toEqual({
       parsedRules: [{
+        type: 'deny',
         method: 'GET',
         pathPattern: '/inventory/*/child',
         source: 'get:/inventory/*/child',
@@ -184,6 +197,7 @@ describe('restriction core helpers', () => {
     })
     expect(parseRestrictionRule('/inventory/managedObjects*/**/evil')).toEqual({
       parsedRules: [{
+        type: 'deny',
         method: '*',
         pathPattern: '/inventory/managedObjects*/**/evil',
         source: '/inventory/managedObjects*/**/evil',
@@ -192,9 +206,19 @@ describe('restriction core helpers', () => {
     })
   })
 
-  it('accepts explicit wildcard method prefixes', () => {
+  it('accepts explicit wildcard method prefixes for restrictions and allow rules', () => {
     expect(parseRestrictionRule('*:/inventory/**')).toEqual({
       parsedRules: [{
+        type: 'deny',
+        method: '*',
+        pathPattern: '/inventory/**',
+        source: '*:/inventory/**',
+      }],
+      failedRules: [],
+    })
+    expect(parseAllowRule('*:/inventory/**')).toEqual({
+      parsedRules: [{
+        type: 'allow',
         method: '*',
         pathPattern: '/inventory/**',
         source: '*:/inventory/**',
@@ -227,7 +251,7 @@ describe('restriction core helpers', () => {
     expect(matchesCompiledRule(compiledRule, method, toPathSegments(path))).toBe(expected)
   })
 
-  it('finds blocked rules using the shared matching logic', () => {
+  it('finds blocked restriction rules using the shared matching logic', () => {
     const rules = [
       parseSingleRule('GET:/inventory/**'),
       parseSingleRule('/alarm/*'),
@@ -236,6 +260,17 @@ describe('restriction core helpers', () => {
     expect(findBlockingRestrictions(rules, 'GET', '/inventory/managedObjects/123').map((rule) => rule.source)).toEqual(['GET:/inventory/**'])
     expect(findBlockingRestrictions(rules, 'POST', '/alarm/alarms').map((rule) => rule.source)).toEqual(['/alarm/*'])
     expect(findBlockingRestrictions(rules, 'POST', '/event/events')).toEqual([])
+  })
+
+  it('finds matching allow rules using the shared matching logic', () => {
+    const rules = [
+      parseSingleAllowRule('GET:/inventory/**'),
+      parseSingleAllowRule('/alarm/*'),
+    ]
+
+    expect(findMatchingRules(rules, 'GET', '/inventory/managedObjects/123').map((rule) => rule.source)).toEqual(['GET:/inventory/**'])
+    expect(findMatchingRules(rules, 'POST', '/alarm/alarms').map((rule) => rule.source)).toEqual(['/alarm/*'])
+    expect(findMatchingRules(rules, 'POST', '/event/events')).toEqual([])
   })
 
   it.each(BLOCKED_RULE_CASES)('$description', ({ rules, method, path, expected }) => {

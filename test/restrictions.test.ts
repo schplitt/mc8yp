@@ -2,8 +2,8 @@ import http from 'node:http'
 import { NodeRuntime, createNodeDriver, createNodeRuntimeDriverFactory } from 'secure-exec'
 import { describe, expect, it } from 'vitest'
 import { createNetworkPermissionDecision } from '../src/codemode/network-permissions'
-import { findBlockingRestrictions } from '../src/utils/restriction-matcher'
-import { parseRestrictionRule } from '../src/utils/restrictions'
+import { findBlockingRestrictions, findMatchingRules } from '../src/utils/restriction-matcher'
+import { parseAllowRule, parseRestrictionRule } from '../src/utils/restrictions'
 
 function parseSingleRule(input: string) {
   const result = parseRestrictionRule([input])
@@ -16,10 +16,22 @@ function parseSingleRule(input: string) {
   return rule
 }
 
+function parseSingleAllowRule(input: string) {
+  const result = parseAllowRule([input])
+  const rule = result.parsedRules[0]
+
+  if (!rule || result.failedRules.length > 0) {
+    throw new Error(`Expected a valid allow rule: ${input}`)
+  }
+
+  return rule
+}
+
 describe('restriction parsing', () => {
   it('parses methodless restrictions as all-method deny rules', () => {
     expect(parseRestrictionRule('/inventory/**')).toEqual({
       parsedRules: [{
+        type: 'deny',
         method: '*',
         pathPattern: '/inventory/**',
         source: '/inventory/**',
@@ -31,6 +43,7 @@ describe('restriction parsing', () => {
   it('parses method-scoped restrictions', () => {
     expect(parseRestrictionRule('get:/inventory/**')).toEqual({
       parsedRules: [{
+        type: 'deny',
         method: 'GET',
         pathPattern: '/inventory/**',
         source: 'get:/inventory/**',
@@ -47,12 +60,56 @@ describe('restriction parsing', () => {
       '',
     ])).toEqual({
       parsedRules: [
-        { method: '*', pathPattern: '/inventory/**', source: '/inventory/**' },
-        { method: 'POST', pathPattern: '/alarm/**', source: 'POST:/alarm/**' },
+        { type: 'deny', method: '*', pathPattern: '/inventory/**', source: '/inventory/**' },
+        { type: 'deny', method: 'POST', pathPattern: '/alarm/**', source: 'POST:/alarm/**' },
       ],
       failedRules: [
         { rule: 'BAD:/devicecontrol/**', reason: 'Unsupported restriction method "BAD".' },
         { rule: '', reason: 'Restriction value must not be empty.' },
+      ],
+    })
+  })
+})
+
+describe('allow parsing', () => {
+  it('parses methodless allow rules as all-method allow rules', () => {
+    expect(parseAllowRule('/inventory/**')).toEqual({
+      parsedRules: [{
+        type: 'allow',
+        method: '*',
+        pathPattern: '/inventory/**',
+        source: '/inventory/**',
+      }],
+      failedRules: [],
+    })
+  })
+
+  it('parses method-scoped allow rules', () => {
+    expect(parseAllowRule('get:/inventory/**')).toEqual({
+      parsedRules: [{
+        type: 'allow',
+        method: 'GET',
+        pathPattern: '/inventory/**',
+        source: 'get:/inventory/**',
+      }],
+      failedRules: [],
+    })
+  })
+
+  it('aggregates parsed and failed allow values', () => {
+    expect(parseAllowRule([
+      '/inventory/**',
+      'POST:/alarm/**',
+      'BAD:/devicecontrol/**',
+      '',
+    ])).toEqual({
+      parsedRules: [
+        { type: 'allow', method: '*', pathPattern: '/inventory/**', source: '/inventory/**' },
+        { type: 'allow', method: 'POST', pathPattern: '/alarm/**', source: 'POST:/alarm/**' },
+      ],
+      failedRules: [
+        { rule: 'BAD:/devicecontrol/**', reason: 'Unsupported allow method "BAD".' },
+        { rule: '', reason: 'Allow value must not be empty.' },
       ],
     })
   })
@@ -85,6 +142,32 @@ describe('restriction matching', () => {
   it('does not treat missing method metadata as GET for method-specific restrictions', () => {
     expect(findBlockingRestrictions(rules, undefined, '/alarm/alarms')).toEqual([])
     expect(findBlockingRestrictions(rules, '', '/alarm/alarms')).toEqual([])
+  })
+})
+
+describe('allow matching', () => {
+  const rules = [
+    parseSingleAllowRule('/inventory/**'),
+    parseSingleAllowRule('POST:/alarm/**'),
+  ]
+
+  it('matches every method when no method prefix is provided', () => {
+    expect(findMatchingRules(rules, 'GET', '/inventory/managedObjects').map((rule) => rule.source)).toEqual(['/inventory/**'])
+  })
+
+  it('keeps method-specific allow rules scoped to that method', () => {
+    expect(findMatchingRules(rules, 'GET', '/alarm/alarms')).toEqual([])
+    expect(findMatchingRules(rules, 'POST', '/alarm/alarms').map((rule) => rule.source)).toEqual(['POST:/alarm/**'])
+  })
+
+  it('still applies catch-all allow rules when method metadata is missing', () => {
+    expect(findMatchingRules(rules, undefined, '/inventory/managedObjects').map((rule) => rule.source)).toEqual(['/inventory/**'])
+    expect(findMatchingRules(rules, '', '/inventory/managedObjects').map((rule) => rule.source)).toEqual(['/inventory/**'])
+  })
+
+  it('does not treat missing method metadata as GET for method-specific allow rules', () => {
+    expect(findMatchingRules(rules, undefined, '/alarm/alarms')).toEqual([])
+    expect(findMatchingRules(rules, '', '/alarm/alarms')).toEqual([])
   })
 })
 
@@ -148,6 +231,52 @@ describe('network permission decisions', () => {
     ])).toEqual({
       allow: false,
       reason: 'Network connect blocked by MCP restrictions: /inventory/**, GET:/inventory/**',
+    })
+  })
+
+  it('allows requests that match the configured allow list', () => {
+    expect(createNetworkPermissionDecision(tenantUrl, {
+      op: 'connect',
+      hostname: 'tenant.example.com',
+      method: 'GET',
+      url: 'https://tenant.example.com/inventory/managedObjects?pageSize=5',
+    }, [], [parseSingleAllowRule('GET:/inventory/**')])).toEqual({
+      allow: true,
+    })
+  })
+
+  it('blocks requests outside the configured allow list when method and url are available', () => {
+    expect(createNetworkPermissionDecision(tenantUrl, {
+      op: 'connect',
+      hostname: 'tenant.example.com',
+      method: 'GET',
+      url: 'https://tenant.example.com/alarm/alarms?pageSize=5',
+    }, [], [parseSingleAllowRule('GET:/inventory/**')])).toEqual({
+      allow: false,
+      reason: 'Network connect blocked by MCP allow list: no allow rule matched GET /alarm/alarms. Configured allow rules: GET:/inventory/**',
+    })
+  })
+
+  it('lets restrictions take priority over matching allow rules', () => {
+    expect(createNetworkPermissionDecision(tenantUrl, {
+      op: 'connect',
+      hostname: 'tenant.example.com',
+      method: 'GET',
+      url: 'https://tenant.example.com/inventory/managedObjects?pageSize=5',
+    }, [parseSingleRule('/inventory/managedObjects')], [parseSingleAllowRule('/inventory/**')])).toEqual({
+      allow: false,
+      reason: 'Network connect blocked by MCP restrictions: /inventory/managedObjects',
+    })
+  })
+
+  it('does not enforce allow lists when secure-exec omits the request method', () => {
+    expect(createNetworkPermissionDecision(tenantUrl, {
+      op: 'connect',
+      hostname: 'tenant.example.com',
+      method: '',
+      url: 'https://tenant.example.com/alarm/alarms?pageSize=5',
+    }, [], [parseSingleAllowRule('GET:/inventory/**')])).toEqual({
+      allow: true,
     })
   })
 

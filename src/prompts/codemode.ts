@@ -20,8 +20,13 @@ export function createCodeModeGuidePrompt(server: McpServer<undefined, C8yMcpCus
     description: 'Guide for the two code-mode tools: query and execute, including available shapes and examples.',
   }, () => {
     const restrictions = server.ctx.custom?.restrictions ?? []
-    const restrictionSection = restrictions.length > 0
-      ? `\n## Current Connection Restrictions\nThe current MCP connection blocks matching operations using these deny rules:\n${restrictions.map((rule) => `- \`${rule.source}\``).join('\n')}\n\nRestricted operations stay visible in the spec and are annotated with \`x-mc8yp-restricted\` and related \`x-mc8yp-*\` fields.\n`
+    const allowRules = server.ctx.custom?.allowRules ?? []
+    const policyLines = [
+      ...restrictions.map((rule) => `- deny: \`${rule.source}\``),
+      ...allowRules.map((rule) => `- allow: \`${rule.source}\``),
+    ]
+    const restrictionSection = policyLines.length > 0
+      ? `\n## Current Connection Access Policy\n${policyLines.join('\n')}\n\nBlocked operations stay visible in the spec and are annotated with \`x-mc8yp-restricted\` and related \`x-mc8yp-*\` fields.\n`
       : ''
 
     return prompt.message(
@@ -37,7 +42,7 @@ Use \`query\` when you need to inspect the core OpenAPI spec.
 - Return the exact value you want back from that function
 - Sync and async functions are both supported
 - Strings are returned as-is; other results are returned as JSON text
-- Restricted operations stay visible and are annotated with \`x-mc8yp-restricted\` and related \`x-mc8yp-*\` fields
+- Blocked operations stay visible and are annotated with \`x-mc8yp-restricted\` and related \`x-mc8yp-*\` fields
 - Treat operations marked with \`x-mc8yp-restricted\` as intentionally unavailable on this MCP connection; inspect them for context, but do not plan to execute them
 
 ### Available Shape
@@ -86,8 +91,8 @@ Use \`execute\` when you want to call the real Cumulocity API.
 - Return the value you want from that function; async functions are usually the right choice here
 - On success, the returned value is sent back in Toon format
 - If execution is blocked or fails, execute returns a plain text error message
-- The current MCP connection may reject restricted method/path combinations before network access
-- If a request is blocked by MCP connection policy, \`execute\` returns an explanatory text message. That is an intentional connection-level restriction, not a Cumulocity API failure, and retrying through the same connection will not help
+- The current MCP connection may reject restricted method/path combinations before network access, and it may also reject requests that are outside a configured allow list
+- If a request is blocked by MCP connection policy, \`execute\` returns an explanatory text message. That is an intentional connection-level access restriction, not a Cumulocity API failure, and retrying through the same connection will not help
 
 ### Available Shape
 \`\`\`ts

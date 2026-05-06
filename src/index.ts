@@ -5,7 +5,7 @@ import { createC8YMcpServer } from './server'
 import { getAuthContext } from './ctx/auth'
 import process from 'node:process'
 import { extractAuthFromHeaders } from './utils/auth'
-import { parseRestrictionRule } from './utils/restrictions'
+import { parseAllowRule, parseRestrictionRule } from './utils/restrictions'
 
 globalThis.executionEnvironment = 'server'
 
@@ -23,22 +23,38 @@ const app = new H3().all('/mcp', async (event) => {
   const restrictionSources = [query.restriction, query.restrict, query.r].flatMap((value) => Array.isArray(value) ? value : [value]).filter(
     (value): value is string => typeof value === 'string' && value.length > 0,
   )
-  const { parsedRules, failedRules } = parseRestrictionRule(restrictionSources)
+  const { parsedRules: restrictions, failedRules: failedRestrictions } = parseRestrictionRule(restrictionSources)
 
-  if (failedRules.length > 0) {
+  if (failedRestrictions.length > 0) {
     throw new HTTPError({
       status: 400,
       statusText: 'Invalid restriction query',
       message: 'One or more restriction query parameters (?restriction, ?restrict, ?r) could not be parsed.',
       data: {
-        failedRules,
+        failedRules: failedRestrictions,
+      },
+    })
+  }
+
+  const allowSources = [query.allowed, query.allow, query.a].flatMap((value) => Array.isArray(value) ? value : [value]).filter(
+    (value): value is string => typeof value === 'string' && value.length > 0,
+  )
+  const { parsedRules: allowRules, failedRules: failedAllowRules } = parseAllowRule(allowSources)
+
+  if (failedAllowRules.length > 0) {
+    throw new HTTPError({
+      status: 400,
+      statusText: 'Invalid allow query',
+      message: 'One or more allow query parameters (?allowed, ?allow, ?a) could not be parsed.',
+      data: {
+        failedRules: failedAllowRules,
       },
     })
   }
 
   // Set auth context for the request
   const authContext = getAuthContext()
-  return authContext.call(credentials, () => transport.respond(event.req, { restrictions: parsedRules }))
+  return authContext.call(credentials, () => transport.respond(event.req, { restrictions, allowRules }))
 })
 
 app.get('/health', () => 'OK')
