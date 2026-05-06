@@ -3,25 +3,17 @@ import { getCoreOpenApiSpec } from '#core-openapi'
 import { NodeRuntime, createNodeDriver, createNodeRuntimeDriverFactory } from 'secure-exec'
 import { applyRestrictionsToOpenApiSpec } from './openapi-restrictions'
 import { AsyncSemaphore } from './semaphore'
+import { createNetworkPermissionDecision } from './network-permissions'
 import { createC8yAuthHeaders, resolveC8yAuth } from '../utils/client'
 import {
-  HTTP_METHODS,
   compileRestrictionRule,
   compileRestrictionSegment,
-  compileRestrictionSources,
   escapeRestrictionRegex,
-  getBlockedCompiledRestrictions,
   matchCompiledSegments,
   matchesCompiledRule,
-  normalizeAndValidateRestrictionPath,
-  normalizeRestrictionMatchPath,
-  parseRestrictionRule,
-
-} from '../utils/restriction-core'
-import type { RestrictionRule } from '../utils/restriction-core'
-import {
-  createNetworkPermissionDecision,
-} from '../utils/restrictions'
+} from '../utils/restriction-matcher'
+import { HTTP_METHODS } from '../utils/restrictions'
+import type { RestrictionRule } from '../utils/restrictions'
 
 const NO_DEFAULT_EXPORT_MESSAGE = 'Execution completed without returning a value.'
 const QUERY_ENTRY_PATH = '/codemode-query.mjs'
@@ -45,19 +37,12 @@ type ExecuteEnvelope = ExecuteSuccessEnvelope | ExecuteErrorEnvelope
 
 function serializeExecuteConfig(tenantUrl: string, headers: Record<string, string>, restrictions: readonly RestrictionRule[]): string {
   const normalizedTenantUrl = new URL(tenantUrl).toString()
-  const restrictionSources = restrictions.map((rule) => {
-    const parsedRule = parseRestrictionRule(rule.source)
-    if (parsedRule.method !== rule.method || parsedRule.pathPattern !== rule.pathPattern) {
-      throw new TypeError(`Restriction source "${rule.source}" does not match its parsed shape.`)
-    }
-    return parsedRule.source
-  })
+  const serializedRestrictions = restrictions.map(({ method, pathPattern, source }) => ({ method, pathPattern, source }))
 
   return JSON.stringify({
     tenantUrl: normalizedTenantUrl,
-    tenantOrigin: new URL(normalizedTenantUrl).origin,
     authHeaders: headers,
-    restrictionSources,
+    restrictions: serializedRestrictions,
   })
 }
 
@@ -125,19 +110,15 @@ export function buildExecutePrelude(tenantUrl: string, headers: Record<string, s
     '  if (!config || typeof config !== "object") {',
     '    throw new TypeError("Invalid execute configuration.");',
     '  }',
-    '  const { tenantUrl, tenantOrigin, authHeaders, restrictionSources } = config;',
-    '  if (typeof tenantUrl !== "string" || typeof tenantOrigin !== "string") {',
-    '    throw new TypeError("Execute configuration must contain string tenant values.");',
+    '  const { tenantUrl, authHeaders, restrictions } = config;',
+    '  if (typeof tenantUrl !== "string") {',
+    '    throw new TypeError("Execute configuration must contain a string tenant URL.");',
     '  }',
-    '  if (!Array.isArray(restrictionSources) || restrictionSources.some((source) => typeof source !== "string")) {',
-    '    throw new TypeError("Execute configuration must contain string restriction sources.");',
+    '  if (!Array.isArray(restrictions) || restrictions.some((rule) => !rule || typeof rule !== "object" || typeof rule.method !== "string" || typeof rule.pathPattern !== "string" || typeof rule.source !== "string")) {',
+    '    throw new TypeError("Execute configuration must contain valid restriction rules.");',
     '  }',
     '  const resolveUrl = (descriptor) => {',
-    '    const resolved = new URL(descriptor, tenantUrl.endsWith("/") ? tenantUrl : tenantUrl + "/");',
-    '    if (resolved.origin !== tenantOrigin) {',
-    '      throw new Error("Cumulocity requests must target the configured tenant origin.");',
-    '    }',
-    '    return resolved;',
+    '    return new URL(descriptor, tenantUrl.endsWith("/") ? tenantUrl : tenantUrl + "/");',
     '  };',
     '  const normalizeRequest = (options) => {',
     '    if (!options || typeof options !== "object") {',
@@ -146,18 +127,34 @@ export function buildExecutePrelude(tenantUrl: string, headers: Record<string, s
     '    const { path, ...rest } = options;',
     '    return { path, init: rest };',
     '  };',
-    `  const HTTP_METHOD_SET = new Set(${JSON.stringify(HTTP_METHODS)});`,
-    `  const normalizeRestrictionMatchPath = ${normalizeRestrictionMatchPath.toString()};`,
-    `  const normalizeAndValidateRestrictionPath = ${normalizeAndValidateRestrictionPath.toString()};`,
-    `  const parseRestrictionRule = ${parseRestrictionRule.toString()};`,
+    `  const HTTP_METHODS = ${JSON.stringify(HTTP_METHODS)};`,
+    '  const HTTP_METHOD_SET = new Set(HTTP_METHODS);',
     `  const escapeRestrictionRegex = ${escapeRestrictionRegex.toString()};`,
     `  const compileRestrictionSegment = ${compileRestrictionSegment.toString()};`,
     `  const matchCompiledSegments = ${matchCompiledSegments.toString()};`,
     `  const compileRestrictionRule = ${compileRestrictionRule.toString()};`,
     `  const matchesCompiledRule = ${matchesCompiledRule.toString()};`,
-    `  const compileRestrictionSources = ${compileRestrictionSources.toString()};`,
-    `  const getBlockedCompiledRestrictions = ${getBlockedCompiledRestrictions.toString()};`,
-    '  const compiledRestrictions = compileRestrictionSources(restrictionSources);',
+    '  const compiledRestrictions = restrictions.map(compileRestrictionRule);',
+    '  const findBlockingRestrictions = (method, pathname) => {',
+    '    const normalizedMethod = typeof method === "string" ? method.trim().toUpperCase() : "";',
+    '    const pathSegments = pathname === "/" ? [] : pathname.slice(1).split("/");',
+    '    return compiledRestrictions.filter((rule) => {',
+    '      if (!normalizedMethod) {',
+    '        return rule.method === "*" && matchCompiledSegments(rule.segments, pathSegments);',
+    '      }',
+    '      return matchesCompiledRule(rule, normalizedMethod, pathSegments);',
+    '    });',
+    '  };',
+    '  const validateRequestMethod = (method) => {',
+    '    if (typeof method !== "string" || method.trim().length === 0) {',
+    '      throw new TypeError("request method must be a non-empty string");',
+    '    }',
+    '    const normalizedMethod = method.trim().toUpperCase();',
+    '    if (!HTTP_METHOD_SET.has(normalizedMethod)) {',
+    '      throw new TypeError("request method must be one of: " + HTTP_METHODS.join(", "));',
+    '    }',
+    '    return normalizedMethod;',
+    '  };',
     '  const formatBlockedRequestMessage = (method, path, matchingRules) => [',
     '    "Request blocked by MCP connection policy.",',
     '    "",',
@@ -203,10 +200,10 @@ export function buildExecutePrelude(tenantUrl: string, headers: Record<string, s
     '      if (typeof path !== "string" || path.length === 0) {',
     '        throw new TypeError("request path must be a non-empty string");',
     '      }',
+    '      const method = validateRequestMethod(init.method);',
     '      const resolvedUrl = resolveUrl(path);',
-    '      const blockedRules = getBlockedCompiledRestrictions(compiledRestrictions, init.method, resolvedUrl.pathname);',
+    '      const blockedRules = findBlockingRestrictions(method, resolvedUrl.pathname);',
     '      if (blockedRules.length > 0) {',
-    '        const method = typeof init.method === "string" && init.method.trim() ? init.method.trim().toUpperCase() : "GET";',
     '        throw new Error(formatBlockedRequestMessage(method, resolvedUrl.pathname, blockedRules.map((rule) => rule.source)));',
     '      }',
     '      const headers = new Headers(init.headers ?? {});',
@@ -217,6 +214,7 @@ export function buildExecutePrelude(tenantUrl: string, headers: Record<string, s
     '      const requestHeaders = Object.fromEntries(headers.entries());',
     '      const response = await fetch(resolvedUrl.toString(), {',
     '        ...init,',
+    '        method,',
     '        headers: requestHeaders,',
     '        body,',
     '      });',

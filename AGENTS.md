@@ -33,6 +33,7 @@ src/
         remove.ts             Remove stored credentials
   codemode/
     execute.ts                Sandboxed query/execute runtime generation
+    network-permissions.ts    Secure-exec network permission decisions for execute mode
     openapi-restrictions.ts   OpenAPI restriction annotation
     semaphore.ts              Concurrency limiter for sandbox execution
   ctx/
@@ -51,8 +52,8 @@ src/
     c8y-types.ts              Cumulocity-specific shared types
     client.ts                 Auth/header resolution for live requests
     credentials.ts            OS keyring credential storage and lookup
-    restriction-core.ts       Restriction parsing, compilation, and matching
-    restrictions.ts           Restriction query parsing and network decisions
+    restriction-matcher.ts    Restriction compilation and path matching helpers
+    restrictions.ts           Restriction parsing and query handling
     schema.ts                 Shared schema helpers
 test/
   excute.test.ts
@@ -133,7 +134,9 @@ Restrictions are deny rules with the format `[METHOD:]<path-pattern>`.
 The restriction system is implemented in two places:
 
 - `src/codemode/openapi-restrictions.ts` annotates blocked OpenAPI operations with `x-mc8yp-*` metadata.
-- `src/utils/restrictions.ts` and `src/utils/restriction-core.ts` enforce matching rules for live requests and query parsing.
+- `src/utils/restrictions.ts` enforces restriction parsing and query handling.
+- `src/utils/restriction-matcher.ts` owns restriction compilation and path matching.
+- `src/codemode/network-permissions.ts` enforces secure-exec network decisions for live execute requests.
 
 This dual behavior is intentional: agents can still inspect restricted operations for context, but cannot execute them through the same MCP connection.
 
@@ -191,7 +194,7 @@ pnpm prerelease    # lint + typecheck + build
 - TypeScript strict mode enabled
 - Node.js `>=24.0.0`
 - Keep the MCP registration surface in `src/server.ts`, `src/tools/`, and `src/prompts/`
-- Keep restriction parsing and matching logic in `src/utils/restriction-core.ts` and `src/utils/restrictions.ts`
+- Keep restriction parsing and query handling logic in `src/utils/restrictions.ts`, and keep restriction compilation/matching logic in `src/utils/restriction-matcher.ts`
 - Keep sandbox/runtime behavior in `src/codemode/execute.ts` rather than duplicating execution logic in tools
 - Prefer mode-aware behavior instead of branching deep in unrelated modules
 

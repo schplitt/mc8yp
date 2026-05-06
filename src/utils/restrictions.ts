@@ -1,13 +1,25 @@
-import type { createNodeDriver } from 'secure-exec'
-import { parseURL } from 'ufo'
-import {
-  HTTP_METHODS,
-  compileRestrictionRule,
-  matchesCompiledRule,
-  parseRestrictionRule,
+export const HTTP_METHODS = ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE'] as const
 
-} from './restriction-core'
-import type { CompiledRestrictionRule, HttpMethod, RestrictionMethod, RestrictionRule } from './restriction-core'
+export type HttpMethod = (typeof HTTP_METHODS)[number]
+export type RestrictionMethod = HttpMethod | '*'
+
+const HTTP_METHOD_SET: ReadonlySet<string> = new Set(HTTP_METHODS)
+
+export interface RestrictionRule {
+  method: RestrictionMethod
+  pathPattern: string
+  source: string
+}
+
+export interface InvalidRestrictionRule {
+  rule: string
+  reason: string
+}
+
+export interface RestrictionParseResult {
+  parsedRules: RestrictionRule[]
+  failedRules: InvalidRestrictionRule[]
+}
 
 export const RESTRICTION_EXTENSION_KEY = 'x-mc8yp-restrictions'
 export const RESTRICTED_OPERATION_FLAG = 'x-mc8yp-restricted'
@@ -16,98 +28,143 @@ export const RESTRICTED_OPERATION_RULES = 'x-mc8yp-restrictionRules'
 export const RESTRICTED_OPERATION_TYPE = 'x-mc8yp-restrictionType'
 export const RESTRICTED_AGENT_NOTE = 'x-mc8yp-agentNote'
 
-export {
-  HTTP_METHODS,
-  compileRestrictionRule,
-  matchesCompiledRule,
-  parseRestrictionRule,
-  type CompiledRestrictionRule,
-  type HttpMethod,
-  type RestrictionMethod,
-  type RestrictionRule,
-}
+export function parseRestrictionRule(input: string | readonly string[]): RestrictionParseResult {
+  const segmentPattern = /^[A-Za-z0-9._~*-]+$/
+  const inputs = typeof input === 'string' ? [input] : input
+  const parsedRules: RestrictionRule[] = []
+  const failedRules: InvalidRestrictionRule[] = []
 
-const HTTP_METHOD_SET: ReadonlySet<string> = new Set(HTTP_METHODS)
-
-export interface RestrictionMatch {
-  method: HttpMethod
-  path: string
-  matchingRules: RestrictionRule[]
-}
-
-type NetworkPermissionDecider = NonNullable<NonNullable<NonNullable<Parameters<typeof createNodeDriver>[0]>['permissions']>['network']>
-
-type NetworkPermissionRequest = Parameters<NetworkPermissionDecider>[0]
-
-type NetworkPermissionDecision = ReturnType<NetworkPermissionDecider>
-
-// --- internals (3 functions: path norm, method norm, recursive segment match) ---
-
-function normalizePath(value: string): string {
-  let raw = value.trim()
-  if (!raw)
-    return '/'
-  try {
-    if (/^[A-Za-z][A-Za-z\d+\-.]*:\/\//.test(raw)) {
-      raw = new URL(raw).pathname || '/'
+  for (const source of inputs) {
+    if (!source) {
+      failedRules.push({
+        rule: source,
+        reason: 'Restriction value must not be empty.',
+      })
+      continue
     }
-  } catch { /* use raw */ }
-  raw = (raw.split('#', 1)[0] ?? raw).split('?', 1)[0] ?? raw
-  raw = raw.startsWith('/') ? raw : `/${raw}`
-  raw = raw.replace(/\/{2,}/g, '/')
-  return (raw.length > 1 && raw.endsWith('/')) ? raw.slice(0, -1) : raw || '/'
-}
 
-function normalizeMethod(value?: string): HttpMethod {
-  const upper = (value?.trim().toUpperCase() || 'GET') as Uppercase<string>
-  if (HTTP_METHOD_SET.has(upper))
-    return upper as HttpMethod
-  throw new Error(`Unsupported HTTP method "${value}".`)
-}
+    const sep = source.indexOf(':')
+    if (sep > 0 && !source.startsWith('/')) {
+      const rawMethod = source.slice(0, sep).toUpperCase()
+      const rawPath = source.slice(sep + 1)
 
-export function parseRestrictionQuery(url: string): RestrictionRule[] {
-  return new URLSearchParams(parseURL(url).search ?? '').getAll('restriction').filter(Boolean).map(parseRestrictionRule)
-}
-
-export function evaluateRestrictions(rules: readonly RestrictionRule[], method: string, path: string): RestrictionMatch {
-  const m = normalizeMethod(method)
-  const p = normalizePath(path)
-  const segs = p === '/' ? [] : p.slice(1).split('/')
-  return {
-    method: m,
-    path: p,
-    matchingRules: rules.filter((rule) => matchesCompiledRule(compileRestrictionRule(rule), m, segs)),
-  }
-}
-
-export function createNetworkPermissionDecision(tenantUrl: string, request: NetworkPermissionRequest, rules: readonly RestrictionRule[] = []): NetworkPermissionDecision {
-  const tenantHostname = new URL(tenantUrl).hostname
-
-  if (request.op !== 'connect') {
-    return { allow: false, reason: `Unsupported network operation "${request.op}". Only "connect" is allowed.` }
-  }
-
-  if (request.hostname !== tenantHostname) {
-    return {
-      allow: false,
-      reason: `Network connect blocked: only ${tenantHostname} is allowed in execute mode.`,
-    }
-  }
-
-  if (typeof request.method === 'string') {
-    const requestPath = typeof request.url === 'string'
-      ? new URL(request.url).pathname
-      : '/'
-    const restrictionMatch = evaluateRestrictions(rules, request.method, requestPath)
-    if (restrictionMatch.matchingRules.length > 0) {
-      return {
-        allow: false,
-        reason: `Network connect blocked by MCP restrictions: ${restrictionMatch.matchingRules.map((rule) => rule.source).join(', ')}`,
+      if (!rawPath) {
+        failedRules.push({
+          rule: source,
+          reason: 'Restriction path pattern must not be empty.',
+        })
+        continue
       }
+      if (rawMethod && rawMethod !== '*' && !HTTP_METHOD_SET.has(rawMethod)) {
+        failedRules.push({
+          rule: source,
+          reason: `Unsupported restriction method "${source.slice(0, sep)}".`,
+        })
+        continue
+      }
+      if (rawPath.includes('?') || rawPath.includes('#')) {
+        failedRules.push({
+          rule: source,
+          reason: `Restriction pattern "${rawPath}" must not include query strings or fragments.`,
+        })
+        continue
+      }
+      if (!rawPath.startsWith('/')) {
+        failedRules.push({
+          rule: source,
+          reason: 'Restriction path pattern must start with "/".',
+        })
+        continue
+      }
+
+      const rawPathSegments = rawPath === '/' ? [] : rawPath.slice(1).split('/')
+      if (rawPathSegments.some((segment) => segment.length === 0)) {
+        failedRules.push({
+          rule: source,
+          reason: 'Restriction path pattern must not contain empty segments.',
+        })
+        continue
+      }
+
+      const invalidRawPathSegment = rawPathSegments.find((segment) => {
+        if (segment === '**') {
+          return false
+        }
+
+        return segment.includes('**') || segment === '.' || segment === '..' || !segmentPattern.test(segment)
+      })
+      if (invalidRawPathSegment) {
+        failedRules.push({
+          rule: source,
+          reason: invalidRawPathSegment === '.' || invalidRawPathSegment === '..'
+            ? `Restriction segment "${invalidRawPathSegment}" is not allowed.`
+            : invalidRawPathSegment.includes('**')
+              ? `Invalid restriction segment "${invalidRawPathSegment}". "**" must be its own path segment.`
+              : `Restriction segment "${invalidRawPathSegment}" contains unsupported characters.`,
+        })
+        continue
+      }
+
+      parsedRules.push({
+        method: (!rawMethod || rawMethod === '*') ? '*' : rawMethod as HttpMethod,
+        pathPattern: rawPath,
+        source,
+      })
+      continue
     }
+
+    if (source.includes('?') || source.includes('#')) {
+      failedRules.push({
+        rule: source,
+        reason: `Restriction pattern "${source}" must not include query strings or fragments.`,
+      })
+      continue
+    }
+    if (!source.startsWith('/')) {
+      failedRules.push({
+        rule: source,
+        reason: 'Restriction path pattern must start with "/".',
+      })
+      continue
+    }
+
+    const sourceSegments = source === '/' ? [] : source.slice(1).split('/')
+    if (sourceSegments.some((segment) => segment.length === 0)) {
+      failedRules.push({
+        rule: source,
+        reason: 'Restriction path pattern must not contain empty segments.',
+      })
+      continue
+    }
+
+    const invalidSourceSegment = sourceSegments.find((segment) => {
+      if (segment === '**') {
+        return false
+      }
+
+      return segment.includes('**') || segment === '.' || segment === '..' || !segmentPattern.test(segment)
+    })
+    if (invalidSourceSegment) {
+      failedRules.push({
+        rule: source,
+        reason: invalidSourceSegment === '.' || invalidSourceSegment === '..'
+          ? `Restriction segment "${invalidSourceSegment}" is not allowed.`
+          : invalidSourceSegment.includes('**')
+            ? `Invalid restriction segment "${invalidSourceSegment}". "**" must be its own path segment.`
+            : `Restriction segment "${invalidSourceSegment}" contains unsupported characters.`,
+      })
+      continue
+    }
+
+    parsedRules.push({
+      method: '*',
+      pathPattern: source,
+      source,
+    })
   }
 
   return {
-    allow: true,
+    parsedRules,
+    failedRules,
   }
 }

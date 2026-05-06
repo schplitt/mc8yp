@@ -46,9 +46,17 @@ const main = defineCommand({
     consola.info(`Using core OpenAPI snapshot: ${getCoreOpenApiLabel()}`)
 
     const raw = args.restriction
-    const restrictions = (Array.isArray(raw) ? raw : raw ? [raw] : [])
-      .filter(Boolean)
-      .map(parseRestrictionRule)
+    const restrictionSources = (Array.isArray(raw) ? raw : raw ? [raw] : []).filter(
+      (value): value is string => typeof value === 'string' && value.length > 0,
+    )
+    const { parsedRules: restrictions, failedRules } = parseRestrictionRule(restrictionSources)
+
+    if (failedRules.length > 0) {
+      throw new Error([
+        'One or more restriction flags could not be parsed:',
+        ...failedRules.map((rule) => `- ${rule.rule}: ${rule.reason}`),
+      ].join('\n'))
+    }
 
     if (restrictions.length > 0) {
       consola.info(`Applying ${restrictions.length} restriction rule(s):`, restrictions.map((r) => r.source))

@@ -2,13 +2,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   compileRestrictionRule,
-  compileRestrictionSources,
-  getBlockedCompiledRestrictions,
+  findBlockingRestrictions,
   matchesCompiledRule,
-  normalizeAndValidateRestrictionPath,
-  normalizeRestrictionMatchPath,
-  parseRestrictionRule,
-} from '../src/utils/restriction-core'
+} from '../src/utils/restriction-matcher'
+import { parseRestrictionRule } from '../src/utils/restrictions'
 
 const INVALID_RESTRICTION_PAYLOADS = [
   '/inventory/managedObjects");globalThis.pwned=true;("',
@@ -121,7 +118,7 @@ const MATCH_CASES = [
     expected: false,
   },
   {
-    description: 'root restriction matches the normalized root path',
+    description: 'root restriction matches the root path',
     rule: '/',
     method: 'GET',
     path: '/',
@@ -160,45 +157,64 @@ const BLOCKED_RULE_CASES = [
   },
 ] as const
 
-function toPathSegments(path: string): string[] {
-  const normalizedPath = normalizeRestrictionMatchPath(path)
+function parseSingleRule(input: string) {
+  const result = parseRestrictionRule([input])
+  const rule = result.parsedRules[0]
 
-  return normalizedPath === '/' ? [] : normalizedPath.slice(1).split('/')
+  if (!rule || result.failedRules.length > 0) {
+    throw new Error(`Expected a valid restriction rule: ${input}`)
+  }
+
+  return rule
+}
+
+function toPathSegments(path: string): string[] {
+  return path === '/' ? [] : path.slice(1).split('/')
 }
 
 describe('restriction core helpers', () => {
-  it('normalizes slash-only path matching consistently', () => {
-    expect(normalizeRestrictionMatchPath('/inventory//managedObjects/')).toBe('/inventory/managedObjects')
-  })
-
-  it('validates and normalizes safe restriction paths', () => {
-    expect(normalizeAndValidateRestrictionPath('/inventory//managedObjects/')).toBe('/inventory/managedObjects')
+  it('parses safe restriction paths without normalization', () => {
     expect(parseRestrictionRule('get:/inventory/*/child')).toEqual({
-      method: 'GET',
-      pathPattern: '/inventory/*/child',
-      source: 'get:/inventory/*/child',
+      parsedRules: [{
+        method: 'GET',
+        pathPattern: '/inventory/*/child',
+        source: 'get:/inventory/*/child',
+      }],
+      failedRules: [],
     })
     expect(parseRestrictionRule('/inventory/managedObjects*/**/evil')).toEqual({
-      method: '*',
-      pathPattern: '/inventory/managedObjects*/**/evil',
-      source: '/inventory/managedObjects*/**/evil',
+      parsedRules: [{
+        method: '*',
+        pathPattern: '/inventory/managedObjects*/**/evil',
+        source: '/inventory/managedObjects*/**/evil',
+      }],
+      failedRules: [],
     })
   })
 
   it('accepts explicit wildcard method prefixes', () => {
     expect(parseRestrictionRule('*:/inventory/**')).toEqual({
-      method: '*',
-      pathPattern: '/inventory/**',
-      source: '*:/inventory/**',
+      parsedRules: [{
+        method: '*',
+        pathPattern: '/inventory/**',
+        source: '*:/inventory/**',
+      }],
+      failedRules: [],
     })
   })
 
-  it.each(INVALID_RESTRICTION_PAYLOADS)('rejects invalid restriction payload: %s', (payload) => {
-    expect(() => parseRestrictionRule(payload)).toThrow()
+  it.each(INVALID_RESTRICTION_PAYLOADS)('reports invalid restriction payload: %s', (payload) => {
+    expect(parseRestrictionRule(payload)).toEqual({
+      parsedRules: [],
+      failedRules: [{
+        rule: payload,
+        reason: expect.any(String),
+      }],
+    })
   })
 
   it('compiles wildcard rules and matches the expected paths', () => {
-    const compiledRule = compileRestrictionRule(parseRestrictionRule('GET:/inventory/*/child'))
+    const compiledRule = compileRestrictionRule(parseSingleRule('GET:/inventory/*/child'))
 
     expect(matchesCompiledRule(compiledRule, 'GET', ['inventory', 'device-1', 'child'])).toBe(true)
     expect(matchesCompiledRule(compiledRule, 'POST', ['inventory', 'device-1', 'child'])).toBe(false)
@@ -206,25 +222,23 @@ describe('restriction core helpers', () => {
   })
 
   it.each(MATCH_CASES)('$description', ({ rule, method, path, expected }) => {
-    const compiledRule = compileRestrictionRule(parseRestrictionRule(rule))
+    const compiledRule = compileRestrictionRule(parseSingleRule(rule))
 
     expect(matchesCompiledRule(compiledRule, method, toPathSegments(path))).toBe(expected)
   })
 
-  it('finds blocked compiled rules using the exact shared matching logic', () => {
-    const compiledRules = compileRestrictionSources([
-      'GET:/inventory/**',
-      '/alarm/*',
-    ])
+  it('finds blocked rules using the shared matching logic', () => {
+    const rules = [
+      parseSingleRule('GET:/inventory/**'),
+      parseSingleRule('/alarm/*'),
+    ]
 
-    expect(getBlockedCompiledRestrictions(compiledRules, 'GET', '/inventory/managedObjects/123').map((rule) => rule.source)).toEqual(['GET:/inventory/**'])
-    expect(getBlockedCompiledRestrictions(compiledRules, 'POST', '/alarm/alarms').map((rule) => rule.source)).toEqual(['/alarm/*'])
-    expect(getBlockedCompiledRestrictions(compiledRules, 'POST', '/event/events')).toEqual([])
+    expect(findBlockingRestrictions(rules, 'GET', '/inventory/managedObjects/123').map((rule) => rule.source)).toEqual(['GET:/inventory/**'])
+    expect(findBlockingRestrictions(rules, 'POST', '/alarm/alarms').map((rule) => rule.source)).toEqual(['/alarm/*'])
+    expect(findBlockingRestrictions(rules, 'POST', '/event/events')).toEqual([])
   })
 
   it.each(BLOCKED_RULE_CASES)('$description', ({ rules, method, path, expected }) => {
-    const compiledRules = compileRestrictionSources(rules)
-
-    expect(getBlockedCompiledRestrictions(compiledRules, method, path).map((rule) => rule.source)).toEqual(expected)
+    expect(findBlockingRestrictions(rules.map((rule) => parseSingleRule(rule)), method, path).map((rule) => rule.source)).toEqual(expected)
   })
 })

@@ -3,9 +3,20 @@
 import { encode } from '@toon-format/toon'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildExecutePrelude, buildExecuteScript, execute } from '../src/codemode/execute'
-import { parseRestrictionQuery, parseRestrictionRule } from '../src/utils/restrictions'
+import { parseRestrictionRule } from '../src/utils/restrictions'
 import type { RestrictionRule } from '../src/utils/restrictions'
 import * as client from '../src/utils/client'
+
+function parseSingleRule(input: string): RestrictionRule {
+  const result = parseRestrictionRule([input])
+  const rule = result.parsedRules[0]
+
+  if (!rule || result.failedRules.length > 0) {
+    throw new Error(`Expected a valid restriction rule: ${input}`)
+  }
+
+  return rule
+}
 
 interface ExecuteHarnessResult {
   called: boolean
@@ -42,17 +53,6 @@ const INVALID_RESTRICTION_QUERY_PAYLOADS = [
   '/inventory/**evil',
   'POST:/inventory/**evil',
   'GET:inventory/managedObjects',
-] as const
-
-const OUT_OF_ORIGIN_REQUEST_PATHS = [
-  {
-    description: 'absolute URLs that point to a different origin',
-    path: 'https://other.example.com/inventory/managedObjects',
-  },
-  {
-    description: 'scheme-relative URLs that point to a different origin',
-    path: '//other.example.com/inventory/managedObjects',
-  },
 ] as const
 
 function resetTestGlobals() {
@@ -165,25 +165,26 @@ function expectedBlockedResult(method: string, path: string, matchingRules: read
 
 describe('buildExecuteScript', () => {
   it('embeds restriction enforcement in the generated request wrapper', () => {
-    const script = buildExecuteScript('async () => null', 'https://tenant.example.com', { Authorization: 'Bearer test' }, [parseRestrictionRule('GET:/inventory/**')])
+    const script = buildExecuteScript('async () => null', 'https://tenant.example.com', { Authorization: 'Bearer test' }, [parseSingleRule('GET:/inventory/**')])
 
-    expect(script).toContain('const compiledRestrictions = compileRestrictionSources(restrictionSources);')
-    expect(script).toContain('const blockedRules = getBlockedCompiledRestrictions(compiledRestrictions, init.method, resolvedUrl.pathname);')
+    expect(script).toContain('const compiledRestrictions = restrictions.map(compileRestrictionRule);')
+    expect(script).toContain('const method = validateRequestMethod(init.method);')
+    expect(script).toContain('const blockedRules = findBlockingRestrictions(method, resolvedUrl.pathname);')
     expect(script).toContain('Request blocked by MCP connection policy.')
     expect(script).toContain('const __mc8ypExecute = (async () => null);')
     expect(script).toContain('status: "success"')
     expect(script).toContain('status: message.startsWith("Request blocked by MCP connection policy.") ? "blocked" : "failed"')
   })
 
-  it('embeds tenant-origin enforcement in the generated request wrapper', () => {
+  it('does not embed tenant-origin enforcement in the generated request wrapper', () => {
     const script = buildExecuteScript('async () => null', 'https://tenant.example.com', { Authorization: 'Bearer test' })
 
-    expect(script).toContain('if (resolved.origin !== tenantOrigin)')
-    expect(script).toContain('Cumulocity requests must target the configured tenant origin.')
+    expect(script).not.toContain('tenantOrigin')
+    expect(script).not.toContain('Cumulocity requests must target the configured tenant origin.')
   })
 
   it('initializes the generated execute prelude without side effects for safe restrictions', () => {
-    const prelude = buildExecutePrelude('https://tenant.example.com', { Authorization: 'Bearer test' }, [parseRestrictionRule('GET:/inventory/**')])
+    const prelude = buildExecutePrelude('https://tenant.example.com', { Authorization: 'Bearer test' }, [parseSingleRule('GET:/inventory/**')])
     const run = new Function(`${prelude}\nreturn globalThis.pwned;`) as () => unknown
 
     expect(run()).toBeUndefined()
@@ -199,10 +200,51 @@ describe('buildExecuteScript', () => {
       '  path: "/inventory/managedObjects?pageSize=5",',
       '});',
       '}',
-    ].join('\n'), [parseRestrictionRule('GET:/inventory/**')])
+    ].join('\n'), [parseSingleRule('GET:/inventory/**')])
 
     expect(result.called).toBe(false)
     expect(result.result).toEqual(expectedBlockedResult('GET', '/inventory/managedObjects', ['GET:/inventory/**']))
+  })
+
+  it('rejects requests without an explicit method before fetch is called', async () => {
+    const result = await runGeneratedExecuteScript([
+      'async () => {',
+      `${installFetchTrap.toString()}`,
+      'installFetchTrap();',
+      'return await cumulocity.request({',
+      '  path: "/event/events",',
+      '});',
+      '}',
+    ].join('\n'))
+
+    expect(result.called).toBe(false)
+    expect(result.result).toEqual({
+      status: 'failed',
+      error: {
+        message: 'request method must be a non-empty string',
+      },
+    })
+  })
+
+  it('rejects unsupported request methods before fetch is called', async () => {
+    const result = await runGeneratedExecuteScript([
+      'async () => {',
+      `${installFetchTrap.toString()}`,
+      'installFetchTrap();',
+      'return await cumulocity.request({',
+      '  method: "MERGE",',
+      '  path: "/event/events",',
+      '});',
+      '}',
+    ].join('\n'))
+
+    expect(result.called).toBe(false)
+    expect(result.result).toEqual({
+      status: 'failed',
+      error: {
+        message: 'request method must be one of: DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT, TRACE',
+      },
+    })
   })
 
   it('allows safe requests when valid restrictions are present', async () => {
@@ -215,7 +257,7 @@ describe('buildExecuteScript', () => {
       '  path: "/event/events",',
       '});',
       '}',
-    ].join('\n'), [parseRestrictionRule('GET:/inventory/**'), parseRestrictionRule('/alarm/*')])
+    ].join('\n'), [parseSingleRule('GET:/inventory/**'), parseSingleRule('/alarm/*')])
 
     expect(result.called).toBe(true)
     expect(result.url).toBe('https://tenant.example.com/event/events')
@@ -228,7 +270,7 @@ describe('buildExecuteScript', () => {
   })
 
   it('blocks query-derived restrictions for same-origin absolute URLs before fetch is called', async () => {
-    const restrictions = parseRestrictionQuery('https://example.test/mcp?restriction=GET%3A%2Finventory%2F**')
+    const restrictions = parseRestrictionRule(['GET:/inventory/**']).parsedRules
     const result = await runGeneratedExecuteScript([
       'async () => {',
       `${installFetchTrap.toString()}`,
@@ -244,29 +286,14 @@ describe('buildExecuteScript', () => {
     expect(result.result).toEqual(expectedBlockedResult('GET', '/inventory/managedObjects', ['GET:/inventory/**']))
   })
 
-  it.each(OUT_OF_ORIGIN_REQUEST_PATHS)('rejects $description before fetch is called', async ({ path }) => {
-    const result = await runGeneratedExecuteScript([
-      'async () => {',
-      `${installFetchTrap.toString()}`,
-      'installFetchTrap();',
-      'return await cumulocity.request({',
-      '  method: "GET",',
-      `  path: ${JSON.stringify(path)},`,
-      '});',
-      '}',
-    ].join('\n'))
-
-    expect(result.called).toBe(false)
-    expect(result.result).toEqual({
-      status: 'failed',
-      error: {
-        message: 'Cumulocity requests must target the configured tenant origin.',
-      },
+  it.each(INVALID_RESTRICTION_QUERY_PAYLOADS)('reports invalid malicious restriction text from query params: %s', (payload) => {
+    expect(parseRestrictionRule([payload])).toEqual({
+      parsedRules: [],
+      failedRules: [{
+        rule: payload,
+        reason: expect.any(String),
+      }],
     })
-  })
-
-  it.each(INVALID_RESTRICTION_QUERY_PAYLOADS)('rejects invalid malicious restriction text from query params: %s', (payload) => {
-    expect(() => parseRestrictionQuery(`https://example.test/mcp?restriction=${encodeURIComponent(payload)}`)).toThrow()
   })
 
   it('classifies non-function execute code as a failed envelope', async () => {
