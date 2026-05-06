@@ -1,8 +1,34 @@
-import type { RestrictionRule } from './restrictions'
+import type { AllowRule, RestrictionMethod, RestrictionRule } from './restrictions'
 
-export interface CompiledRestrictionRule extends RestrictionRule {
+interface MatchableRule {
+  method: RestrictionMethod
+  pathPattern: string
+  source: string
+}
+
+export interface CompiledRestrictionRule extends MatchableRule {
   segments: ('**' | RegExp)[]
 }
+
+export type AccessPolicyDecision
+  = | {
+    blocked: false
+    blockedBy?: undefined
+    matchingRestrictions?: undefined
+    matchingAllowRules?: undefined
+  }
+  | {
+    blocked: true
+    blockedBy: 'restriction'
+    matchingRestrictions: RestrictionRule[]
+    matchingAllowRules?: undefined
+  }
+  | {
+    blocked: true
+    blockedBy: 'allow'
+    matchingRestrictions?: undefined
+    matchingAllowRules?: undefined
+  }
 
 export function escapeRestrictionRegex(value: string): string {
   let escaped = ''
@@ -48,7 +74,7 @@ export function matchCompiledSegments(pattern: ('**' | RegExp)[], path: string[]
   return si === path.length
 }
 
-export function compileRestrictionRule(rule: RestrictionRule): CompiledRestrictionRule {
+export function compileRestrictionRule<TRule extends MatchableRule>(rule: TRule): TRule & CompiledRestrictionRule {
   return {
     ...rule,
     segments: rule.pathPattern === '/' ? [] : rule.pathPattern.slice(1).split('/').map(compileRestrictionSegment),
@@ -59,11 +85,11 @@ export function matchesCompiledRule(rule: CompiledRestrictionRule, method: strin
   return (rule.method === '*' || rule.method === method) && matchCompiledSegments(rule.segments, pathSegments)
 }
 
-export function findBlockingRestrictions(
-  rules: readonly RestrictionRule[],
+export function findMatchingRules<TRule extends MatchableRule>(
+  rules: readonly TRule[],
   method: string | undefined,
   pathname: string,
-): RestrictionRule[] {
+): TRule[] {
   const normalizedMethod = typeof method === 'string' ? method.trim().toUpperCase() : ''
   const pathSegments = pathname === '/' ? [] : pathname.slice(1).split('/')
 
@@ -75,4 +101,46 @@ export function findBlockingRestrictions(
 
     return matchesCompiledRule(compiledRule, normalizedMethod, pathSegments)
   })
+}
+
+export function findBlockingRestrictions(
+  rules: readonly RestrictionRule[],
+  method: string | undefined,
+  pathname: string,
+): RestrictionRule[] {
+  return findMatchingRules(rules, method, pathname)
+}
+
+export function evaluateAccessPolicy(
+  restrictions: readonly RestrictionRule[],
+  allowRules: readonly AllowRule[],
+  method: string,
+  pathname: string,
+): AccessPolicyDecision {
+  const matchingRestrictions = findMatchingRules(restrictions, method, pathname)
+  if (matchingRestrictions.length > 0) {
+    return {
+      blocked: true,
+      blockedBy: 'restriction',
+      matchingRestrictions,
+    }
+  }
+
+  if (allowRules.length === 0) {
+    return {
+      blocked: false,
+    }
+  }
+
+  const matchingAllowRules = findMatchingRules(allowRules, method, pathname)
+  if (matchingAllowRules.length > 0) {
+    return {
+      blocked: false,
+    }
+  }
+
+  return {
+    blocked: true,
+    blockedBy: 'allow',
+  }
 }

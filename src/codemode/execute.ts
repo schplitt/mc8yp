@@ -13,7 +13,7 @@ import {
   matchesCompiledRule,
 } from '../utils/restriction-matcher'
 import { HTTP_METHODS } from '../utils/restrictions'
-import type { RestrictionRule } from '../utils/restrictions'
+import type { AllowRule, RestrictionRule } from '../utils/restrictions'
 
 const NO_DEFAULT_EXPORT_MESSAGE = 'Execution completed without returning a value.'
 const QUERY_ENTRY_PATH = '/codemode-query.mjs'
@@ -35,14 +35,21 @@ interface ExecuteErrorEnvelope {
 
 type ExecuteEnvelope = ExecuteSuccessEnvelope | ExecuteErrorEnvelope
 
-function serializeExecuteConfig(tenantUrl: string, headers: Record<string, string>, restrictions: readonly RestrictionRule[]): string {
+function serializeExecuteConfig(
+  tenantUrl: string,
+  headers: Record<string, string>,
+  restrictions: readonly RestrictionRule[],
+  allowRules: readonly AllowRule[],
+): string {
   const normalizedTenantUrl = new URL(tenantUrl).toString()
-  const serializedRestrictions = restrictions.map(({ method, pathPattern, source }) => ({ method, pathPattern, source }))
+  const serializedRestrictions = restrictions.map(({ type, method, pathPattern, source }) => ({ type, method, pathPattern, source }))
+  const serializedAllowRules = allowRules.map(({ type, method, pathPattern, source }) => ({ type, method, pathPattern, source }))
 
   return JSON.stringify({
     tenantUrl: normalizedTenantUrl,
     authHeaders: headers,
     restrictions: serializedRestrictions,
+    allowRules: serializedAllowRules,
   })
 }
 
@@ -60,12 +67,16 @@ function createQueryRuntime() {
   })
 }
 
-function createExecuteRuntime(tenantUrl: string, restrictions: readonly RestrictionRule[]) {
+function createExecuteRuntime(
+  tenantUrl: string,
+  restrictions: readonly RestrictionRule[],
+  allowRules: readonly AllowRule[],
+) {
   return new NodeRuntime({
     systemDriver: createNodeDriver({
       useDefaultNetwork: true,
       permissions: {
-        network: (request) => createNetworkPermissionDecision(tenantUrl, request, restrictions),
+        network: (request) => createNetworkPermissionDecision(tenantUrl, request, restrictions, allowRules),
       },
     }),
     runtimeDriverFactory: createNodeRuntimeDriverFactory(),
@@ -85,8 +96,16 @@ function normalizeCode(functionCode: string): string {
   return normalized
 }
 
-function buildQueryScript(sourceCode: string, restrictions: readonly RestrictionRule[]): string {
-  const restrictedSpec = applyRestrictionsToOpenApiSpec(getCoreOpenApiSpec() as Parameters<typeof applyRestrictionsToOpenApiSpec>[0], restrictions)
+function buildQueryScript(
+  sourceCode: string,
+  restrictions: readonly RestrictionRule[],
+  allowRules: readonly AllowRule[],
+): string {
+  const restrictedSpec = applyRestrictionsToOpenApiSpec(
+    getCoreOpenApiSpec() as Parameters<typeof applyRestrictionsToOpenApiSpec>[0],
+    restrictions,
+    allowRules,
+  )
   const functionExpression = normalizeCode(sourceCode)
 
   return [
@@ -101,8 +120,13 @@ function buildQueryScript(sourceCode: string, restrictions: readonly Restriction
   ].join('\n\n')
 }
 
-export function buildExecutePrelude(tenantUrl: string, headers: Record<string, string>, restrictions: readonly RestrictionRule[] = []): string {
-  const serializedConfig = JSON.stringify(serializeExecuteConfig(tenantUrl, headers, restrictions))
+export function buildExecutePrelude(
+  tenantUrl: string,
+  headers: Record<string, string>,
+  restrictions: readonly RestrictionRule[] = [],
+  allowRules: readonly AllowRule[] = [],
+): string {
+  const serializedConfig = JSON.stringify(serializeExecuteConfig(tenantUrl, headers, restrictions, allowRules))
 
   return [
     'const cumulocity = Object.freeze((() => {',
@@ -110,12 +134,15 @@ export function buildExecutePrelude(tenantUrl: string, headers: Record<string, s
     '  if (!config || typeof config !== "object") {',
     '    throw new TypeError("Invalid execute configuration.");',
     '  }',
-    '  const { tenantUrl, authHeaders, restrictions } = config;',
+    '  const { tenantUrl, authHeaders, restrictions, allowRules } = config;',
     '  if (typeof tenantUrl !== "string") {',
     '    throw new TypeError("Execute configuration must contain a string tenant URL.");',
     '  }',
-    '  if (!Array.isArray(restrictions) || restrictions.some((rule) => !rule || typeof rule !== "object" || typeof rule.method !== "string" || typeof rule.pathPattern !== "string" || typeof rule.source !== "string")) {',
+    '  if (!Array.isArray(restrictions) || restrictions.some((rule) => !rule || typeof rule !== "object" || typeof rule.type !== "string" || typeof rule.method !== "string" || typeof rule.pathPattern !== "string" || typeof rule.source !== "string")) {',
     '    throw new TypeError("Execute configuration must contain valid restriction rules.");',
+    '  }',
+    '  if (!Array.isArray(allowRules) || allowRules.some((rule) => !rule || typeof rule !== "object" || typeof rule.type !== "string" || typeof rule.method !== "string" || typeof rule.pathPattern !== "string" || typeof rule.source !== "string")) {',
+    '    throw new TypeError("Execute configuration must contain valid allow rules.");',
     '  }',
     '  const resolveUrl = (descriptor) => {',
     '    return new URL(descriptor, tenantUrl.endsWith("/") ? tenantUrl : tenantUrl + "/");',
@@ -135,15 +162,30 @@ export function buildExecutePrelude(tenantUrl: string, headers: Record<string, s
     `  const compileRestrictionRule = ${compileRestrictionRule.toString()};`,
     `  const matchesCompiledRule = ${matchesCompiledRule.toString()};`,
     '  const compiledRestrictions = restrictions.map(compileRestrictionRule);',
-    '  const findBlockingRestrictions = (method, pathname) => {',
+    '  const compiledAllowRules = allowRules.map(compileRestrictionRule);',
+    '  const findMatchingRules = (compiledRules, method, pathname) => {',
     '    const normalizedMethod = typeof method === "string" ? method.trim().toUpperCase() : "";',
     '    const pathSegments = pathname === "/" ? [] : pathname.slice(1).split("/");',
-    '    return compiledRestrictions.filter((rule) => {',
+    '    return compiledRules.filter((rule) => {',
     '      if (!normalizedMethod) {',
     '        return rule.method === "*" && matchCompiledSegments(rule.segments, pathSegments);',
     '      }',
     '      return matchesCompiledRule(rule, normalizedMethod, pathSegments);',
     '    });',
+    '  };',
+    '  const evaluateAccessPolicy = (method, pathname) => {',
+    '    const matchingRestrictions = findMatchingRules(compiledRestrictions, method, pathname);',
+    '    if (matchingRestrictions.length > 0) {',
+    '      return { blocked: true, blockedBy: "restriction", matchingRestrictions };',
+    '    }',
+    '    if (compiledAllowRules.length === 0) {',
+    '      return { blocked: false };',
+    '    }',
+    '    const matchingAllowRules = findMatchingRules(compiledAllowRules, method, pathname);',
+    '    if (matchingAllowRules.length > 0) {',
+    '      return { blocked: false };',
+    '    }',
+    '    return { blocked: true, blockedBy: "allow" };',
     '  };',
     '  const validateRequestMethod = (method) => {',
     '    if (typeof method !== "string" || method.trim().length === 0) {',
@@ -155,22 +197,42 @@ export function buildExecutePrelude(tenantUrl: string, headers: Record<string, s
     '    }',
     '    return normalizedMethod;',
     '  };',
-    '  const formatBlockedRequestMessage = (method, path, matchingRules) => [',
-    '    "Request blocked by MCP connection policy.",',
-    '    "",',
-    '    "This operation is intentionally denied by the current MCP connection configuration.",',
-    '    "It did not fail at the Cumulocity API and it was not executed against the tenant.",',
-    '    "Retrying or trying the same operation again through this connection will not succeed.",',
-    '    "",',
-    '    "Report this to the user as a connection-level access restriction.",',
-    '    "If the operation is needed, the MCP restrictions for this connection must be updated by whoever manages that configuration.",',
-    '    "",',
-    '    "Blocked operation:",',
-    '    "Method: " + method,',
-    '    "Path: " + path,',
-    '    "Matching restrictions:",',
-    '    ...matchingRules.map((rule) => "- " + rule),',
-    '  ].join("\\n");',
+    '  const formatBlockedRequestMessage = (method, path, accessDecision) => {',
+    '    if (accessDecision.blockedBy === "allow") {',
+    '      return [',
+    '        "Request blocked by MCP connection policy.",',
+    '        "",',
+    '        "This operation is intentionally blocked because it is not included in the current MCP connection allow list.",',
+    '        "It did not fail at the Cumulocity API and it was not executed against the tenant.",',
+    '        "Retrying or trying the same operation again through this connection will not succeed.",',
+    '        "",',
+    '        "Report this to the user as a connection-level access restriction.",',
+    '        "If the operation is needed, the MCP allow list for this connection must be updated by whoever manages that configuration.",',
+    '        "",',
+    '        "Blocked operation:",',
+    '        "Method: " + method,',
+    '        "Path: " + path,',
+    '        "Configured allow rules:",',
+    '        ...(allowRules.length > 0 ? allowRules.map((rule) => "- " + rule.source) : ["- (none)"]),',
+    '      ].join("\\n");',
+    '    }',
+    '    return [',
+    '      "Request blocked by MCP connection policy.",',
+    '      "",',
+    '      "This operation is intentionally denied by the current MCP connection configuration.",',
+    '      "It did not fail at the Cumulocity API and it was not executed against the tenant.",',
+    '      "Retrying or trying the same operation again through this connection will not succeed.",',
+    '      "",',
+    '      "Report this to the user as a connection-level access restriction.",',
+    '      "If the operation is needed, the MCP restrictions for this connection must be updated by whoever manages that configuration.",',
+    '      "",',
+    '      "Blocked operation:",',
+    '      "Method: " + method,',
+    '      "Path: " + path,',
+    '      "Matching restrictions:",',
+    '      ...accessDecision.matchingRestrictions.map((rule) => "- " + rule.source),',
+    '    ].join("\\n");',
+    '  };',
     '  const normalizeBody = (headers, body) => {',
     '    if (body == null || typeof body === "string") {',
     '      return body;',
@@ -202,9 +264,9 @@ export function buildExecutePrelude(tenantUrl: string, headers: Record<string, s
     '      }',
     '      const method = validateRequestMethod(init.method);',
     '      const resolvedUrl = resolveUrl(path);',
-    '      const blockedRules = findBlockingRestrictions(method, resolvedUrl.pathname);',
-    '      if (blockedRules.length > 0) {',
-    '        throw new Error(formatBlockedRequestMessage(method, resolvedUrl.pathname, blockedRules.map((rule) => rule.source)));',
+    '      const accessDecision = evaluateAccessPolicy(method, resolvedUrl.pathname);',
+    '      if (accessDecision.blocked) {',
+    '        throw new Error(formatBlockedRequestMessage(method, resolvedUrl.pathname, accessDecision));',
     '      }',
     '      const headers = new Headers(init.headers ?? {});',
     '      for (const [key, value] of Object.entries(authHeaders)) {',
@@ -235,11 +297,12 @@ export function buildExecuteScript(
   tenantUrl: string,
   headers: Record<string, string>,
   restrictions: readonly RestrictionRule[] = [],
+  allowRules: readonly AllowRule[] = [],
 ): string {
   const functionExpression = normalizeCode(sourceCode)
 
   return [
-    buildExecutePrelude(tenantUrl, headers, restrictions),
+    buildExecutePrelude(tenantUrl, headers, restrictions, allowRules),
     `const __mc8ypExecute = (${functionExpression});`,
     '',
     'const __mc8ypErrorMessage = (error) => error instanceof Error ? error.message : String(error);',
@@ -281,9 +344,14 @@ function extractDefaultExport(exportsObject: unknown): unknown {
   throw new Error(NO_DEFAULT_EXPORT_MESSAGE)
 }
 
-async function runExecuteScript(code: string, tenantUrl: string, restrictions: readonly RestrictionRule[]): Promise<unknown> {
+async function runExecuteScript(
+  code: string,
+  tenantUrl: string,
+  restrictions: readonly RestrictionRule[],
+  allowRules: readonly AllowRule[],
+): Promise<unknown> {
   const release = await runtimeSemaphore.acquire()
-  const runtime = createExecuteRuntime(tenantUrl, restrictions)
+  const runtime = createExecuteRuntime(tenantUrl, restrictions, allowRules)
 
   try {
     const result = await runtime.run<unknown>(code, EXECUTE_ENTRY_PATH)
@@ -322,17 +390,31 @@ async function runModule(code: string, entryPath: string, runtime: NodeRuntime):
   }
 }
 
-export async function query(functionCode: string, restrictions: readonly RestrictionRule[] = []): Promise<string> {
-  const result = await runQueryScript(buildQueryScript(functionCode, restrictions))
+export async function query(
+  functionCode: string,
+  restrictions: readonly RestrictionRule[] = [],
+  allowRules: readonly AllowRule[] = [],
+): Promise<string> {
+  const result = await runQueryScript(buildQueryScript(functionCode, restrictions, allowRules))
   // dont encode as toon to make spec easier to understand
   return typeof result === 'string' ? result : JSON.stringify(result)
 }
 
-export async function execute(functionCode: string, input?: unknown, restrictions: readonly RestrictionRule[] = []): Promise<string> {
+export async function execute(
+  functionCode: string,
+  input?: unknown,
+  restrictions: readonly RestrictionRule[] = [],
+  allowRules: readonly AllowRule[] = [],
+): Promise<string> {
   const auth = await resolveC8yAuth(input)
   const authHeaders = createC8yAuthHeaders(auth)
 
-  const result = await runExecuteScript(buildExecuteScript(functionCode, auth.tenantUrl, authHeaders, restrictions), auth.tenantUrl, restrictions) as ExecuteEnvelope
+  const result = await runExecuteScript(
+    buildExecuteScript(functionCode, auth.tenantUrl, authHeaders, restrictions, allowRules),
+    auth.tenantUrl,
+    restrictions,
+    allowRules,
+  ) as ExecuteEnvelope
 
   if (result.status === 'success') {
     return encode(result.result)

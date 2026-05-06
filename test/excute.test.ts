@@ -3,8 +3,8 @@
 import { encode } from '@toon-format/toon'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildExecutePrelude, buildExecuteScript, execute } from '../src/codemode/execute'
-import { parseRestrictionRule } from '../src/utils/restrictions'
-import type { RestrictionRule } from '../src/utils/restrictions'
+import { parseAllowRule, parseRestrictionRule } from '../src/utils/restrictions'
+import type { AllowRule, RestrictionRule } from '../src/utils/restrictions'
 import * as client from '../src/utils/client'
 
 function parseSingleRule(input: string): RestrictionRule {
@@ -13,6 +13,17 @@ function parseSingleRule(input: string): RestrictionRule {
 
   if (!rule || result.failedRules.length > 0) {
     throw new Error(`Expected a valid restriction rule: ${input}`)
+  }
+
+  return rule
+}
+
+function parseSingleAllowRule(input: string): AllowRule {
+  const result = parseAllowRule([input])
+  const rule = result.parsedRules[0]
+
+  if (!rule || result.failedRules.length > 0) {
+    throw new Error(`Expected a valid allow rule: ${input}`)
   }
 
   return rule
@@ -67,12 +78,13 @@ function resetTestGlobals() {
 async function runGeneratedExecuteScript(
   sourceCode: string,
   restrictions: readonly RestrictionRule[] = [],
+  allowRules: readonly AllowRule[] = [],
   headers: Record<string, string> = { Authorization: 'Bearer test' },
 ): Promise<ExecuteHarnessResult> {
   resetTestGlobals()
 
   const run = new Function([
-    buildExecutePrelude('https://tenant.example.com', headers, restrictions),
+    buildExecutePrelude('https://tenant.example.com', headers, restrictions, allowRules),
     `const __mc8ypExecute = (${sourceCode});`,
     'globalThis.__done = (async () => {',
     '  try {',
@@ -135,7 +147,7 @@ afterEach(() => {
   resetTestGlobals()
 })
 
-function expectedBlockedRequestMessage(method: string, path: string, matchingRules: readonly string[]): string {
+function expectedRestrictedRequestMessage(method: string, path: string, matchingRules: readonly string[]): string {
   return [
     'Request blocked by MCP connection policy.',
     '',
@@ -154,22 +166,46 @@ function expectedBlockedRequestMessage(method: string, path: string, matchingRul
   ].join('\n')
 }
 
-function expectedBlockedResult(method: string, path: string, matchingRules: readonly string[]): { status: 'blocked', error: { message: string } } {
+function expectedAllowedRequestMessage(method: string, path: string, allowRules: readonly string[]): string {
+  return [
+    'Request blocked by MCP connection policy.',
+    '',
+    'This operation is intentionally blocked because it is not included in the current MCP connection allow list.',
+    'It did not fail at the Cumulocity API and it was not executed against the tenant.',
+    'Retrying or trying the same operation again through this connection will not succeed.',
+    '',
+    'Report this to the user as a connection-level access restriction.',
+    'If the operation is needed, the MCP allow list for this connection must be updated by whoever manages that configuration.',
+    '',
+    'Blocked operation:',
+    `Method: ${method}`,
+    `Path: ${path}`,
+    'Configured allow rules:',
+    ...allowRules.map((rule) => `- ${rule}`),
+  ].join('\n')
+}
+
+function expectedBlockedResult(message: string): { status: 'blocked', error: { message: string } } {
   return {
     status: 'blocked',
-    error: {
-      message: expectedBlockedRequestMessage(method, path, matchingRules),
-    },
+    error: { message },
   }
 }
 
 describe('buildExecuteScript', () => {
-  it('embeds restriction enforcement in the generated request wrapper', () => {
-    const script = buildExecuteScript('async () => null', 'https://tenant.example.com', { Authorization: 'Bearer test' }, [parseSingleRule('GET:/inventory/**')])
+  it('embeds restriction and allow-list enforcement in the generated request wrapper', () => {
+    const script = buildExecuteScript(
+      'async () => null',
+      'https://tenant.example.com',
+      { Authorization: 'Bearer test' },
+      [parseSingleRule('GET:/inventory/**')],
+      [parseSingleAllowRule('GET:/inventory/**')],
+    )
 
     expect(script).toContain('const compiledRestrictions = restrictions.map(compileRestrictionRule);')
-    expect(script).toContain('const method = validateRequestMethod(init.method);')
-    expect(script).toContain('const blockedRules = findBlockingRestrictions(method, resolvedUrl.pathname);')
+    expect(script).toContain('const compiledAllowRules = allowRules.map(compileRestrictionRule);')
+    expect(script).toContain('const accessDecision = evaluateAccessPolicy(method, resolvedUrl.pathname);')
+    expect(script).toContain('Configured allow rules:')
     expect(script).toContain('Request blocked by MCP connection policy.')
     expect(script).toContain('const __mc8ypExecute = (async () => null);')
     expect(script).toContain('status: "success"')
@@ -183,8 +219,13 @@ describe('buildExecuteScript', () => {
     expect(script).not.toContain('Cumulocity requests must target the configured tenant origin.')
   })
 
-  it('initializes the generated execute prelude without side effects for safe restrictions', () => {
-    const prelude = buildExecutePrelude('https://tenant.example.com', { Authorization: 'Bearer test' }, [parseSingleRule('GET:/inventory/**')])
+  it('initializes the generated execute prelude without side effects for safe restrictions and allow rules', () => {
+    const prelude = buildExecutePrelude(
+      'https://tenant.example.com',
+      { Authorization: 'Bearer test' },
+      [parseSingleRule('GET:/inventory/**')],
+      [parseSingleAllowRule('GET:/inventory/**')],
+    )
     const run = new Function(`${prelude}\nreturn globalThis.pwned;`) as () => unknown
 
     expect(run()).toBeUndefined()
@@ -203,7 +244,39 @@ describe('buildExecuteScript', () => {
     ].join('\n'), [parseSingleRule('GET:/inventory/**')])
 
     expect(result.called).toBe(false)
-    expect(result.result).toEqual(expectedBlockedResult('GET', '/inventory/managedObjects', ['GET:/inventory/**']))
+    expect(result.result).toEqual(expectedBlockedResult(expectedRestrictedRequestMessage('GET', '/inventory/managedObjects', ['GET:/inventory/**'])))
+  })
+
+  it('blocks requests outside the configured allow list before fetch is called', async () => {
+    const result = await runGeneratedExecuteScript([
+      'async () => {',
+      `${installFetchTrap.toString()}`,
+      'installFetchTrap();',
+      'return await cumulocity.request({',
+      '  method: "GET",',
+      '  path: "/alarm/alarms?pageSize=5",',
+      '});',
+      '}',
+    ].join('\n'), [], [parseSingleAllowRule('GET:/inventory/**')])
+
+    expect(result.called).toBe(false)
+    expect(result.result).toEqual(expectedBlockedResult(expectedAllowedRequestMessage('GET', '/alarm/alarms', ['GET:/inventory/**'])))
+  })
+
+  it('lets restrictions take priority over matching allow rules in the generated wrapper', async () => {
+    const result = await runGeneratedExecuteScript([
+      'async () => {',
+      `${installFetchTrap.toString()}`,
+      'installFetchTrap();',
+      'return await cumulocity.request({',
+      '  method: "GET",',
+      '  path: "/inventory/managedObjects?pageSize=5",',
+      '});',
+      '}',
+    ].join('\n'), [parseSingleRule('GET:/inventory/managedObjects')], [parseSingleAllowRule('GET:/inventory/**')])
+
+    expect(result.called).toBe(false)
+    expect(result.result).toEqual(expectedBlockedResult(expectedRestrictedRequestMessage('GET', '/inventory/managedObjects', ['GET:/inventory/managedObjects'])))
   })
 
   it('rejects requests without an explicit method before fetch is called', async () => {
@@ -269,6 +342,27 @@ describe('buildExecuteScript', () => {
     })
   })
 
+  it('allows requests that match the configured allow list', async () => {
+    const result = await runGeneratedExecuteScript([
+      'async () => {',
+      `${installEchoFetch.toString()}`,
+      'installEchoFetch();',
+      'return await cumulocity.request({',
+      '  method: "GET",',
+      '  path: "/inventory/managedObjects?pageSize=5",',
+      '});',
+      '}',
+    ].join('\n'), [], [parseSingleAllowRule('GET:/inventory/**')])
+
+    expect(result.called).toBe(true)
+    expect(result.url).toBe('https://tenant.example.com/inventory/managedObjects?pageSize=5')
+    expect(result.method).toBe('GET')
+    expect(result.result).toEqual({
+      status: 'success',
+      result: { ok: true },
+    })
+  })
+
   it('blocks query-derived restrictions for same-origin absolute URLs before fetch is called', async () => {
     const restrictions = parseRestrictionRule(['GET:/inventory/**']).parsedRules
     const result = await runGeneratedExecuteScript([
@@ -283,11 +377,18 @@ describe('buildExecuteScript', () => {
     ].join('\n'), restrictions)
 
     expect(result.called).toBe(false)
-    expect(result.result).toEqual(expectedBlockedResult('GET', '/inventory/managedObjects', ['GET:/inventory/**']))
+    expect(result.result).toEqual(expectedBlockedResult(expectedRestrictedRequestMessage('GET', '/inventory/managedObjects', ['GET:/inventory/**'])))
   })
 
   it.each(INVALID_RESTRICTION_QUERY_PAYLOADS)('reports invalid malicious restriction text from query params: %s', (payload) => {
     expect(parseRestrictionRule([payload])).toEqual({
+      parsedRules: [],
+      failedRules: [{
+        rule: payload,
+        reason: expect.any(String),
+      }],
+    })
+    expect(parseAllowRule([payload])).toEqual({
       parsedRules: [],
       failedRules: [{
         rule: payload,

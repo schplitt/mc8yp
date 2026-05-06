@@ -70,7 +70,7 @@ Recommended shapes:
 If your function returns a string, it is returned as-is. Otherwise the result is returned as JSON text.
 
 The current MCP connection may mark blocked operations with \`x-mc8yp-restricted\` and related \`x-mc8yp-*\` fields. These operations are intentionally unavailable even though they still exist in the OpenAPI spec.
-Treat those annotations as a hard connection-level restriction: use them to understand what exists, but do not plan to call those operations with \`execute\`.
+Treat those annotations as a hard connection-level access policy: use them to understand what exists, but do not plan to call those operations with \`execute\`.
 
 Examples:
 () => {
@@ -96,7 +96,7 @@ Examples:
     }),
   }, async (input) => {
     try {
-      return tool.text(await query(input.code, server.ctx.custom?.restrictions ?? []))
+      return tool.text(await query(input.code, server.ctx.custom?.restrictions ?? [], server.ctx.custom?.allowRules ?? []))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return tool.error(message)
@@ -138,7 +138,7 @@ Tool output behavior:
 - On success, the actual function result is returned in Toon format.
 - On blocked or failed execution, the tool returns a plain text message.
 
-The current MCP connection may deny certain method/path combinations. Restricted routes remain visible in the spec, and \`cumulocity.request(...)\` will reject blocked calls before sending them.
+The current MCP connection may deny certain method/path combinations and may also use an allow list. Restricted or non-allowed routes remain visible in the spec, and \`cumulocity.request(...)\` will reject blocked calls before sending them.
 When that happens, the tool returns a plain text connection-policy message. That is not a Cumulocity API failure and retrying the same operation through the same connection will not help.
 
 ${getExecuteEnvironmentNote()}
@@ -174,7 +174,7 @@ async () => {
     })),
   }, async (input) => {
     try {
-      return tool.text(await execute(input.code, input, server.ctx.custom?.restrictions ?? []))
+      return tool.text(await execute(input.code, input, server.ctx.custom?.restrictions ?? [], server.ctx.custom?.allowRules ?? []))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return tool.error(message)
