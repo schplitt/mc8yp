@@ -19,8 +19,8 @@ const transport = new HttpTransport(server, {
 const app = new H3().all('/mcp', async (event) => {
   // Extract authentication from request headers
   const credentials = extractAuthFromHeaders(event.req)
-  const restriction = getQuery(event).restriction
-  const restrictionSources = (Array.isArray(restriction) ? restriction : [restriction]).filter(
+  const query = getQuery(event)
+  const restrictionSources = [query.restriction, query.restrict, query.r].flatMap((value) => Array.isArray(value) ? value : [value]).filter(
     (value): value is string => typeof value === 'string' && value.length > 0,
   )
   const { parsedRules, failedRules } = parseRestrictionRule(restrictionSources)
@@ -29,7 +29,7 @@ const app = new H3().all('/mcp', async (event) => {
     throw new HTTPError({
       status: 400,
       statusText: 'Invalid restriction query',
-      message: 'One or more restriction query parameters could not be parsed.',
+      message: 'One or more restriction query parameters (?restriction, ?restrict, ?r) could not be parsed.',
       data: {
         failedRules,
       },
