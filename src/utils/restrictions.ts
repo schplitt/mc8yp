@@ -1,10 +1,42 @@
 export const HTTP_METHODS = ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE'] as const
+export const RESTRICTION_QUERY_KEYS = ['restriction', 'restrict', 'r'] as const
+export const ALLOW_QUERY_KEYS = ['allowed', 'allow', 'a'] as const
+export const RESTRICTION_HEADER = 'mc8yp-restriction'
+export const ALLOW_HEADER = 'mc8yp-allow'
 
 export type HttpMethod = (typeof HTTP_METHODS)[number]
 export type RestrictionMethod = HttpMethod | '*'
 
 const HTTP_METHOD_SET: ReadonlySet<string> = new Set(HTTP_METHODS)
 const SEGMENT_PATTERN = /^[A-Za-z0-9._~*-]+$/
+
+function collectRuleSources(values: readonly unknown[]): string[] {
+  return values.flatMap((value) => Array.isArray(value) ? value : [value]).filter(
+    (value): value is string => typeof value === 'string' && value.length > 0,
+  )
+}
+
+function collectHeaderRuleSources(value: string | null): string[] {
+  if (!value) {
+    return []
+  }
+
+  return value.split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0)
+}
+
+export function collectServerRestrictionSources(query: Record<string, unknown>, headers: Headers): string[] {
+  return [
+    ...collectRuleSources(RESTRICTION_QUERY_KEYS.map((key) => query[key])),
+    ...collectHeaderRuleSources(headers.get(RESTRICTION_HEADER)),
+  ]
+}
+
+export function collectServerAllowSources(query: Record<string, unknown>, headers: Headers): string[] {
+  return [
+    ...collectRuleSources(ALLOW_QUERY_KEYS.map((key) => query[key])),
+    ...collectHeaderRuleSources(headers.get(ALLOW_HEADER)),
+  ]
+}
 
 interface BaseRule {
   method: RestrictionMethod

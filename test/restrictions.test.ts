@@ -3,7 +3,14 @@ import { NodeRuntime, createNodeDriver, createNodeRuntimeDriverFactory } from 's
 import { describe, expect, it } from 'vitest'
 import { createNetworkPermissionDecision } from '../src/codemode/network-permissions'
 import { findBlockingRestrictions, findMatchingRules } from '../src/utils/restriction-matcher'
-import { parseAllowRule, parseRestrictionRule } from '../src/utils/restrictions'
+import {
+  ALLOW_HEADER,
+  RESTRICTION_HEADER,
+  collectServerAllowSources,
+  collectServerRestrictionSources,
+  parseAllowRule,
+  parseRestrictionRule,
+} from '../src/utils/restrictions'
 
 function parseSingleRule(input: string) {
   const result = parseRestrictionRule([input])
@@ -112,6 +119,42 @@ describe('allow parsing', () => {
         { rule: '', reason: 'Allow value must not be empty.' },
       ],
     })
+  })
+})
+
+describe('server access policy input collection', () => {
+  it('collects restriction rules from query aliases and the project-scoped header', () => {
+    const headers = new Headers({
+      [RESTRICTION_HEADER]: 'DELETE:/alarm/**, /event/**',
+    })
+
+    expect(collectServerRestrictionSources({
+      restriction: '/inventory/**',
+      restrict: ['GET:/measurement/**'],
+      r: '',
+    }, headers)).toEqual([
+      '/inventory/**',
+      'GET:/measurement/**',
+      'DELETE:/alarm/**',
+      '/event/**',
+    ])
+  })
+
+  it('collects allow rules from query aliases and trims comma-separated header values', () => {
+    const headers = new Headers()
+    headers.append(ALLOW_HEADER, ' /inventory/** ')
+    headers.append(ALLOW_HEADER, 'POST:/alarm/**,   ')
+
+    expect(collectServerAllowSources({
+      allowed: ['GET:/devicecontrol/**'],
+      allow: '/measurement/**',
+      a: undefined,
+    }, headers)).toEqual([
+      'GET:/devicecontrol/**',
+      '/measurement/**',
+      '/inventory/**',
+      'POST:/alarm/**',
+    ])
   })
 })
 
