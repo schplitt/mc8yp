@@ -276,12 +276,26 @@ mc8yp -a "/inventory/**" -r "/inventory/managedObjects"
 
 Pass restrictions as `restriction`, `restrict`, or `r` query parameters on the MCP endpoint URL.
 Pass allow rules as `allowed`, `allow`, or `a` query parameters.
+You can also send project-scoped HTTP headers to avoid conflicts with well-known headers:
+
+- `mc8yp-restriction` for deny rules
+- `mc8yp-allow` for allow-list rules
+
+Both headers accept either repeated header instances or a comma-separated list of rules. Query parameters and headers can be combined on the same connection.
 
 ```
 /mcp?restriction=/inventory/**&restrict=DELETE:/alarm/**
 /mcp?r=/inventory/**&r=DELETE:/alarm/**
 /mcp?allow=/inventory/**&allowed=POST:/alarm/**
 /mcp?a=/inventory/**&r=/inventory/managedObjects
+```
+
+```http
+POST /mcp HTTP/1.1
+Authorization: Bearer <token>
+mc8yp-restriction: /inventory/**
+mc8yp-restriction: DELETE:/alarm/**
+mc8yp-allow: GET:/measurement/**
 ```
 
 ### How Access Policy Works

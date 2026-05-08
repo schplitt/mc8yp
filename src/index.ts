@@ -5,7 +5,16 @@ import { createC8YMcpServer } from './server'
 import { getAuthContext } from './ctx/auth'
 import process from 'node:process'
 import { extractAuthFromHeaders } from './utils/auth'
-import { parseAllowRule, parseRestrictionRule } from './utils/restrictions'
+import {
+  ALLOW_HEADER,
+  ALLOW_QUERY_KEYS,
+  RESTRICTION_HEADER,
+  RESTRICTION_QUERY_KEYS,
+  collectServerAllowSources,
+  collectServerRestrictionSources,
+  parseAllowRule,
+  parseRestrictionRule,
+} from './utils/restrictions'
 
 globalThis.executionEnvironment = 'server'
 
@@ -20,32 +29,28 @@ const app = new H3().all('/mcp', async (event) => {
   // Extract authentication from request headers
   const credentials = extractAuthFromHeaders(event.req)
   const query = getQuery(event)
-  const restrictionSources = [query.restriction, query.restrict, query.r].flatMap((value) => Array.isArray(value) ? value : [value]).filter(
-    (value): value is string => typeof value === 'string' && value.length > 0,
-  )
+  const restrictionSources = collectServerRestrictionSources(query, event.req.headers)
   const { parsedRules: restrictions, failedRules: failedRestrictions } = parseRestrictionRule(restrictionSources)
 
   if (failedRestrictions.length > 0) {
     throw new HTTPError({
       status: 400,
-      statusText: 'Invalid restriction query',
-      message: 'One or more restriction query parameters (?restriction, ?restrict, ?r) could not be parsed.',
+      statusText: 'Invalid restriction policy',
+      message: `One or more restriction values from query params (${RESTRICTION_QUERY_KEYS.map((key) => `?${key}`).join(', ')}) or the ${RESTRICTION_HEADER} header could not be parsed.`,
       data: {
         failedRules: failedRestrictions,
       },
     })
   }
 
-  const allowSources = [query.allowed, query.allow, query.a].flatMap((value) => Array.isArray(value) ? value : [value]).filter(
-    (value): value is string => typeof value === 'string' && value.length > 0,
-  )
+  const allowSources = collectServerAllowSources(query, event.req.headers)
   const { parsedRules: allowRules, failedRules: failedAllowRules } = parseAllowRule(allowSources)
 
   if (failedAllowRules.length > 0) {
     throw new HTTPError({
       status: 400,
-      statusText: 'Invalid allow query',
-      message: 'One or more allow query parameters (?allowed, ?allow, ?a) could not be parsed.',
+      statusText: 'Invalid allow policy',
+      message: `One or more allow values from query params (${ALLOW_QUERY_KEYS.map((key) => `?${key}`).join(', ')}) or the ${ALLOW_HEADER} header could not be parsed.`,
       data: {
         failedRules: failedAllowRules,
       },
