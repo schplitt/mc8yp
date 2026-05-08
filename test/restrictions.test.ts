@@ -140,6 +140,64 @@ describe('server access policy input collection', () => {
     ])
   })
 
+  it('ignores empty restriction header entries created by leading, trailing, or repeated commas', () => {
+    const headers = new Headers()
+    headers.append(RESTRICTION_HEADER, ' , DELETE:/alarm/** ,, /event/** , ')
+    headers.append(RESTRICTION_HEADER, ',, GET:/measurement/**,')
+
+    expect(collectServerRestrictionSources({}, headers)).toEqual([
+      'DELETE:/alarm/**',
+      '/event/**',
+      'GET:/measurement/**',
+    ])
+  })
+
+  it('treats commas inside a restriction rule as separators, so malformed fragments fail parsing independently', () => {
+    const sources = collectServerRestrictionSources({}, new Headers({
+      [RESTRICTION_HEADER]: 'GET, /inventory/**, POST:/alarm/**',
+    }))
+
+    expect(sources).toEqual([
+      'GET',
+      '/inventory/**',
+      'POST:/alarm/**',
+    ])
+
+    expect(parseRestrictionRule(sources)).toEqual({
+      parsedRules: [
+        { type: 'deny', method: '*', pathPattern: '/inventory/**', source: '/inventory/**' },
+        { type: 'deny', method: 'POST', pathPattern: '/alarm/**', source: 'POST:/alarm/**' },
+      ],
+      failedRules: [
+        { rule: 'GET', reason: 'Restriction path pattern must start with "/".' },
+      ],
+    })
+  })
+
+  it('surfaces very malformed restriction header fragments individually after comma splitting', () => {
+    const sources = collectServerRestrictionSources({}, new Headers({
+      [RESTRICTION_HEADER]: 'GET,:/i**, *:,/',
+    }))
+
+    expect(sources).toEqual([
+      'GET',
+      ':/i**',
+      '*:',
+      '/',
+    ])
+
+    expect(parseRestrictionRule(sources)).toEqual({
+      parsedRules: [
+        { type: 'deny', method: '*', pathPattern: '/', source: '/' },
+      ],
+      failedRules: [
+        { rule: 'GET', reason: 'Restriction path pattern must start with "/".' },
+        { rule: ':/i**', reason: 'Restriction path pattern must start with "/".' },
+        { rule: '*:', reason: 'Restriction path pattern must not be empty.' },
+      ],
+    })
+  })
+
   it('collects allow rules from query aliases and trims comma-separated header values', () => {
     const headers = new Headers()
     headers.append(ALLOW_HEADER, ' /inventory/** ')
@@ -155,6 +213,64 @@ describe('server access policy input collection', () => {
       '/inventory/**',
       'POST:/alarm/**',
     ])
+  })
+
+  it('ignores empty allow header entries created by leading, trailing, or repeated commas', () => {
+    const headers = new Headers()
+    headers.append(ALLOW_HEADER, ', /inventory/** ,, POST:/alarm/** ,')
+    headers.append(ALLOW_HEADER, ' , , GET:/measurement/**')
+
+    expect(collectServerAllowSources({}, headers)).toEqual([
+      '/inventory/**',
+      'POST:/alarm/**',
+      'GET:/measurement/**',
+    ])
+  })
+
+  it('treats commas inside an allow rule as separators, so malformed fragments fail parsing independently', () => {
+    const sources = collectServerAllowSources({}, new Headers({
+      [ALLOW_HEADER]: 'POST, /inventory/**, GET:/alarm/**',
+    }))
+
+    expect(sources).toEqual([
+      'POST',
+      '/inventory/**',
+      'GET:/alarm/**',
+    ])
+
+    expect(parseAllowRule(sources)).toEqual({
+      parsedRules: [
+        { type: 'allow', method: '*', pathPattern: '/inventory/**', source: '/inventory/**' },
+        { type: 'allow', method: 'GET', pathPattern: '/alarm/**', source: 'GET:/alarm/**' },
+      ],
+      failedRules: [
+        { rule: 'POST', reason: 'Allow path pattern must start with "/".' },
+      ],
+    })
+  })
+
+  it('surfaces very malformed allow header fragments individually after comma splitting', () => {
+    const sources = collectServerAllowSources({}, new Headers({
+      [ALLOW_HEADER]: 'GET,:/i**, *:,/',
+    }))
+
+    expect(sources).toEqual([
+      'GET',
+      ':/i**',
+      '*:',
+      '/',
+    ])
+
+    expect(parseAllowRule(sources)).toEqual({
+      parsedRules: [
+        { type: 'allow', method: '*', pathPattern: '/', source: '/' },
+      ],
+      failedRules: [
+        { rule: 'GET', reason: 'Allow path pattern must start with "/".' },
+        { rule: ':/i**', reason: 'Allow path pattern must start with "/".' },
+        { rule: '*:', reason: 'Allow path pattern must not be empty.' },
+      ],
+    })
   })
 })
 
