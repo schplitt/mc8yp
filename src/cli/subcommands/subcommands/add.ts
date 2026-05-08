@@ -1,6 +1,7 @@
 import type { CommandDef } from 'citty'
 import type { UserC8yAuth } from '../../../utils/credentials'
 import { exit } from 'node:process'
+import { cancel, isCancel, password } from '@clack/prompts'
 import { defineCommand } from 'citty'
 import consola from 'consola'
 import * as v from 'valibot'
@@ -26,10 +27,22 @@ const command: CommandDef = defineCommand({
         cancel: 'reject',
       })
 
-      const password = await consola.prompt('Password:', {
-        type: 'text',
-        cancel: 'reject',
+      const passwordPrompt = await password({
+        message: 'Password:',
+        clearOnError: true,
+        validate: (value) => {
+          if (!value) {
+            return 'Password is required.'
+          }
+
+          return undefined
+        },
       })
+
+      if (isCancel(passwordPrompt)) {
+        cancel('Cancelled.')
+        exit()
+      }
 
       // Check if credentials with same tenant URL already exist
       const existingCreds = await getStoredC8yAuth()
@@ -51,7 +64,7 @@ const command: CommandDef = defineCommand({
       await setStoredC8yAuth({
         tenantUrl,
         user,
-        password,
+        password: passwordPrompt,
       })
 
       consola.success('Credentials saved successfully!')

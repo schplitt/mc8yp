@@ -28,7 +28,7 @@ mc8yp
 ```
 
 **Credential Storage:**
-Credentials are stored using your operating system's secure credential manager:
+Credentials are stored using your operating system's secure credential manager. The interactive `mc8yp creds add` flow uses hidden password input so the secret is not echoed back in the terminal while you type it.
 
 - **macOS**: Keychain
 - **Windows**: Credential Vault
@@ -50,7 +50,7 @@ No additional credential configuration needed — the microservice uses Cumuloci
 ### Managing Credentials (CLI)
 
 ```sh
-# Add credentials (prompts for tenant URL, username, password)
+# Add credentials (prompts for tenant URL, username, and a masked password)
 pnpm dlx mc8yp creds add
 
 # List stored credentials

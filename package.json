@@ -48,6 +48,7 @@
   },
   "dependencies": {
     "@c8y/client": "catalog:",
+    "@clack/prompts": "catalog:",
     "@napi-rs/keyring": "catalog:",
     "@tmcp/adapter-valibot": "catalog:",
     "@tmcp/transport-http": "catalog:",

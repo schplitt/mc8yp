@@ -10,6 +10,7 @@ trustPolicyExclude:
 
 catalog:
   '@c8y/client': ^1023.68.7
+  '@clack/prompts': ^1.3.0
   '@napi-rs/keyring': ^1.2.0
   '@schplitt/eslint-config': ^1.4.0
   '@tmcp/adapter-valibot': ^0.1.5

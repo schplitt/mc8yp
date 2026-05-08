@@ -81,6 +81,7 @@ src/core-openapi.d.ts         Ambient type declarations for the `#core-openapi` 
 3. It sets `globalThis.executionEnvironment = 'cli'`.
 4. It exposes credential lookup helpers on `globalThis` for tools and subcommands.
 5. It starts the shared MCP server over stdio transport.
+6. `creds add` uses `@clack/prompts` so password entry is masked instead of echoed through the terminal prompt.
 
 #### Microservice mode
 
@@ -258,6 +259,7 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 - `secure-exec` is the execution boundary for both `query` and `execute`.
 - `tsdown` produces separate server and CLI bundles.
 - `@napi-rs/keyring` is used for local(cli) credential storage.
+- `@clack/prompts` is used for interactive CLI credential entry so password input is masked.
 - `secure-exec` must stay external in server builds. Bundling it into the microservice server output pulls in `node-stdlib-browser` resolution code and can crash at startup with `Cannot find module 'assert/'`.
 
 ### Patterns & Conventions
