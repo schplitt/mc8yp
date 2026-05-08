@@ -7167,25 +7167,13 @@
           }
         ],
         "summary": "Create one or multiple managed objects",
-        "description": "Create a managed object, for example, a device with temperature measurements support or a binary switch.<br>\nIn general, each managed object may consist of:\n\n*  A unique identifier that references the object.\n*  The name of the object.\n*  The most specific type of the managed object.\n*  A time stamp showing the last update.\n*  Fragments with specific meanings, for example, `c8y_IsDevice`, `c8y_SupportedOperations`.\n*  Any additional custom fragments.\n\nImagine, for example, that you want to describe electric meters from different vendors. Depending on the make of the meter, one may have a relay and one may be capable to measure a single phase or three phases (for example, a three-phase electricity sensor). A fragment `c8y_ThreePhaseElectricitySensor` would identify such an electric meter. Devices' characteristics are identified by storing fragments for each of them.\n\n> **&#9432; Info:** For more details about fragments with specific meanings, refer to [Device management & connectivity > Device integration > Fragment library](https://www.cumulocity.com/docs/device-integration/fragment-library/) in the Cumulocity user documentation.\n\nThe maximum number of managed objects that can be created in a single bulk request is 50.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_INVENTORY_CREATE <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_CREATE\n</section>\n",
+        "description": "Create a managed object, for example, a device with temperature measurements support or a binary switch.<br>\nIn general, each managed object may consist of:\n\n*  A unique identifier that references the object.\n*  The name of the object.\n*  The most specific type of the managed object.\n*  A time stamp showing the last update.\n*  Fragments with specific meanings, for example, `c8y_IsDevice`, `c8y_SupportedOperations`.\n*  Any additional custom fragments.\n\nImagine, for example, that you want to describe electric meters from different vendors. Depending on the make of the meter, one may have a relay and one may be capable to measure a single phase or three phases (for example, a three-phase electricity sensor). A fragment `c8y_ThreePhaseElectricitySensor` would identify such an electric meter. Devices' characteristics are identified by storing fragments for each of them.\n\n> **&#9432; Info:** For more details about fragments with specific meanings, refer to [Device management & connectivity > Device integration > Fragment library](https://www.cumulocity.com/docs/device-integration/fragment-library/) in the Cumulocity user documentation.\n\nThe maximum number of managed objects that can be created in a single bulk request is 50.\nIf any managed object included in the bulk request fails validation, then the request fails with a client error and nothing from the bulk request gets created.\nIf an unexpected server error occurs during bulk processing, then the response will return a server error, but part of the bulk that was processed before the error occurred will be created and the remainder will not.\n\nExternal identifiers can be assigned to managed objects upon creation by specifying a list in `externalIds` field.\nGiven external identifiers must be valid and not be already assigned to another managed object or the request to create a single or multiple managed objects will fail with a client error and not create anything.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_INVENTORY_CREATE <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_CREATE\n</section>\n",
         "requestBody": {
           "required": true,
           "content": {
             "application/vnd.com.nsn.cumulocity.managedobject+json": {
               "schema": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/managedObject"
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "owner": {
-                        "readOnly": true
-                      }
-                    }
-                  }
-                ]
+                "$ref": "#/components/schemas/managedObjectCreate"
               },
               "example": {
                 "name": "My tracking device",
@@ -7200,7 +7188,7 @@
             },
             "application/vnd.com.nsn.cumulocity.managedobjectcollection+json": {
               "schema": {
-                "$ref": "#/components/schemas/ManagedObjectCollection"
+                "$ref": "#/components/schemas/ManagedObjectCollectionCreate"
               },
               "example": {
                 "managedObjects": [
@@ -7300,7 +7288,7 @@
           "content": {
             "application/vnd.com.nsn.cumulocity.managedobjectcollection+json": {
               "schema": {
-                "$ref": "#/components/schemas/ManagedObjectCollectionBulk"
+                "$ref": "#/components/schemas/ManagedObjectCollectionUpdate"
               },
               "example": {
                 "managedObjects": [
@@ -25144,7 +25132,7 @@
           },
           "c8y_DeviceTypes": {
             "type": "array",
-            "description": "This fragment must be added in order to publish sample commands for a subset of devices sharing the same device type. If the fragment is present, the list of sample commands for a device type will be extended with the sample commands for the `c8y_DeviceTypes`. New sample commands created from the user interface will be created in the context of the `c8y_DeviceTypes`.",
+            "description": "This fragment must be added in order to publish sample commands for a subset of devices sharing the same device type. If the fragment is present, the list of sample commands for a device type\nwill be extended with the sample commands for the `c8y_DeviceTypes`. New sample commands created from the user interface will be created in the context of the `c8y_DeviceTypes`.\n",
             "items": {
               "type": "string"
             }
@@ -25158,7 +25146,7 @@
           }
         },
         "additionalProperties": {
-          "description": "It is possible to add an arbitrary number of additional properties as a list of key-value pairs, for example, `\"property1\": {}`, `\"property2\": \"value\"`. These properties are known as custom fragments and can be of any type, for example, object or string. Each custom fragment is identified by a unique name.\n\nReview [Getting started > Technical concepts > Cumulocity's domain model > Inventory > Fragments > Naming conventions of fragments](https://www.cumulocity.com/docs/concepts/domain-model/#naming-conventions-of-fragments) in the Cumulocity user documentation as there are characters that can not be used when naming custom fragments.\n",
+          "description": "It is possible to add an arbitrary number of additional properties as a list of key-value pairs, for example, `\"property1\": {}`, `\"property2\": \"value\"`.\nThese properties are known as custom fragments and can be of any type, for example, object or string. Each custom fragment is identified by a unique name.\n\nReview [Getting started > Technical concepts > Cumulocity's domain model > Inventory > Fragments > Naming conventions of fragments](https://www.cumulocity.com/docs/concepts/domain-model/#naming-conventions-of-fragments)\nin the Cumulocity user documentation as there are characters that can not be used when naming custom fragments.\n",
           "x-additionalPropertiesName": "customFragments"
         },
         "example": {
@@ -25219,6 +25207,123 @@
           }
         }
       },
+      "managedObjectCreate": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/desc_objectName"
+          },
+          "type": {
+            "description": "The fragment type can be interpreted as _device class_, this means, devices with the same type can receive the same types of configuration, software, firmware and operations. The type value is indexed and is therefore used for queries.",
+            "type": "string"
+          },
+          "externalIds": {
+            "description": "List of external identifiers to bind to newly created managed object.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/externalId"
+            }
+          },
+          "c8y_IsDevice": {
+            "description": "A fragment which identifies this managed object as a device.",
+            "type": "object"
+          },
+          "c8y_IsDeviceGroup": {
+            "description": "A fragment which identifies this managed object as a device group.",
+            "type": "object"
+          },
+          "c8y_DeviceTypes": {
+            "type": "array",
+            "description": "This fragment must be added in order to publish sample commands for a subset of devices sharing the same device type. If the fragment is present, the list of sample commands for a device type\nwill be extended with the sample commands for the `c8y_DeviceTypes`. New sample commands created from the user interface will be created in the context of the `c8y_DeviceTypes`.\n",
+            "items": {
+              "type": "string"
+            }
+          },
+          "c8y_SupportedOperations": {
+            "type": "array",
+            "description": "Lists the operations that are available for a particular device, so that applications can trigger the operations.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": {
+          "description": "It is possible to add an arbitrary number of additional properties as a list of key-value pairs, for example, `\"property1\": {}`, `\"property2\": \"value\"`.\nThese properties are known as custom fragments and can be of any type, for example, object or string. Each custom fragment is identified by a unique name.\n\nReview [Getting started > Technical concepts > Cumulocity's domain model > Inventory > Fragments > Naming conventions of fragments](https://www.cumulocity.com/docs/concepts/domain-model/#naming-conventions-of-fragments)\nin the Cumulocity user documentation as there are characters that can not be used when naming custom fragments.\n",
+          "x-additionalPropertiesName": "customFragments"
+        },
+        "example": {
+          "name": "My tracking device",
+          "externalIds": [
+            {
+              "externalId": "simulator_145074_1",
+              "type": "c8y_Serial"
+            }
+          ],
+          "c8y_IsDevice": {},
+          "c8y_DeviceTypes": [
+            "deviceSubsetType"
+          ],
+          "c8y_SupportedOperations": [
+            "c8y_Restart"
+          ]
+        }
+      },
+      "managedObjectUpdate": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "description": "Unique identifier of the object.",
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/desc_objectName"
+          },
+          "type": {
+            "description": "The fragment type can be interpreted as _device class_, this means, devices with the same type can receive the same types of configuration, software, firmware and operations. The type value is indexed and is therefore used for queries.",
+            "type": "string"
+          },
+          "c8y_IsDevice": {
+            "description": "A fragment which identifies this managed object as a device.",
+            "type": "object"
+          },
+          "c8y_IsDeviceGroup": {
+            "description": "A fragment which identifies this managed object as a device group.",
+            "type": "object"
+          },
+          "c8y_DeviceTypes": {
+            "type": "array",
+            "description": "This fragment must be added in order to publish sample commands for a subset of devices sharing the same device type. If the fragment is present, the list of sample commands for a device type\nwill be extended with the sample commands for the `c8y_DeviceTypes`. New sample commands created from the user interface will be created in the context of the `c8y_DeviceTypes`.\n",
+            "items": {
+              "type": "string"
+            }
+          },
+          "c8y_SupportedOperations": {
+            "type": "array",
+            "description": "Lists the operations that are available for a particular device, so that applications can trigger the operations.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": {
+          "description": "It is possible to add an arbitrary number of additional properties as a list of key-value pairs, for example, `\"property1\": {}`, `\"property2\": \"value\"`.\nThese properties are known as custom fragments and can be of any type, for example, object or string. Each custom fragment is identified by a unique name.\n\nReview [Getting started > Technical concepts > Cumulocity's domain model > Inventory > Fragments > Naming conventions of fragments](https://www.cumulocity.com/docs/concepts/domain-model/#naming-conventions-of-fragments)\nin the Cumulocity user documentation as there are characters that can not be used when naming custom fragments.\n",
+          "x-additionalPropertiesName": "customFragments"
+        },
+        "example": {
+          "id": "51994",
+          "name": "My tracking device",
+          "c8y_IsDevice": {},
+          "c8y_DeviceTypes": [
+            "deviceSubsetType"
+          ],
+          "c8y_SupportedOperations": [
+            "c8y_Restart"
+          ]
+        }
+      },
       "managedObjectAvailability": {
         "type": "object",
         "properties": {
@@ -25234,7 +25339,7 @@
             "type": "string",
             "format": "date-time",
             "description": "The time when the device sent the last message to Cumulocity.",
-            "example": "20130-03-19T00:00:00.000Z"
+            "example": "2013-03-19T00:00:00.000Z"
           },
           "interval": {
             "type": "integer",
@@ -25245,85 +25350,6 @@
           },
           "connectionStatus": {
             "$ref": "#/components/schemas/c8y_AvailabilityConnectionStatus"
-          }
-        }
-      },
-      "managedObjectBulk": {
-        "type": "object",
-        "required": [
-          "id"
-        ],
-        "properties": {
-          "id": {
-            "description": "Unique identifier of the object.",
-            "type": "string"
-          },
-          "name": {
-            "$ref": "#/components/schemas/desc_objectName"
-          },
-          "owner": {
-            "description": "Username of the device's owner.",
-            "type": "string"
-          },
-          "type": {
-            "description": "The fragment type can be interpreted as _device class_, this means, devices with the same type can receive the same types of configuration, software, firmwar>",
-            "type": "string"
-          },
-          "childAdditions": {
-            "$ref": "#/components/schemas/objectChildAdditions"
-          },
-          "childAssets": {
-            "$ref": "#/components/schemas/objectChildAssets"
-          },
-          "childDevices": {
-            "$ref": "#/components/schemas/objectChildDevices"
-          },
-          "c8y_IsDevice": {
-            "description": "A fragment which identifies this managed object as a device.",
-            "type": "object"
-          },
-          "c8y_IsDeviceGroup": {
-            "description": "A fragment which identifies this managed object as a device group.",
-            "type": "object"
-          },
-          "c8y_DeviceTypes": {
-            "type": "array",
-            "description": "This fragment must be added in order to publish sample commands for a subset of devices sharing the same device type. If the fragment is present, the list of>",
-            "items": {
-              "type": "string"
-            }
-          },
-          "c8y_SupportedOperations": {
-            "type": "array",
-            "description": "Lists the operations that are available for a particular device, so that applications can trigger the operations.",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "additionalProperties": {
-          "description": "It is possible to add an arbitrary number of additional properties as a list of key-value pairs, for example, `\"property1\": {}`, `\"property2\": \"value\"`. These properties >\n\nReview [Getting started > Technical concepts > Cumulocity's domain model > Inventory > Fragments > Naming conventions of fragments](https://www.cumulocity.com/docs/concep>\n",
-          "x-additionalPropertiesName": "customFragments"
-        },
-        "example": {
-          "id": "51994",
-          "name": "My tracking device",
-          "owner": "manga",
-          "c8y_IsDevice": {},
-          "c8y_DeviceTypes": [
-            "deviceSubsetType"
-          ],
-          "c8y_SupportedOperations": [
-            "c8y_Restart"
-          ],
-          "childAdditions": {
-            "references": []
-          },
-          "childAssets": {
-            "references": []
-          },
-          "childDevices": {
-            "references": []
           }
         }
       },
@@ -28251,7 +28277,32 @@
           }
         }
       },
-      "ManagedObjectCollectionBulk": {
+      "ManagedObjectCollectionCreate": {
+        "type": "object",
+        "required": [
+          "managedObjects"
+        ],
+        "properties": {
+          "managedObjects": {
+            "description": "An array containing the managed objects to create.",
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/managedObjectCreate"
+            }
+          }
+        },
+        "example": {
+          "managedObjects": [
+            {
+              "name": "My tracking device",
+              "c8y_IsDevice": {}
+            }
+          ]
+        }
+      },
+      "ManagedObjectCollectionUpdate": {
         "type": "object",
         "required": [
           "managedObjects"
@@ -28261,8 +28312,9 @@
             "description": "An array containing the managed objects to update.",
             "type": "array",
             "minItems": 1,
+            "maxItems": 50,
             "items": {
-              "$ref": "#/components/schemas/managedObjectBulk"
+              "$ref": "#/components/schemas/managedObjectUpdate"
             }
           }
         },
