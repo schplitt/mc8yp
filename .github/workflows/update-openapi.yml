@@ -1,4 +1,4 @@
-name: Update Core OpenAPI Specs
+name: Update Bundled OpenAPI Specs
 
 "on":
   schedule:
@@ -38,7 +38,7 @@ jobs:
       - name: Check for changes
         id: diff
         run: |
-          if git diff --quiet core-openapi/; then
+          if git diff --quiet openapi/; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -51,7 +51,7 @@ jobs:
           FETCH_RESULTS: ${{ steps.fetch.outputs.results }}
         run: |
           set -euo pipefail
-          BRANCH="chore/update-core-openapi-specs"
+          BRANCH="chore/update-bundled-openapi-specs"
           BASE="${{ github.event.repository.default_branch }}"
 
           git config user.name "github-actions[bot]"
@@ -59,10 +59,10 @@ jobs:
 
           # Build branch from current HEAD (default branch was checked out)
           git checkout -B "$BRANCH"
-          git add core-openapi/
+          git add openapi/
 
-          CHANGED_FILES=$(git diff --cached --name-only | sed 's|core-openapi/||' | sed 's|\.json$||' | tr '\n' ', ' | sed 's/,$//')
-          git commit -m "chore: update core OpenAPI specs ($CHANGED_FILES)"
+          CHANGED_FILES=$(git diff --cached --name-only | sed 's|openapi/||' | sed 's|\.json$||' | tr '\n' ', ' | sed 's/,$//')
+          git commit -m "chore: update bundled OpenAPI specs ($CHANGED_FILES)"
 
           git push --force origin "$BRANCH"
 
@@ -70,7 +70,7 @@ jobs:
           ERROR_COUNT=$(echo "$FETCH_RESULTS" | jq '[.[] | select(.status == "error")] | length')
           BODY_FILE=$(mktemp)
           {
-            echo "Automated update of bundled core OpenAPI specs from upstream Cumulocity API."
+            echo "Automated update of bundled OpenAPI specs from upstream Cumulocity API."
             echo ""
             echo "**Updated versions:** ${CHANGED_FILES}"
             if [ "$ERROR_COUNT" -gt 0 ]; then
@@ -78,7 +78,7 @@ jobs:
               echo "<details>"
               echo "<summary>⚠️ ${ERROR_COUNT} spec(s) failed to fetch</summary>"
               echo ""
-              echo "$FETCH_RESULTS" | jq -r '.[] | select(.status == "error") | "- `\(.version)`: \(.detail // "unknown error")"'
+              echo "$FETCH_RESULTS" | jq -r '.[] | select(.status == "error") | "- `\(.api)@\(.version)`: \(.detail // "unknown error")"'
               echo ""
               echo "</details>"
             fi
@@ -90,7 +90,7 @@ jobs:
           EXISTING=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
           if [ -z "$EXISTING" ]; then
             gh pr create \
-              --title "chore: update core OpenAPI specs ($CHANGED_FILES)" \
+              --title "chore: update bundled OpenAPI specs ($CHANGED_FILES)" \
               --body-file "$BODY_FILE" \
               --head "$BRANCH" \
               --base "$BASE"
