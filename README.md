@@ -62,13 +62,15 @@ pnpm dlx mc8yp creds remove
 
 ### Selecting The Bundled OpenAPI Build (CLI)
 
-Use `--spec` or `-s` to choose which bundled OpenAPI build the `query` tool exposes.
+Use `--spec` or `-s` to choose which bundled **core** OpenAPI snapshot the `query` tool exposes.
 
 Supported values are `release`, `2026`, `2025`, and `2024`.
 
-Each build currently contains:
+This flag selects the bundled **core** API version only. The bundled **dtm** OpenAPI snapshot is currently fixed and is included alongside every supported core build.
 
-- the matching bundled **core** OpenAPI snapshot
+Each bundled CLI build currently contains:
+
+- the selected bundled **core** OpenAPI snapshot
 - the bundled **dtm** OpenAPI snapshot
 
 ```sh
