@@ -81,11 +81,12 @@ async function runGeneratedExecuteScript(
   restrictions: readonly RestrictionRule[] = [],
   allowRules: readonly AllowRule[] = [],
   headers: Record<string, string> = { Authorization: 'Bearer test' },
+  enabledApis: readonly string[] = [],
 ): Promise<ExecuteHarnessResult> {
   resetTestGlobals()
 
   const run = new Function([
-    buildExecutePrelude('https://tenant.example.com', headers, restrictions, allowRules),
+    buildExecutePrelude('https://tenant.example.com', headers, restrictions, allowRules, enabledApis),
     `const __mc8ypExecute = (${sourceCode});`,
     'globalThis.__done = (async () => {',
     '  try {',
@@ -365,6 +366,7 @@ describe('buildExecuteScript', () => {
   })
 
   it('blocks requests outside allow rules generated from enabled bundled openapi parts before fetch is called', async () => {
+    const generatedAllowRules = createOpenApiPartAllowRules(['core'])
     const result = await runGeneratedExecuteScript([
       'async () => {',
       `${installFetchTrap.toString()}`,
@@ -374,10 +376,29 @@ describe('buildExecuteScript', () => {
       '  path: "/assets?pageSize=5",',
       '});',
       '}',
-    ].join('\n'), [], createOpenApiPartAllowRules(['core']))
+    ].join('\n'), [], generatedAllowRules, { Authorization: 'Bearer test' }, ['core'])
 
     expect(result.called).toBe(false)
-    expect(result.result).toEqual(expectedBlockedResult(expectedAllowedRequestMessage('GET', '/assets', createOpenApiPartAllowRules(['core']).map((rule) => rule.source))))
+    expect(result.result).toEqual(expectedBlockedResult([
+      'Request blocked by MCP connection policy.',
+      '',
+      'This operation is intentionally blocked because it is not included in the current MCP connection allow list.',
+      'It did not fail at the Cumulocity API and it was not executed against the tenant.',
+      'Retrying or trying the same operation again through this connection will not succeed.',
+      '',
+      'Report this to the user as a connection-level access restriction.',
+      'If the operation is needed, the MCP allow list for this connection must be updated by whoever manages that configuration.',
+      '',
+      'Enabled bundled OpenAPI parts for this connection:',
+      '- core',
+      'Only endpoints from those bundled specs are allowed through this connection-level allow expansion.',
+      '',
+      'Blocked operation:',
+      'Method: GET',
+      'Path: /assets',
+      'Configured allow rules:',
+      ...generatedAllowRules.map((rule) => `- ${rule.source}`),
+    ].join('\n')))
   })
 
   it('blocks query-derived restrictions for same-origin absolute URLs before fetch is called', async () => {
