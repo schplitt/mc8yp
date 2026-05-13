@@ -3,6 +3,7 @@ import { definePrompt } from 'tmcp/prompt'
 import { prompt } from 'tmcp/utils'
 import { getCoreOpenApiLabel } from '#core-openapi'
 import type { C8yMcpCustomContext } from '../types/mcp-context'
+import { BUNDLED_OPENAPI_ENTRIES, OPENAPI_PARTS } from '../utils/openapi'
 
 function getRuntimeSection(): string {
   return globalThis.executionEnvironment === 'cli'
@@ -10,8 +11,9 @@ function getRuntimeSection(): string {
     : '## Server Runtime\nThis deployed MCP server uses the current tenant and the service user attached to this MCP connection. Do not pass tenant-specific credentials or tenant URLs yourself.'
 }
 
-function getCoreOpenApiSection(): string {
-  return `## Core OpenAPI Snapshot\nThe query tool currently exposes the ${getCoreOpenApiLabel()} core OpenAPI snapshot.`
+function getOpenApiSection(server: McpServer<undefined, C8yMcpCustomContext>): string {
+  const enabledApis = server.ctx.custom?.enabledApis ?? []
+  return `## Bundled OpenAPI Specs\nThe query tool currently exposes the ${getCoreOpenApiLabel()} bundled core OpenAPI snapshot together with the other bundled product specs. Bundled specs on this connection: ${BUNDLED_OPENAPI_ENTRIES.map((entry) => `${entry.api} (${entry.version})`).join(', ')}. Enabled bundled OpenAPI parts for execute policy: ${enabledApis.length > 0 ? enabledApis.join(', ') : OPENAPI_PARTS.join(', ')}.`
 }
 
 export function createCodeModeGuidePrompt(server: McpServer<undefined, C8yMcpCustomContext>) {
@@ -26,7 +28,7 @@ export function createCodeModeGuidePrompt(server: McpServer<undefined, C8yMcpCus
       ...allowRules.map((rule) => `- allow: \`${rule.source}\``),
     ]
     const restrictionSection = policyLines.length > 0
-      ? `\n## Current Connection Access Policy\n${policyLines.join('\n')}\n\nThe \`query\` tool still shows the raw bundled OpenAPI spec. These rules are enforced when requests are executed, not by rewriting the spec.\n`
+      ? `\n## Current Connection Access Policy\n${policyLines.join('\n')}\n\nThe \`query\` tool still shows the raw bundled OpenAPI specs for this connection. These rules are enforced when requests are executed. Enabled bundled OpenAPI parts affect execute policy rather than hiding specs from query.\n`
       : ''
 
     return prompt.message(
@@ -35,15 +37,17 @@ export function createCodeModeGuidePrompt(server: McpServer<undefined, C8yMcpCus
 You have exactly two MCP tools available.
 
 ## query
-Use \`query\` when you need to inspect the core OpenAPI spec.
+Use \`query\` when you need to inspect the bundled OpenAPI specs.
 
 - Input: a JavaScript function expression
-- The top-level binding \`spec\` is available automatically
+- The top-level bindings \`coreSpec\`, \`dtmSpec\`, and \`specsEnabled\` are available automatically
+- \`coreSpec\` is for the main Cumulocity REST surface such as inventory, alarms, events, measurements, identity, device control, users, tenants, audit, and the broader platform APIs
+- \`dtmSpec\` is for Digital Twin Manager work such as schema definitions, asset models, linked series, and DTM asset or definition APIs
 - Return the exact value you want back from that function
 - Sync and async functions are both supported
 - Strings are returned as-is; other results are returned as JSON text
-- The \`query\` tool shows the raw bundled OpenAPI spec for the selected snapshot
-- The current MCP connection may still block \`execute\` requests through deny rules and/or an allow list even when an operation exists in the spec
+- The \`query\` tool shows the raw bundled OpenAPI specs for the selected build
+- The current MCP connection may still block \`execute\` requests through deny rules and/or an allow list even when an operation exists in a visible spec
 
 ### Available Shape
 \`\`\`ts
@@ -64,19 +68,36 @@ type PathItem = {
   delete?: OperationInfo
 }
 
-declare const spec: {
+type CoreSpec = {
   paths: Record<string, PathItem>
 }
+
+type DtmSpec = {
+  paths: Record<string, PathItem>
+}
+
+type SpecsEnabled = {
+  core: boolean
+  dtm: boolean
+}
+
+declare const coreSpec: CoreSpec
+declare const dtmSpec: DtmSpec
+declare const specsEnabled: SpecsEnabled
 \`\`\`
 
-Example:
+Examples:
 \`\`\`js
-() => Object.keys(spec.paths).filter((path) => path.includes('inventory'))
+() => specsEnabled
+\`\`\`
+
+\`\`\`js
+() => Object.keys(coreSpec.paths).filter((path) => path.includes('inventory'))
 \`\`\`
 
 \`\`\`js
 () => {
-  const op = spec.paths['/inventory/managedObjects']?.get
+  const op = dtmSpec.paths['/assets']?.get
   return op?.parameters
 }
 \`\`\`
@@ -131,18 +152,16 @@ async () => {
 
 \`\`\`js
 async () => {
-  const devices = await cumulocity.request({
+  return await cumulocity.request({
     method: 'GET',
-    path: '/inventory/managedObjects?pageSize=20&withTotalPages=true',
+    path: '/assets?pageSize=20',
   })
-
-  return devices
 }
 \`\`\`
 
 ${getRuntimeSection()}
 
-${getCoreOpenApiSection()}
+${getOpenApiSection(server)}
 
 ## Working Pattern
 1. Use \`query\` to find the right endpoint, parameters, and response shape.

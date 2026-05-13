@@ -30,8 +30,8 @@ function sanitizeDockerNamePart(value, fallback) {
 const dockerRepositoryName = sanitizeDockerNamePart(assetBaseName, 'mc8yp')
 const dockerReleaseTag = sanitizeDockerNamePart(releaseTag, `v${packageJson.version}`)
 
-const openapiVersionsConfig = JSON.parse(fs.readFileSync(path.join(rootDir, 'openapi-versions.json'), 'utf8'))
-const specVersions = openapiVersionsConfig.versions.map((entry) => entry.version)
+const openApiBuildConfig = JSON.parse(fs.readFileSync(path.join(rootDir, 'openapi-builds.json'), 'utf8'))
+const openApiBuilds = openApiBuildConfig.builds
 
 function run(command, args, cwd = rootDir) {
   execFileSync(command, args, {
@@ -86,16 +86,16 @@ try {
   fs.mkdirSync(stagingRootDir, { recursive: true })
   removeExistingZipArtifacts()
 
-  for (const version of specVersions) {
-    const buildDir = path.join(buildRootDir, version)
+  for (const build of openApiBuilds) {
+    const buildDir = path.join(buildRootDir, build.version)
     if (!fs.existsSync(path.join(buildDir, 'server.mjs'))) {
-      throw new Error(`Missing built server bundle for core OpenAPI version "${version}" at ${buildDir}. Run pnpm build first.`)
+      throw new Error(`Missing built server bundle for OpenAPI build version "${build.version}" at ${buildDir}. Run pnpm build first.`)
     }
 
-    prepareStagingDir(version)
-    const zipFileName = `${assetBaseName}-${version}-${releaseTag}.zip`
+    prepareStagingDir(build.version)
+    const zipFileName = `${assetBaseName}-${build.artifact}-${releaseTag}.zip`
     const zipFilePath = path.join(rootDir, zipFileName)
-    const imageRef = `${dockerRepositoryName}:${sanitizeDockerNamePart(version, 'release')}-${dockerReleaseTag}`
+    const imageRef = `${dockerRepositoryName}:${sanitizeDockerNamePart(build.artifact, build.version)}-${dockerReleaseTag}`
 
     try {
       run('docker', ['build', '--platform', targetPlatform, '-f', stagedDockerfilePath, '-t', imageRef, '.'], rootDir)

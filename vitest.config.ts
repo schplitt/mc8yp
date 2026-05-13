@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config'
-import { coreOpenApiPlugin } from './tsdown.config'
+import { coreOpenApiPlugin, dtmOpenApiPlugin } from './tsdown.config'
 
 export default defineConfig({
-  plugins: [coreOpenApiPlugin({ mode: 'cli' })],
+  plugins: [coreOpenApiPlugin({ mode: 'cli' }), dtmOpenApiPlugin({ mode: 'cli' })],
 })

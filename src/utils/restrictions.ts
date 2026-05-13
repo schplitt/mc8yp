@@ -1,14 +1,19 @@
+import { OPENAPI_PARTS } from './openapi'
+
 export const HTTP_METHODS = ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE'] as const
 export const RESTRICTION_QUERY_KEYS = ['restriction', 'restrict', 'r'] as const
 export const ALLOW_QUERY_KEYS = ['allowed', 'allow', 'a'] as const
+export const OPENAPI_QUERY_KEYS = ['openapi', 'api'] as const
 export const RESTRICTION_HEADER = 'mc8yp-restriction'
 export const ALLOW_HEADER = 'mc8yp-allow'
+export const OPENAPI_HEADER = 'mc8yp-openapi'
 
 export type HttpMethod = (typeof HTTP_METHODS)[number]
 export type RestrictionMethod = HttpMethod | '*'
 
 const HTTP_METHOD_SET: ReadonlySet<string> = new Set(HTTP_METHODS)
 const SEGMENT_PATTERN = /^[A-Za-z0-9._~*-]+$/
+const OPENAPI_PART_SET: ReadonlySet<string> = new Set(OPENAPI_PARTS)
 
 function collectRuleSources(values: readonly unknown[]): string[] {
   return values.flatMap((value) => Array.isArray(value) ? value : [value]).filter(
@@ -35,6 +40,13 @@ export function collectServerAllowSources(query: Record<string, unknown>, header
   return [
     ...collectRuleSources(ALLOW_QUERY_KEYS.map((key) => query[key])),
     ...collectHeaderRuleSources(headers.get(ALLOW_HEADER)),
+  ]
+}
+
+export function collectServerOpenApiSources(query: Record<string, unknown>, headers: Headers): string[] {
+  return [
+    ...collectRuleSources(OPENAPI_QUERY_KEYS.map((key) => query[key])),
+    ...collectHeaderRuleSources(headers.get(OPENAPI_HEADER)),
   ]
 }
 
@@ -67,6 +79,11 @@ export interface RestrictionParseResult {
 export interface AllowParseResult {
   parsedRules: AllowRule[]
   failedRules: InvalidAllowRule[]
+}
+
+export interface OpenApiPartsParseResult {
+  enabledApis: string[]
+  failedValues: Array<{ value: string, reason: string }>
 }
 
 export function parseRestrictionRule(input: string | readonly string[]): RestrictionParseResult {
@@ -350,5 +367,39 @@ export function parseAllowRule(input: string | readonly string[]): AllowParseRes
   return {
     parsedRules,
     failedRules,
+  }
+}
+
+export function parseEnabledOpenApiParts(input: string | readonly string[]): OpenApiPartsParseResult {
+  const inputs = typeof input === 'string' ? [input] : input
+  const enabledApis: string[] = []
+  const failedValues: Array<{ value: string, reason: string }> = []
+
+  for (const source of inputs) {
+    if (!source) {
+      failedValues.push({
+        value: source,
+        reason: 'OpenAPI value must not be empty.',
+      })
+      continue
+    }
+
+    const normalized = source.trim().toLowerCase()
+    if (!OPENAPI_PART_SET.has(normalized)) {
+      failedValues.push({
+        value: source,
+        reason: `Unsupported OpenAPI value "${source}". Available: ${OPENAPI_PARTS.join(', ')}.`,
+      })
+      continue
+    }
+
+    if (!enabledApis.includes(normalized)) {
+      enabledApis.push(normalized)
+    }
+  }
+
+  return {
+    enabledApis,
+    failedValues,
   }
 }

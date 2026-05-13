@@ -2,13 +2,17 @@ import http from 'node:http'
 import { NodeRuntime, createNodeDriver, createNodeRuntimeDriverFactory } from 'secure-exec'
 import { describe, expect, it } from 'vitest'
 import { createNetworkPermissionDecision } from '../src/codemode/network-permissions'
+import { BUNDLED_OPENAPI_ENTRIES, createOpenApiPartAllowRules } from '../src/utils/openapi'
 import { findBlockingRestrictions, findMatchingRules } from '../src/utils/restriction-matcher'
 import {
   ALLOW_HEADER,
+  OPENAPI_HEADER,
   RESTRICTION_HEADER,
   collectServerAllowSources,
+  collectServerOpenApiSources,
   collectServerRestrictionSources,
   parseAllowRule,
+  parseEnabledOpenApiParts,
   parseRestrictionRule,
 } from '../src/utils/restrictions'
 
@@ -119,6 +123,41 @@ describe('allow parsing', () => {
         { rule: '', reason: 'Allow value must not be empty.' },
       ],
     })
+  })
+})
+
+describe('bundled openapi selection parsing', () => {
+  it('parses enabled bundled openapi parts', () => {
+    expect(parseEnabledOpenApiParts(['core', 'dtm', 'core'])).toEqual({
+      enabledApis: ['core', 'dtm'],
+      failedValues: [],
+    })
+  })
+
+  it('collects bundled openapi parts from query aliases and the project-scoped header', () => {
+    const headers = new Headers()
+    headers.append(OPENAPI_HEADER, 'dtm, core')
+
+    expect(collectServerOpenApiSources({
+      openapi: 'core',
+      api: ['dtm'],
+    }, headers)).toEqual(['core', 'dtm', 'dtm', 'core'])
+  })
+
+  it('reports unsupported bundled openapi parts', () => {
+    expect(parseEnabledOpenApiParts(['core', 'abc'])).toEqual({
+      enabledApis: ['core'],
+      failedValues: [{ value: 'abc', reason: 'Unsupported OpenAPI value "abc". Available: core, dtm.' }],
+    })
+  })
+
+  it('keeps the bundled core and dtm route roots disjoint', () => {
+    const core = BUNDLED_OPENAPI_ENTRIES.find((entry) => entry.api === 'core')
+    const dtm = BUNDLED_OPENAPI_ENTRIES.find((entry) => entry.api === 'dtm')
+    const corePaths = Object.keys((core?.spec as { paths?: Record<string, unknown> } | undefined)?.paths ?? {})
+    const dtmPaths = Object.keys((dtm?.spec as { paths?: Record<string, unknown> } | undefined)?.paths ?? {})
+
+    expect(corePaths.filter((path) => dtmPaths.includes(path))).toEqual([])
   })
 })
 
@@ -401,6 +440,18 @@ describe('network permission decisions', () => {
       url: 'https://tenant.example.com/inventory/managedObjects?pageSize=5',
     }, [], [parseSingleAllowRule('GET:/inventory/**')])).toEqual({
       allow: true,
+    })
+  })
+
+  it('blocks requests when enabled bundled openapi parts were expanded into the allow list', () => {
+    expect(createNetworkPermissionDecision(tenantUrl, {
+      op: 'connect',
+      hostname: 'tenant.example.com',
+      method: 'GET',
+      url: 'https://tenant.example.com/assets?pageSize=5',
+    }, [], createOpenApiPartAllowRules(['core']))).toEqual({
+      allow: false,
+      reason: expect.stringContaining('Network connect blocked by MCP allow list: no allow rule matched GET /assets.'),
     })
   })
 

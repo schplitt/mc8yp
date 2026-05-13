@@ -2,7 +2,8 @@
 /* eslint-disable no-new-func */
 import { encode } from '@toon-format/toon'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { buildExecutePrelude, buildExecuteScript, execute } from '../src/codemode/execute'
+import { buildExecutePrelude, buildExecuteScript, execute, query } from '../src/codemode/execute'
+import { createOpenApiPartAllowRules } from '../src/utils/openapi'
 import { parseAllowRule, parseRestrictionRule } from '../src/utils/restrictions'
 import type { AllowRule, RestrictionRule } from '../src/utils/restrictions'
 import * as client from '../src/utils/client'
@@ -363,6 +364,22 @@ describe('buildExecuteScript', () => {
     })
   })
 
+  it('blocks requests outside allow rules generated from enabled bundled openapi parts before fetch is called', async () => {
+    const result = await runGeneratedExecuteScript([
+      'async () => {',
+      `${installFetchTrap.toString()}`,
+      'installFetchTrap();',
+      'return await cumulocity.request({',
+      '  method: "GET",',
+      '  path: "/assets?pageSize=5",',
+      '});',
+      '}',
+    ].join('\n'), [], createOpenApiPartAllowRules(['core']))
+
+    expect(result.called).toBe(false)
+    expect(result.result).toEqual(expectedBlockedResult(expectedAllowedRequestMessage('GET', '/assets', createOpenApiPartAllowRules(['core']).map((rule) => rule.source))))
+  })
+
   it('blocks query-derived restrictions for same-origin absolute URLs before fetch is called', async () => {
     const restrictions = parseRestrictionRule(['GET:/inventory/**']).parsedRules
     const result = await runGeneratedExecuteScript([
@@ -406,6 +423,20 @@ describe('buildExecuteScript', () => {
         message: 'Execute code must evaluate to a function.',
       },
     })
+  })
+})
+
+describe('query', () => {
+  it('exposes every bundled spec through the query sandbox', async () => {
+    const result = await query('() => ({ hasCore: !!coreSpec, hasDtm: !!dtmSpec, specsEnabled })')
+
+    expect(JSON.parse(result)).toEqual({ hasCore: true, hasDtm: true, specsEnabled: { core: true, dtm: true } })
+  })
+
+  it('keeps all bundled specs visible while exposing enabled execute-policy spec families', async () => {
+    const result = await query('() => ({ hasCore: !!coreSpec, hasDtm: !!dtmSpec, specsEnabled })', [], [], ['core'])
+
+    expect(JSON.parse(result)).toEqual({ hasCore: true, hasDtm: true, specsEnabled: { core: true, dtm: false } })
   })
 })
 
