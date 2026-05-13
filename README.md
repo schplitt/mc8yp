@@ -1,19 +1,129 @@
-# mc8yp - Cumulocity IoT MCP Server
+# mc8yp - Full Cumulocity API Access for AI Agents
 
 ![Version](https://img.shields.io/npm/v/mc8yp)
 ![License](https://img.shields.io/npm/l/mc8yp)
 ![Node Version](https://img.shields.io/node/v/mc8yp)
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gives AI agents full access to the Cumulocity IoT platform through code execution. Instead of exposing dozens of fixed tools, the server provides two code-mode tools — `query` and `execute` — that let the agent write JavaScript to inspect the bundled OpenAPI specs and call any API endpoint.
+mc8yp is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gives AI agents access to the **full Cumulocity API surface** through a compact code-mode interface.
 
-**Two Deployment Modes:**
+It supports the two bundled Cumulocity API families exposed by this project:
 
-- **CLI Mode**: Run locally with `pnpm dlx mc8yp` for development and testing with AI agents like Claude Desktop. Uses your system's secure keyring to store credentials.
-- **Microservice Mode**: Deploy as a Cumulocity microservice for production use. The MCP endpoint (`/mcp`) integrates with Cumulocity's agents manager, using the service user's permissions automatically.
+- **Core API**
+- **DTM API**
 
-## Installation
+Instead of limiting agents to a small fixed set of prebuilt tools, mc8yp gives them broad access to Cumulocity through two code-mode tools:
 
-### CLI Mode (Local Development & Testing)
+- `query` — inspect the bundled Core + DTM OpenAPI specs
+- `execute` — call the live Cumulocity API
+
+The result is an MCP integration where agents can work across the broader Cumulocity platform, while operators still keep **fine-grained control** over what is actually allowed at runtime.
+
+mc8yp is available in two modes:
+
+- **Cumulocity microservice mode** for production use with [AI Agent Manager](https://cumulocity.com/docs/ai/aim-introduction/)
+- **CLI mode** for local debugging, testing, and development
+
+## Why mc8yp
+
+### Full API power for agents
+
+mc8yp is built to give agents access to the **complete Cumulocity API surface available through the bundled Core and DTM specs**, instead of a tiny curated subset of actions.
+
+That means agents are not blocked just because a specific endpoint was never wrapped as a custom MCP tool.
+
+### Built for AI Agent Manager first
+
+The primary production deployment model is **Cumulocity microservice mode**.
+
+Deploy mc8yp as a Cumulocity microservice and expose `/mcp` to **AI Agent Manager**, so agents can use broad Cumulocity API capabilities inside the platform.
+
+### Full power, controlled access
+
+Broad capability does **not** have to mean unrestricted access.
+
+mc8yp lets you constrain live API usage with:
+
+- **restrictions** to deny specific methods or paths
+- **allow rules** to define an allow-list
+- **bundled OpenAPI disablement** for selected API families
+- **sandboxed execution** and a tenant-host network boundary
+- normal **Cumulocity permissions** from the authenticated user or service user
+
+This makes setups like these possible:
+
+- **read-only agents**
+- **non-destructive production agents**
+- agents limited to **inventory**, **alarms**, or other selected API families
+- agents allowed to write only to a small approved set of endpoints
+
+### Token efficiency comes from the small MCP surface
+
+The agent gets broad API reach without requiring a huge fixed tool inventory. Instead of many endpoint-specific tools, mc8yp keeps the MCP surface compact and lets the model reason over the bundled OpenAPI specs.
+
+## How it works
+
+1. The agent uses `query` to inspect the bundled Cumulocity OpenAPI specs.
+2. The agent decides which Core or DTM endpoint it needs.
+3. The agent uses `execute` to call the live Cumulocity API.
+4. mc8yp enforces configured restrictions and allow rules before sending the request.
+
+## Deployment Modes
+
+### 1. Cumulocity Microservice Mode (recommended)
+
+Designed for deployment inside **Cumulocity IoT**.
+
+In this mode, mc8yp exposes an HTTP MCP endpoint at `/mcp` and is intended for use with **AI Agent Manager**.
+
+- deploy through Cumulocity microservice packaging
+- integrate with [AI Agent Manager](https://cumulocity.com/docs/ai/aim-introduction/)
+- use the service user's permissions automatically
+- configure per-connection MCP policy with restrictions, allow rules, and bundled OpenAPI disablement
+
+### 2. CLI Mode (local development)
+
+CLI mode is ideal for:
+
+- local debugging
+- testing agent prompts and workflows
+- validating access-policy setups before deployment
+- working with MCP clients such as Claude Desktop
+
+Credentials are stored in your operating system's secure credential manager.
+
+## Quick Start: AI Agent Manager / Microservice
+
+1. Download the latest release package from [GitHub Releases](https://github.com/schplitt/mc8yp/releases)
+2. Upload the `.zip` in **Application Management**
+3. Subscribe the application in your tenant
+4. Connect your agent workflow to:
+
+```txt
+https://<tenant>.cumulocity.com/service/mc8yp-server/mcp
+```
+
+No extra tenant credential setup is required in microservice mode. The microservice uses Cumulocity's deployment environment and request authentication model.
+
+### Example: production-safe read-only microservice connection
+
+You can expose broad API knowledge to the agent while allowing only safe read access at runtime.
+
+Example MCP endpoint configuration patterns:
+
+```txt
+/mcp?allow=GET:/inventory/**&allow=GET:/alarm/**&allow=GET:/measurement/**
+```
+
+Or with headers:
+
+```http
+POST /mcp HTTP/1.1
+mc8yp-allow: GET:/inventory/**
+mc8yp-allow: GET:/alarm/**
+mc8yp-allow: GET:/measurement/**
+```
+
+## Quick Start: Local CLI
 
 ```sh
 # Run directly (recommended)
@@ -27,27 +137,15 @@ npm install -g mc8yp
 mc8yp
 ```
 
-**Credential Storage:**
-Credentials are stored using your operating system's secure credential manager. The interactive `mc8yp creds add` flow uses hidden password input so the secret is not echoed back in the terminal while you type it.
+### Credential Storage
+
+The interactive `mc8yp creds add` flow uses masked password input and stores credentials in your operating system's secure credential manager.
 
 - **macOS**: Keychain
 - **Windows**: Credential Vault
 - **Linux**: Secret Service API (libsecret)
 
-### Microservice Mode (Production Deployment)
-
-Designed **exclusively for deployment on Cumulocity IoT**. The server exposes an HTTP endpoint at `/mcp` that integrates with Cumulocity's agents manager, automatically using the service user's credentials and permissions.
-
-1. Download the latest release package from [GitHub Releases](https://github.com/schplitt/mc8yp/releases)
-2. Upload the `.zip` to Cumulocity via **Application Management**
-3. Subscribe to the application in your tenant
-4. The MCP server will be available at: `https://<tenant>.cumulocity.com/service/mc8yp-server/mcp`
-
-No additional credential configuration needed — the microservice uses Cumulocity's built-in service user authentication.
-
-## Usage
-
-### Managing Credentials (CLI)
+### Managing Credentials
 
 ```sh
 # Add credentials (prompts for tenant URL, username, and a masked password)
@@ -56,39 +154,13 @@ pnpm dlx mc8yp creds add
 # List stored credentials
 pnpm dlx mc8yp creds list
 
-# Remove credentials
+# Remove stored credentials
 pnpm dlx mc8yp creds remove
 ```
 
-### Selecting The Bundled OpenAPI Build (CLI)
+### Connecting a Local MCP Client
 
-Use `--spec` or `-s` to choose which bundled **core** OpenAPI snapshot the `query` tool exposes.
-
-Supported values are `release`, `2026`, `2025`, and `2024`.
-
-This flag selects the bundled **core** API version only. The bundled **dtm** OpenAPI snapshot is currently fixed and is included alongside every supported core build.
-
-Each bundled CLI build currently contains:
-
-- the selected bundled **core** OpenAPI snapshot
-- the bundled **dtm** OpenAPI snapshot
-
-```sh
-# Default: latest bundled release build
-mc8yp
-
-# Explicitly use the 2025 bundled build
-mc8yp --spec 2025
-
-# Short form
-mc8yp -s 2024
-```
-
-This only affects the bundled OpenAPI data that `query` sees. The `execute` tool still calls the live Cumulocity API of the selected tenant or deployed service environment.
-
-### Connecting to AI Agents
-
-For Claude Desktop or any MCP client, add to your MCP configuration:
+For Claude Desktop or any MCP client, add:
 
 ```json
 {
@@ -102,7 +174,7 @@ For Claude Desktop or any MCP client, add to your MCP configuration:
 }
 ```
 
-With restrictions (see [API Restrictions](#api-restrictions)):
+Example with read-only access rules:
 
 ```json
 {
@@ -110,11 +182,42 @@ With restrictions (see [API Restrictions](#api-restrictions)):
     "mc8yp": {
       "type": "stdio",
       "command": "pnpm",
-      "args": ["dlx", "mc8yp", "-r", "/alarm/**", "-r", "DELETE:/inventory/**"]
+      "args": [
+        "dlx",
+        "mc8yp",
+        "-a",
+        "GET:/inventory/**",
+        "-a",
+        "GET:/alarm/**",
+        "-a",
+        "GET:/measurement/**"
+      ]
     }
   }
 }
 ```
+
+## Bundled OpenAPI Coverage
+
+The `query` tool exposes the bundled OpenAPI snapshots included by this project:
+
+- **Core** snapshots: `release`, `2026`, `2025`, and `2024`
+- **DTM** snapshot: bundled alongside each supported core build
+
+In CLI mode, use `--spec` or `-s` to choose which bundled **core** OpenAPI snapshot `query` exposes:
+
+```sh
+# Default: latest bundled release build
+mc8yp
+
+# Explicitly use the 2025 bundled build
+mc8yp --spec 2025
+
+# Short form
+mc8yp -s 2024
+```
+
+This only changes the bundled OpenAPI data that `query` sees. The `execute` tool still calls the live Cumulocity API of the selected tenant or deployed service environment.
 
 ## Tools & Prompts
 
@@ -131,7 +234,13 @@ Both code-mode tools run in a sandboxed runtime ([secure-exec](https://github.co
 - `query` returns JSON text for easier inspection of OpenAPI data.
 - `execute` returns the successful function result in [Toon format](https://github.com/nicepkg/toon). If execution is blocked or fails, it returns a plain text message instead.
 
-### Execute Input Shape
+### Prompts
+
+| Prompt            | Description                                                                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `code-mode-guide` | Full reference for the `query` and `execute` tools, including available types, examples, and access-policy info for the current connection. |
+
+## Execute Input Shape
 
 The `execute` tool expects an async function expression, not module source with `export default`.
 
@@ -159,12 +268,6 @@ async () => {
 }
 ```
 
-### Prompts
-
-| Prompt            | Description                                                                                                                                 |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `code-mode-guide` | Full reference for the `query` and `execute` tools, including available types, examples, and access-policy info for the current connection. |
-
 ## API Access Policy
 
 mc8yp supports two per-connection rule types:
@@ -173,6 +276,8 @@ mc8yp supports two per-connection rule types:
 - **Allow rules** — allow-list rules that permit matching API operations and block everything else when at least one allow rule is configured
 
 If both apply to the same operation, **restrictions take priority**.
+
+This is what makes it possible to expose broad API capability while still keeping an agent in a **read-only** or otherwise **non-destructive** operating mode.
 
 Example: allowing `/inventory/**` but restricting `/inventory/managedObjects` still blocks `/inventory/managedObjects`.
 
@@ -244,7 +349,7 @@ Supported wildcards:
 - `/inventory/**` already matches `/inventory` itself, so you do **not** need both `/inventory` and `/inventory/**`
 - `/i**` is **not valid** because `**` must be its own segment. Use `/i*/**` if you want to match a first segment starting with `i` and everything below it
 - `*:/inventory/**` is allowed and means the same thing as `/inventory/**`
-- Root paths across the bundled core and DTM specs are intentionally treated as disjoint, so path-based restriction and allow rules are enough for request enforcement
+- Root paths across the bundled Core and DTM specs are intentionally treated as disjoint, so path-based restriction and allow rules are enough for request enforcement
 - Rule patterns may not contain empty segments (`//`), `.` or `..` segments, query strings, or fragments
 
 ### CLI Mode
@@ -300,7 +405,7 @@ You can also send project-scoped HTTP headers to avoid conflicts with well-known
 
 Both headers accept either repeated header instances or a comma-separated list of values. Query parameters and headers can be combined on the same connection.
 
-```
+```txt
 /mcp?restriction=/inventory/**&restrict=DELETE:/alarm/**
 /mcp?r=/inventory/**&r=DELETE:/alarm/**
 /mcp?allow=/inventory/**&allowed=POST:/alarm/**
@@ -389,7 +494,7 @@ pnpm test:run
 pnpm test:bench
 ```
 
-### Run Locally
+### Run Locally From Source
 
 Build first, then point your MCP client at the compiled CLI:
 
