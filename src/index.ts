@@ -8,13 +8,18 @@ import { extractAuthFromHeaders } from './utils/auth'
 import {
   ALLOW_HEADER,
   ALLOW_QUERY_KEYS,
+  OPENAPI_DISABLED_HEADER,
+  OPENAPI_DISABLED_QUERY_KEY,
   RESTRICTION_HEADER,
   RESTRICTION_QUERY_KEYS,
   collectServerAllowSources,
+  collectServerDisabledOpenApiSources,
   collectServerRestrictionSources,
   parseAllowRule,
+  parseDisabledOpenApiParts,
   parseRestrictionRule,
 } from './utils/restrictions'
+import { createOpenApiPartRestrictionRules } from './utils/openapi'
 
 globalThis.executionEnvironment = 'server'
 
@@ -44,7 +49,7 @@ const app = new H3().all('/mcp', async (event) => {
   }
 
   const allowSources = collectServerAllowSources(query, event.req.headers)
-  const { parsedRules: allowRules, failedRules: failedAllowRules } = parseAllowRule(allowSources)
+  const { parsedRules: parsedAllowRules, failedRules: failedAllowRules } = parseAllowRule(allowSources)
 
   if (failedAllowRules.length > 0) {
     throw new HTTPError({
@@ -57,9 +62,29 @@ const app = new H3().all('/mcp', async (event) => {
     })
   }
 
+  const openApiSources = collectServerDisabledOpenApiSources(query, event.req.headers)
+  const { disabledApis, failedValues: failedOpenApiValues } = parseDisabledOpenApiParts(openApiSources)
+
+  if (failedOpenApiValues.length > 0) {
+    throw new HTTPError({
+      status: 400,
+      statusText: 'Invalid bundled OpenAPI disable selection',
+      message: `One or more bundled OpenAPI values from the ?${OPENAPI_DISABLED_QUERY_KEY} query parameter or the ${OPENAPI_DISABLED_HEADER} header could not be parsed.`,
+      data: {
+        failedValues: failedOpenApiValues,
+      },
+    })
+  }
+
+  // When a request forbids bundled OpenAPI parts, expand that selection into
+  // concrete restriction rules here so execute enforcement can stay purely path/method-based.
+  const effectiveRestrictions = disabledApis.length > 0
+    ? [...restrictions, ...createOpenApiPartRestrictionRules(disabledApis)]
+    : restrictions
+
   // Set auth context for the request
   const authContext = getAuthContext()
-  return authContext.call(credentials, () => transport.respond(event.req, { restrictions, allowRules }))
+  return authContext.call(credentials, () => transport.respond(event.req, { restrictions: effectiveRestrictions, allowRules: parsedAllowRules, disabledApis }))
 })
 
 app.get('/health', () => 'OK')

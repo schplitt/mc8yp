@@ -6,7 +6,7 @@
 
 The project exposes a small code-mode surface to AI agents instead of a large fixed toolset:
 
-- `query` inspects the bundled Cumulocity OpenAPI spec
+- `query` inspects the bundled Cumulocity OpenAPI specs
 - `execute` calls the live Cumulocity API through a sandboxed request helper
 - `list-credentials` is available only in CLI mode to inspect locally stored tenants
 
@@ -60,16 +60,20 @@ test/
   restrictions.test.ts
   restrictions.bench.ts
   semaphore.test.ts
-core-openapi/
-  release.json               Bundled latest Cumulocity core OpenAPI snapshot
-  2026.json                  Bundled 2026 Cumulocity core OpenAPI snapshot
-  2025.json                  Bundled 2025 Cumulocity core OpenAPI snapshot
-  2024.json                  Bundled 2024 Cumulocity core OpenAPI snapshot
+openapi/
+  core/
+    release.json             Bundled latest Cumulocity core OpenAPI snapshot
+    2026.json                Bundled 2026 Cumulocity core OpenAPI snapshot
+    2025.json                Bundled 2025 Cumulocity core OpenAPI snapshot
+    2024.json                Bundled 2024 Cumulocity core OpenAPI snapshot
+  dtm/
+    release.json             Bundled latest Cumulocity DTM OpenAPI snapshot
+openapi-builds.json           Build matrix plus download URLs for bundled OpenAPI sources
 scripts/
   cumulocity.mjs             Updates cumulocity.json metadata from package.json
   package-microservices.mjs  Builds versioned Docker-based Cumulocity release zips
-tsdown.config.ts              CLI/server build configuration plus the `#core-openapi` virtual module plugin
-src/core-openapi.d.ts         Ambient type declarations for the `#core-openapi` virtual module
+tsdown.config.ts              CLI/server build configuration plus the `#core-openapi` and `#dtm-openapi` virtual module plugins
+src/openapi-modules.d.ts      Ambient type declarations for both the `#core-openapi` and `#dtm-openapi` virtual modules
 ```
 
 ### Runtime Flow
@@ -77,7 +81,7 @@ src/core-openapi.d.ts         Ambient type declarations for the `#core-openapi` 
 #### CLI mode
 
 1. `src/cli/index.ts` parses CLI arguments and access-policy flags (`-r`, `--restrict`, `--restriction`, `-a`, `--allow`, and `--allowed`).
-2. It accepts `--spec` / `-s` to select the bundled core OpenAPI snapshot exposed by `query`.
+2. It accepts `--spec` / `-s` to select the bundled core-versioned OpenAPI build exposed by `query`.
 3. It sets `globalThis.executionEnvironment = 'cli'`.
 4. It exposes credential lookup helpers on `globalThis` for tools and subcommands.
 5. It starts the shared MCP server over stdio transport.
@@ -87,14 +91,14 @@ src/core-openapi.d.ts         Ambient type declarations for the `#core-openapi` 
 
 1. `src/index.ts` starts the HTTP server and exposes `/mcp` and `/health`.
 2. It sets `globalThis.executionEnvironment = 'server'`.
-3. It extracts auth from request headers, restrictions from `restriction`, `restrict`, and `r` query parameters plus the `mc8yp-restriction` header, and allow rules from `allowed`, `allow`, and `a` query parameters plus the `mc8yp-allow` header.
+3. It extracts auth from request headers, restrictions from `restriction`, `restrict`, and `r` query parameters plus the `mc8yp-restriction` header, allow rules from `allowed`, `allow`, and `a` query parameters plus the `mc8yp-allow` header, and bundled OpenAPI disablement from the `openapi-disabled` query parameter plus the `mc8yp-openapi-disabled` header.
 4. It stores auth in request-local context and forwards the request to the shared MCP server.
 5. It configures the HTTP transport in POST-only mode (`disableSse: true`) because the optional long-lived GET/SSE channel proved unstable behind Cumulocity microservice ingress.
 
 #### Shared MCP surface
 
 - `src/server.ts` creates the MCP server, registers tools and prompts, and conditionally enables `list-credentials` only in CLI mode.
-- `core-openapi/` contains the versioned Cumulocity core OpenAPI snapshots consumed by the build.
+- `openapi/core/` and `openapi/dtm/` contain the bundled OpenAPI snapshots consumed by the build.
 - `src/tools/codemode.ts` defines the `query` and `execute` tools.
 - `src/prompts/codemode.ts` defines the `code-mode-guide` prompt.
 
@@ -102,29 +106,34 @@ src/core-openapi.d.ts         Ambient type declarations for the `#core-openapi` 
 
 `src/codemode/execute.ts` is the main control surface for sandbox execution.
 
-- `query` executes JavaScript against the selected bundled core OpenAPI spec with network access disabled.
+- `query` executes JavaScript against the bundled OpenAPI specs with network access disabled.
 - `execute` executes JavaScript with a provided `cumulocity.request()` helper.
 - Both runtimes use `secure-exec` with a 128 MB memory limit and 50 second CPU time limit.
 - A semaphore limits concurrent sandbox runs to 3.
 - Input code is normalized before execution so fenced code blocks can still run.
 
-### Core OpenAPI Selection
+### Bundled OpenAPI Selection
 
-- All consumers import from the virtual module `#core-openapi`, which exposes `getCoreOpenApiSpec`, `getCoreOpenApiVersion`, `setCoreOpenApiVersion`, and `getCoreOpenApiLabel`.
-- The module body is synthesized by a small tsdown plugin in `tsdown.config.ts`:
-  - For the CLI build the plugin inlines all `core-openapi/*.json` snapshots and `setCoreOpenApiVersion` switches between them at runtime.
-  - For each server build the plugin inlines exactly one snapshot and `setCoreOpenApiVersion` only accepts that build's version.
-- Types for the virtual module live in `src/core-openapi.d.ts` (ambient `declare module '#core-openapi'`); no `tsconfig.paths` entry is needed.
-- `tsdown.config.ts` emits one server bundle per supported core OpenAPI version into `.output/<version>/`.
-- `scripts/package-microservices.mjs` turns those built server outputs into one Docker-based zip per version for releases.
+- Consumers import from the virtual modules `#core-openapi` and `#dtm-openapi`.
+- Both modules use the same module-local interface shape: `specs`, one active `get...Spec()`, one active `get...Version()`, one `set...Version()`, and one `get...Label()`.
+- The module bodies are synthesized by small tsdown plugins in `tsdown.config.ts`:
+  - For the CLI build the core plugin inlines all `openapi/core/*.json` snapshots and `setCoreOpenApiVersion` switches between them at runtime.
+  - For the CLI build the DTM plugin currently inlines the bundled `openapi/dtm/release.json` snapshot.
+  - For each server build, the plugins inline exactly the configured core+DTM combination for that build.
+- Types for both virtual modules live together in `src/openapi-modules.d.ts`; no `tsconfig.paths` entry is needed.
+- `openapi-builds.json` is the source of truth for both the download URLs used by `scripts/update-openapi.mjs` and the server build/package matrix used by `tsdown.config.ts` and `scripts/package-microservices.mjs`.
+- `tsdown.config.ts` emits one server bundle per supported build version into `.output/<version>/`.
+- `scripts/package-microservices.mjs` turns those built server outputs into one Docker-based zip per build, for example `mc8yp-core-2026-dtm-v2.x.x.zip`.
 - The packaging script writes a temporary generated Dockerfile under `.c8y/`, builds from the repository root, copies the selected `.output/<version>/` bundle into `/app/server/`, and installs production dependencies inside the Linux image with pnpm before copying them into the runtime stage.
 - The packaging script builds Docker images for `linux/amd64` by default so release zips created on Apple Silicon remain deployable in typical Cumulocity environments; override with `DOCKER_PLATFORM` only when you intentionally need a different target.
 
 ### Query vs Execute
 
 - `query` expects a JavaScript function expression and returns strings directly or other values as JSON text.
+- `query` injects three deterministic top-level bindings into the sandbox: `coreSpec`, `dtmSpec`, and `specsEnabled`.
+- `coreSpec` is the main Cumulocity REST surface, `dtmSpec` is the Digital Twin Manager surface, and `specsEnabled` reports which spec families are enabled for execute policy.
 - `execute` expects a JavaScript function expression and returns successful results in Toon format.
-- Restricted operations remain visible in the OpenAPI spec, but blocked live requests fail before network access.
+- Visible operations remain raw OpenAPI data; blocked live requests fail before network access.
 
 ### Restrictions
 
@@ -133,7 +142,10 @@ Restrictions and allow rules both use the format `[METHOD:]<path-pattern>`.
 - Restrictions are deny rules.
 - Allow rules are allow-list entries. When any allow rule exists, requests must match at least one allow rule unless a restriction blocks them first.
 - Restrictions take priority over allow rules.
+- Root paths across the bundled core and DTM specs are intentionally treated as disjoint, so path-based rules are sufficient for request enforcement.
 - In microservice mode, prefer the project-scoped `mc8yp-restriction` and `mc8yp-allow` headers for HTTP policy transport; repeated headers and comma-separated values are both accepted.
+- Bundled spec execute-policy disablement is controlled separately through the disabled OpenAPI parts for the connection, using `mc8yp-openapi-disabled` or the `openapi-disabled` query parameter.
+- In both `src/cli/index.ts` and `src/index.ts`, disabled bundled OpenAPI selection is intentionally expanded into concrete restriction rules so execute enforcement can remain purely path-and-method based.
 
 The restriction system is implemented in two places:
 
@@ -141,7 +153,7 @@ The restriction system is implemented in two places:
 - `src/utils/restriction-matcher.ts` owns rule compilation, path matching, and restriction-vs-allow precedence.
 - `src/codemode/network-permissions.ts` enforces secure-exec network decisions for live execute requests.
 
-The OpenAPI view exposed by `query` is the raw bundled snapshot. Connection policy is enforced at execution time rather than by rewriting the spec.
+The OpenAPI view exposed by `query` is the raw bundled snapshot data for all bundled specs. Query never hides or rewrites bundled specs; instead, `specsEnabled` reports which spec families are enabled for execute policy on the connection. Connection policy is enforced at execution time rather than by rewriting the spec.
 
 ## Authentication And Credentials
 
@@ -189,6 +201,7 @@ pnpm prerelease    # lint + typecheck + build
 - `tsdown.config.ts` builds the CLI bundle into `dist/`
 - Server bundles intentionally keep runtime dependencies external.
 - Release zip artifacts are created in the repository root by `pnpm package:microservices`
+- `pnpm package:microservices` names artifacts from the bundled API combination, for example `mc8yp-core-2026-dtm-v2.x.x.zip`.
 - `pnpm package:microservices` uses a temporary `.c8y/` staging directory, deletes old root `*.zip` artifacts before creating fresh ones, installs production dependencies inside a Linux Docker build so platform-specific optional native packages resolve correctly, and builds `linux/amd64` images unless `DOCKER_PLATFORM` is set explicitly.
 
 ## Code Style And Conventions
@@ -204,7 +217,8 @@ pnpm prerelease    # lint + typecheck + build
 ### Practical editing guidance
 
 - If a change affects tool behavior, inspect both the tool definition and the codemode runtime.
-- If a change affects core OpenAPI selection, update the `#core-openapi` plugin in `tsdown.config.ts` and the ambient declaration in `src/core-openapi.d.ts`.
+- If a change affects bundled OpenAPI selection, update the `#core-openapi` / `#dtm-openapi` plugins in `tsdown.config.ts`, the ambient declarations in `src/openapi-modules.d.ts`, and the source/build matrix in `openapi-builds.json`.
+- If you add a third bundled OpenAPI spec in the future, extend these exact places together: add `openapi/<name>/...` files, add another virtual module in `tsdown.config.ts`, add its declaration to `src/openapi-modules.d.ts`, extend `src/utils/openapi.ts`, extend the explicit `coreSpec`/`dtmSpec` messaging and typings in `src/tools/codemode.ts` and `src/prompts/codemode.ts`, update the query sandbox bindings in `src/codemode/execute.ts`, update disabled-OpenAPI parsing in `src/utils/restrictions.ts`, keep the restriction expansion points in `src/cli/index.ts` and `src/index.ts` aligned, and update `README.md` plus this file.
 - If a change affects restrictions or allow rules, verify both policy messaging and live request blocking.
 - If a change affects auth, verify the CLI and server paths separately.
 - If a change affects public MCP behavior, update `README.md` as well as this file.
@@ -240,7 +254,7 @@ When working on this project:
 1. Start from the actual controlling surface. For most feature work that is `src/tools/`, `src/prompts/`, `src/codemode/execute.ts`, or restriction/auth utilities.
 2. Treat CLI mode and microservice mode as separate execution environments with different auth and tool availability.
 3. Run focused tests first when changing a narrow subsystem, then run the full validation set if the change is broader. Use this exact validation order: `pnpm test:run`, then `pnpm lint:fix`, then `pnpm typecheck`.
-4. The `query` tool exposes the raw bundled OpenAPI snapshot; restrictions and allow lists are enforced when requests are executed, not by rewriting the spec.
+4. The `query` tool exposes the raw bundled OpenAPI snapshots for the current connection; `specsEnabled` reports which spec families remain enabled for execute policy after bundled-spec disablement, and restrictions and allow lists are enforced when requests are executed rather than by rewriting spec contents.
 5. Keep public MCP tool and prompt descriptions aligned with actual runtime behavior.
 6. Preserve the current sandbox limits and request boundary logic unless the task explicitly changes them.
 7. Record recurring project-specific lessons in the section below when they are likely to prevent future mistakes.
@@ -266,8 +280,8 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 
 - `execute` uses a generated ESM module entry and reads the default export from sandbox execution.
 - `query` and `execute` accept function-expression style code and normalize fenced code input before evaluation.
-- `#core-openapi` is a virtual module synthesized by a tsdown plugin; consumers must not import the JSON snapshots directly.
-- The CLI build inlines all `core-openapi/*.json` snapshots; each server build inlines exactly one.
+- `#core-openapi` and `#dtm-openapi` are virtual modules synthesized by tsdown plugins; consumers must not import the JSON snapshots directly.
+- The CLI build inlines all bundled core snapshots plus the bundled DTM snapshot; each server build inlines exactly the configured combination for that build.
 - Server builds should not use `noExternal: [/^.*$/]`. The microservice bundle is allowed to depend on runtime `node_modules`, and the release image must install those dependencies inside the Linux image rather than copying host `node_modules` from macOS.
 - `scripts/package-microservices.mjs` intentionally targets `linux/amd64` by default to avoid Apple Silicon release images failing with `exec format error` in Cumulocity.
 - Restrictions and allow rules are both discoverability metadata and enforcement logic; both layers matter.

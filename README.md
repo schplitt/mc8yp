@@ -4,7 +4,7 @@
 ![License](https://img.shields.io/npm/l/mc8yp)
 ![Node Version](https://img.shields.io/node/v/mc8yp)
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gives AI agents full access to the Cumulocity IoT platform through code execution. Instead of exposing dozens of fixed tools, the server provides two code-mode tools — `query` and `execute` — that let the agent write JavaScript to inspect the core OpenAPI spec and call any API endpoint.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gives AI agents full access to the Cumulocity IoT platform through code execution. Instead of exposing dozens of fixed tools, the server provides two code-mode tools — `query` and `execute` — that let the agent write JavaScript to inspect the bundled OpenAPI specs and call any API endpoint.
 
 **Two Deployment Modes:**
 
@@ -19,7 +19,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gi
 # Run directly (recommended)
 pnpm dlx mc8yp
 
-# Pick a specific core OpenAPI snapshot for query
+# Pick a specific bundled OpenAPI build for query
 pnpm dlx mc8yp --spec 2025
 
 # Or install globally
@@ -60,24 +60,31 @@ pnpm dlx mc8yp creds list
 pnpm dlx mc8yp creds remove
 ```
 
-### Selecting The Core OpenAPI Snapshot (CLI)
+### Selecting The Bundled OpenAPI Build (CLI)
 
-Use `--spec` or `-s` to choose which bundled core OpenAPI snapshot the `query` tool exposes.
+Use `--spec` or `-s` to choose which bundled **core** OpenAPI snapshot the `query` tool exposes.
 
 Supported values are `release`, `2026`, `2025`, and `2024`.
 
+This flag selects the bundled **core** API version only. The bundled **dtm** OpenAPI snapshot is currently fixed and is included alongside every supported core build.
+
+Each bundled CLI build currently contains:
+
+- the selected bundled **core** OpenAPI snapshot
+- the bundled **dtm** OpenAPI snapshot
+
 ```sh
-# Default: latest bundled release snapshot
+# Default: latest bundled release build
 mc8yp
 
-# Explicitly use the 2025 core OpenAPI snapshot
+# Explicitly use the 2025 bundled build
 mc8yp --spec 2025
 
 # Short form
 mc8yp -s 2024
 ```
 
-This only affects the `query` tool's OpenAPI view. The `execute` tool still calls the live Cumulocity API of the selected tenant or deployed service environment.
+This only affects the bundled OpenAPI data that `query` sees. The `execute` tool still calls the live Cumulocity API of the selected tenant or deployed service environment.
 
 ### Connecting to AI Agents
 
@@ -115,7 +122,7 @@ With restrictions (see [API Restrictions](#api-restrictions)):
 
 | Tool               | Description                                                                                                                                                                                                                                        |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `query`            | Search and inspect the bundled Cumulocity core OpenAPI spec by running a JavaScript module. The spec is injected as a top-level `spec` binding. Export the result with `export default`.                                                           |
+| `query`            | Search and inspect the bundled OpenAPI specs by running a JavaScript function expression. The sandbox exposes `coreSpec`, `dtmSpec`, and `specsEnabled`, and it never hides bundled specs from the query surface.                                  |
 | `execute`          | Execute JavaScript against the live Cumulocity API. Provide an async JavaScript function expression. A top-level `cumulocity` binding provides `cumulocity.request({ method, path, body?, headers? })`. Return the final value from that function. |
 | `list-credentials` | _(CLI mode only)_ List stored credentials from your system keyring.                                                                                                                                                                                |
 
@@ -237,6 +244,7 @@ Supported wildcards:
 - `/inventory/**` already matches `/inventory` itself, so you do **not** need both `/inventory` and `/inventory/**`
 - `/i**` is **not valid** because `**` must be its own segment. Use `/i*/**` if you want to match a first segment starting with `i` and everything below it
 - `*:/inventory/**` is allowed and means the same thing as `/inventory/**`
+- Root paths across the bundled core and DTM specs are intentionally treated as disjoint, so path-based restriction and allow rules are enough for request enforcement
 - Rule patterns may not contain empty segments (`//`), `.` or `..` segments, query strings, or fragments
 
 ### CLI Mode
@@ -251,9 +259,6 @@ mc8yp -r "/inventory/**"
 
 # Block deletes on inventory and all alarm access
 mc8yp -r "DELETE:/inventory/**" -r "/alarm/**"
-
-# Block everything under user management
-mc8yp --restriction "/user/**"
 
 # Same thing using the long alias
 mc8yp --restrict "/user/**"
@@ -272,22 +277,35 @@ mc8yp --allow "GET:/inventory/**" --allowed "POST:/alarm/**"
 mc8yp -a "/inventory/**" -r "/inventory/managedObjects"
 ```
 
+To forbid one or more bundled OpenAPI parts for execute policy, repeat `--disable-openapi` (or `-d`) in CLI mode. `query` still sees all bundled specs and can inspect `specsEnabled` to understand which spec families remain enabled for execute policy:
+
+```sh
+# Disable bundled DTM APIs for execute policy on this CLI connection
+mc8yp -d dtm
+
+# Disable multiple bundled specs if more are added in the future
+mc8yp -d dtm -d core
+```
+
 ### Microservice Mode (HTTP)
 
 Pass restrictions as `restriction`, `restrict`, or `r` query parameters on the MCP endpoint URL.
 Pass allow rules as `allowed`, `allow`, or `a` query parameters.
+To forbid bundled OpenAPI parts for execute policy, pass the `openapi-disabled` query parameter.
 You can also send project-scoped HTTP headers to avoid conflicts with well-known headers:
 
 - `mc8yp-restriction` for deny rules
 - `mc8yp-allow` for allow-list rules
+- `mc8yp-openapi-disabled` for bundled OpenAPI part disablement
 
-Both headers accept either repeated header instances or a comma-separated list of rules. Query parameters and headers can be combined on the same connection.
+Both headers accept either repeated header instances or a comma-separated list of values. Query parameters and headers can be combined on the same connection.
 
 ```
 /mcp?restriction=/inventory/**&restrict=DELETE:/alarm/**
 /mcp?r=/inventory/**&r=DELETE:/alarm/**
 /mcp?allow=/inventory/**&allowed=POST:/alarm/**
-/mcp?a=/inventory/**&r=/inventory/managedObjects
+/mcp?openapi-disabled=dtm
+/mcp?openapi-disabled=dtm&openapi-disabled=core
 ```
 
 ```http
@@ -296,21 +314,24 @@ Authorization: Bearer <token>
 mc8yp-restriction: /inventory/**
 mc8yp-restriction: DELETE:/alarm/**
 mc8yp-allow: GET:/measurement/**
+mc8yp-openapi-disabled: dtm
 ```
 
 ### How Access Policy Works
 
-1. **Query visibility**: The `query` tool exposes the raw bundled OpenAPI snapshot for the current MCP connection. It does not annotate or filter operations based on restrictions or allow rules.
+1. **Query visibility**: The `query` tool exposes the raw bundled OpenAPI specs for the current MCP connection. Bundled specs are not hidden or rewritten, and the query sandbox exposes `specsEnabled` so the model can see which spec families are enabled for execute policy.
 
 2. **Sandbox request enforcement**: The `execute` tool checks restrictions and allow rules inside the generated sandbox request helper, where the actual HTTP method and normalized path are both available. Matching deny rules block first. If any allow rules are configured, requests must also match at least one allow rule.
 
-3. **Network boundary**: The secure-exec permission layer independently restricts network access to the configured tenant host. Other network operations are denied.
+3. **Bundled spec disablement**: When the connection disables bundled OpenAPI parts such as `dtm`, `query` still shows all bundled specs, while the server expands that selection into additional restrictions so `execute` stays path-and-method based.
+
+4. **Network boundary**: The secure-exec permission layer independently restricts network access to the configured tenant host. Other network operations are denied.
 
 When an `execute` request is blocked by MCP connection policy, the tool returns explanatory text stating whether the operation was denied by a restriction or blocked because it is outside the configured allow list, no request was sent to Cumulocity, and retrying through the same connection will not help.
 
 ## Build And Packaging
 
-The repository bundles multiple core OpenAPI snapshots for CLI use and builds one microservice server bundle per snapshot version.
+The repository bundles multiple OpenAPI specs for CLI use and builds one microservice server bundle per configured build version.
 
 ### Build Outputs
 
@@ -319,7 +340,7 @@ The repository bundles multiple core OpenAPI snapshots for CLI use and builds on
 - CLI bundle in `dist/`
 - Versioned server bundles in `.output/release/`, `.output/2026/`, `.output/2025/`, and `.output/2024/`
 
-The versions built are driven by [`openapi-versions.json`](openapi-versions.json). Each server bundle contains only its own `core-openapi/<version>.json` snapshot.
+The build matrix is driven by [`openapi-builds.json`](openapi-builds.json). Core snapshots live under `openapi/core/`, DTM snapshots live under `openapi/dtm/`, and each server bundle contains the configured combination for that build.
 
 ### Release Packaging
 
@@ -335,10 +356,10 @@ pnpm package:microservices
 
 That command creates one zip per bundled server variant in the repository root, for example:
 
-- `mc8yp-release-v1.2.3.zip`
-- `mc8yp-2026-v1.2.3.zip`
-- `mc8yp-2025-v1.2.3.zip`
-- `mc8yp-2024-v1.2.3.zip`
+- `mc8yp-core-release-dtm-v1.2.3.zip`
+- `mc8yp-core-2026-dtm-v1.2.3.zip`
+- `mc8yp-core-2025-dtm-v1.2.3.zip`
+- `mc8yp-core-2024-dtm-v1.2.3.zip`
 
 The GitHub release workflow uses that packaging command when building tagged releases.
 

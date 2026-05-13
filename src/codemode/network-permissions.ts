@@ -13,6 +13,7 @@ export function createNetworkPermissionDecision(
   request: NetworkPermissionRequest,
   restrictions: readonly RestrictionRule[] = [],
   allowRules: readonly AllowRule[] = [],
+  disabledApis: readonly string[] = [],
 ): NetworkPermissionDecision {
   const tenantHostname = new URL(tenantUrl).hostname
 
@@ -44,7 +45,7 @@ export function createNetworkPermissionDecision(
 
         return {
           allow: false,
-          reason: `Network connect blocked by MCP allow list: no allow rule matched ${normalizedMethod} ${pathname}. Configured allow rules: ${allowRules.map((rule) => rule.source).join(', ')}`,
+          reason: `Network connect blocked by MCP allow list: no allow rule matched ${normalizedMethod} ${pathname}. Configured allow rules: ${allowRules.map((rule) => rule.source).join(', ')}${disabledApis.length > 0 ? `. Disabled bundled OpenAPI parts for execute policy on this connection: ${disabledApis.join(', ')}. Endpoints from those bundled specs are blocked by connection-level bundled OpenAPI policy.` : ''}`,
         }
       }
     } else {

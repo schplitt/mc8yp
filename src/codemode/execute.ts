@@ -1,5 +1,4 @@
 import { encode } from '@toon-format/toon'
-import { getCoreOpenApiSpec } from '#core-openapi'
 import { NodeRuntime, createNodeDriver, createNodeRuntimeDriverFactory } from 'secure-exec'
 import { AsyncSemaphore } from './semaphore'
 import { createNetworkPermissionDecision } from './network-permissions'
@@ -11,6 +10,7 @@ import {
   matchCompiledSegments,
   matchesCompiledRule,
 } from '../utils/restriction-matcher'
+import { BUNDLED_OPENAPI_SPECS } from '../utils/openapi'
 import { HTTP_METHODS } from '../utils/restrictions'
 import type { AllowRule, RestrictionRule } from '../utils/restrictions'
 
@@ -39,6 +39,7 @@ function serializeExecuteConfig(
   headers: Record<string, string>,
   restrictions: readonly RestrictionRule[],
   allowRules: readonly AllowRule[],
+  disabledApis: readonly string[],
 ): string {
   const normalizedTenantUrl = new URL(tenantUrl).toString()
   const serializedRestrictions = restrictions.map(({ type, method, pathPattern, source }) => ({ type, method, pathPattern, source }))
@@ -49,6 +50,7 @@ function serializeExecuteConfig(
     authHeaders: headers,
     restrictions: serializedRestrictions,
     allowRules: serializedAllowRules,
+    disabledApis,
   })
 }
 
@@ -70,12 +72,13 @@ function createExecuteRuntime(
   tenantUrl: string,
   restrictions: readonly RestrictionRule[],
   allowRules: readonly AllowRule[],
+  disabledApis: readonly string[],
 ) {
   return new NodeRuntime({
     systemDriver: createNodeDriver({
       useDefaultNetwork: true,
       permissions: {
-        network: (request) => createNetworkPermissionDecision(tenantUrl, request, restrictions, allowRules),
+        network: (request) => createNetworkPermissionDecision(tenantUrl, request, restrictions, allowRules, disabledApis),
       },
     }),
     runtimeDriverFactory: createNodeRuntimeDriverFactory(),
@@ -97,14 +100,17 @@ function normalizeCode(functionCode: string): string {
 
 function buildQueryScript(
   sourceCode: string,
-  _restrictions: readonly RestrictionRule[],
-  _allowRules: readonly AllowRule[],
+  disabledApis: readonly string[],
 ): string {
-  const spec = getCoreOpenApiSpec()
   const functionExpression = normalizeCode(sourceCode)
 
   return [
-    `const spec = ${JSON.stringify(spec)};`,
+    `const coreSpec = ${JSON.stringify(BUNDLED_OPENAPI_SPECS.core)};`,
+    `const dtmSpec = ${JSON.stringify(BUNDLED_OPENAPI_SPECS.dtm)};`,
+    `const specsEnabled = ${JSON.stringify({
+      core: !disabledApis.includes('core'),
+      dtm: !disabledApis.includes('dtm'),
+    })};`,
     `const __mc8ypQuery = (${functionExpression});`,
     '',
     'if (typeof __mc8ypQuery !== "function") {',
@@ -120,8 +126,9 @@ export function buildExecutePrelude(
   headers: Record<string, string>,
   restrictions: readonly RestrictionRule[] = [],
   allowRules: readonly AllowRule[] = [],
+  disabledApis: readonly string[] = [],
 ): string {
-  const serializedConfig = JSON.stringify(serializeExecuteConfig(tenantUrl, headers, restrictions, allowRules))
+  const serializedConfig = JSON.stringify(serializeExecuteConfig(tenantUrl, headers, restrictions, allowRules, disabledApis))
 
   return [
     'const cumulocity = Object.freeze((() => {',
@@ -129,7 +136,7 @@ export function buildExecutePrelude(
     '  if (!config || typeof config !== "object") {',
     '    throw new TypeError("Invalid execute configuration.");',
     '  }',
-    '  const { tenantUrl, authHeaders, restrictions, allowRules } = config;',
+    '  const { tenantUrl, authHeaders, restrictions, allowRules, disabledApis } = config;',
     '  if (typeof tenantUrl !== "string") {',
     '    throw new TypeError("Execute configuration must contain a string tenant URL.");',
     '  }',
@@ -138,6 +145,9 @@ export function buildExecutePrelude(
     '  }',
     '  if (!Array.isArray(allowRules) || allowRules.some((rule) => !rule || typeof rule !== "object" || typeof rule.type !== "string" || typeof rule.method !== "string" || typeof rule.pathPattern !== "string" || typeof rule.source !== "string")) {',
     '    throw new TypeError("Execute configuration must contain valid allow rules.");',
+    '  }',
+    '  if (!Array.isArray(disabledApis) || disabledApis.some((value) => typeof value !== "string")) {',
+    '    throw new TypeError("Execute configuration must contain valid disabled API parts.");',
     '  }',
     '  const resolveUrl = (descriptor) => {',
     '    return new URL(descriptor, tenantUrl.endsWith("/") ? tenantUrl : tenantUrl + "/");',
@@ -158,30 +168,6 @@ export function buildExecutePrelude(
     `  const matchesCompiledRule = ${matchesCompiledRule.toString()};`,
     '  const compiledRestrictions = restrictions.map(compileRestrictionRule);',
     '  const compiledAllowRules = allowRules.map(compileRestrictionRule);',
-    '  const findMatchingRules = (compiledRules, method, pathname) => {',
-    '    const normalizedMethod = typeof method === "string" ? method.trim().toUpperCase() : "";',
-    '    const pathSegments = pathname === "/" ? [] : pathname.slice(1).split("/");',
-    '    return compiledRules.filter((rule) => {',
-    '      if (!normalizedMethod) {',
-    '        return rule.method === "*" && matchCompiledSegments(rule.segments, pathSegments);',
-    '      }',
-    '      return matchesCompiledRule(rule, normalizedMethod, pathSegments);',
-    '    });',
-    '  };',
-    '  const evaluateAccessPolicy = (method, pathname) => {',
-    '    const matchingRestrictions = findMatchingRules(compiledRestrictions, method, pathname);',
-    '    if (matchingRestrictions.length > 0) {',
-    '      return { blocked: true, blockedBy: "restriction", matchingRestrictions };',
-    '    }',
-    '    if (compiledAllowRules.length === 0) {',
-    '      return { blocked: false };',
-    '    }',
-    '    const matchingAllowRules = findMatchingRules(compiledAllowRules, method, pathname);',
-    '    if (matchingAllowRules.length > 0) {',
-    '      return { blocked: false };',
-    '    }',
-    '    return { blocked: true, blockedBy: "allow" };',
-    '  };',
     '  const validateRequestMethod = (method) => {',
     '    if (typeof method !== "string" || method.trim().length === 0) {',
     '      throw new TypeError("request method must be a non-empty string");',
@@ -191,6 +177,20 @@ export function buildExecutePrelude(
     '      throw new TypeError("request method must be one of: " + HTTP_METHODS.join(", "));',
     '    }',
     '    return normalizedMethod;',
+    '  };',
+    '  const evaluateAccessPolicy = (method, pathname) => {',
+    '    const matchingRestrictions = compiledRestrictions.filter((rule) => matchesCompiledRule(rule, method, pathname === "/" ? [] : pathname.slice(1).split("/")));',
+    '    if (matchingRestrictions.length > 0) {',
+    '      return { blocked: true, blockedBy: "restriction", matchingRestrictions };',
+    '    }',
+    '    if (compiledAllowRules.length === 0) {',
+    '      return { blocked: false };',
+    '    }',
+    '    const matchingAllowRules = compiledAllowRules.filter((rule) => matchesCompiledRule(rule, method, pathname === "/" ? [] : pathname.slice(1).split("/")));',
+    '    if (matchingAllowRules.length > 0) {',
+    '      return { blocked: false };',
+    '    }',
+    '    return { blocked: true, blockedBy: "allow" };',
     '  };',
     '  const formatBlockedRequestMessage = (method, path, accessDecision) => {',
     '    if (accessDecision.blockedBy === "allow") {',
@@ -203,6 +203,7 @@ export function buildExecutePrelude(
     '        "",',
     '        "Report this to the user as a connection-level access restriction.",',
     '        "If the operation is needed, the MCP allow list for this connection must be updated by whoever manages that configuration.",',
+    '        ...(disabledApis.length > 0 ? ["", "Disabled bundled OpenAPI parts for execute policy on this connection:", ...disabledApis.map((api) => "- " + api), "Endpoints from those bundled specs are blocked by connection-level bundled OpenAPI policy."] : []),',
     '        "",',
     '        "Blocked operation:",',
     '        "Method: " + method,',
@@ -220,6 +221,7 @@ export function buildExecutePrelude(
     '      "",',
     '      "Report this to the user as a connection-level access restriction.",',
     '      "If the operation is needed, the MCP restrictions for this connection must be updated by whoever manages that configuration.",',
+    '      ...(disabledApis.length > 0 ? ["", "Disabled bundled OpenAPI parts for execute policy on this connection:", ...disabledApis.map((api) => "- " + api), "Endpoints from those bundled specs are blocked by connection-level bundled OpenAPI policy."] : []),',
     '      "",',
     '      "Blocked operation:",',
     '      "Method: " + method,',
@@ -293,11 +295,12 @@ export function buildExecuteScript(
   headers: Record<string, string>,
   restrictions: readonly RestrictionRule[] = [],
   allowRules: readonly AllowRule[] = [],
+  disabledApis: readonly string[] = [],
 ): string {
   const functionExpression = normalizeCode(sourceCode)
 
   return [
-    buildExecutePrelude(tenantUrl, headers, restrictions, allowRules),
+    buildExecutePrelude(tenantUrl, headers, restrictions, allowRules, disabledApis),
     `const __mc8ypExecute = (${functionExpression});`,
     '',
     'const __mc8ypErrorMessage = (error) => error instanceof Error ? error.message : String(error);',
@@ -344,9 +347,10 @@ async function runExecuteScript(
   tenantUrl: string,
   restrictions: readonly RestrictionRule[],
   allowRules: readonly AllowRule[],
+  disabledApis: readonly string[],
 ): Promise<unknown> {
   const release = await runtimeSemaphore.acquire()
-  const runtime = createExecuteRuntime(tenantUrl, restrictions, allowRules)
+  const runtime = createExecuteRuntime(tenantUrl, restrictions, allowRules, disabledApis)
 
   try {
     const result = await runtime.run<unknown>(code, EXECUTE_ENTRY_PATH)
@@ -387,11 +391,11 @@ async function runModule(code: string, entryPath: string, runtime: NodeRuntime):
 
 export async function query(
   functionCode: string,
-  restrictions: readonly RestrictionRule[] = [],
-  allowRules: readonly AllowRule[] = [],
+  _restrictions: readonly RestrictionRule[] = [],
+  _allowRules: readonly AllowRule[] = [],
+  disabledApis: readonly string[] = [],
 ): Promise<string> {
-  const result = await runQueryScript(buildQueryScript(functionCode, restrictions, allowRules))
-  // dont encode as toon to make spec easier to understand
+  const result = await runQueryScript(buildQueryScript(functionCode, disabledApis))
   return typeof result === 'string' ? result : JSON.stringify(result)
 }
 
@@ -400,15 +404,17 @@ export async function execute(
   input?: unknown,
   restrictions: readonly RestrictionRule[] = [],
   allowRules: readonly AllowRule[] = [],
+  disabledApis: readonly string[] = [],
 ): Promise<string> {
   const auth = await resolveC8yAuth(input)
   const authHeaders = createC8yAuthHeaders(auth)
 
   const result = await runExecuteScript(
-    buildExecuteScript(functionCode, auth.tenantUrl, authHeaders, restrictions, allowRules),
+    buildExecuteScript(functionCode, auth.tenantUrl, authHeaders, restrictions, allowRules, disabledApis),
     auth.tenantUrl,
     restrictions,
     allowRules,
+    disabledApis,
   ) as ExecuteEnvelope
 
   if (result.status === 'success') {
