@@ -5,8 +5,8 @@ import pkgjson from '../../package.json' with { type: 'json' }
 import { getCoreOpenApiLabel, getCoreOpenApiVersion, setCoreOpenApiVersion, specs } from '#core-openapi'
 import { createC8YMcpServer } from '../server'
 import { getCredentialsByTenantUrl, getStoredC8yAuth } from '../utils/credentials'
-import { createOpenApiPartAllowRules } from '../utils/openapi'
-import { parseAllowRule, parseEnabledOpenApiParts, parseRestrictionRule } from '../utils/restrictions'
+import { createOpenApiPartRestrictionRules } from '../utils/openapi'
+import { parseAllowRule, parseDisabledOpenApiParts, parseRestrictionRule } from '../utils/restrictions'
 
 const main = defineCommand({
   meta: {
@@ -25,10 +25,10 @@ const main = defineCommand({
       description: 'Allow rule to permit API access (for example "GET:/inventory/**"). Can be repeated. When present, non-matching operations are blocked unless another allow rule matches them.',
       alias: ['a', 'allow'],
     },
-    openapi: {
+    disableOpenapi: {
       type: 'string',
-      description: 'Bundled OpenAPI parts to enable for query and execute. Repeat to narrow visibility to a subset such as "core". Defaults to all bundled specs.',
-      alias: ['o', 'api'],
+      description: 'Bundled OpenAPI parts to forbid for execute policy. Repeat to disable one or more spec families such as "dtm". Query still sees all bundled specs.',
+      alias: 'd',
     },
     spec: {
       type: 'string',
@@ -90,11 +90,11 @@ const main = defineCommand({
       consola.info(`Applying ${parsedAllowRules.length} allow rule(s):`, parsedAllowRules.map((rule) => rule.source))
     }
 
-    const rawOpenApi = args.openapi
+    const rawOpenApi = args.disableOpenapi
     const openApiSources = (Array.isArray(rawOpenApi) ? rawOpenApi : rawOpenApi ? [rawOpenApi] : []).filter(
       (value): value is string => typeof value === 'string' && value.length > 0,
     )
-    const { enabledApis, failedValues } = parseEnabledOpenApiParts(openApiSources)
+    const { disabledApis, failedValues } = parseDisabledOpenApiParts(openApiSources)
 
     if (failedValues.length > 0) {
       throw new Error([
@@ -103,22 +103,22 @@ const main = defineCommand({
       ].join('\n'))
     }
 
-    if (enabledApis.length > 0) {
-      consola.info(`Enabled bundled OpenAPI parts for this connection:`, enabledApis)
+    if (disabledApis.length > 0) {
+      consola.info(`Disabled bundled OpenAPI parts for execute policy on this connection:`, disabledApis)
     }
 
-    // When a connection narrows bundled OpenAPI parts, expand that selection into
-    // concrete allow rules here so execute enforcement can stay purely path/method-based.
-    const allowRules = enabledApis.length > 0
-      ? [...parsedAllowRules, ...createOpenApiPartAllowRules(enabledApis)]
-      : parsedAllowRules
+    // When a connection forbids bundled OpenAPI parts, expand that selection into
+    // concrete restriction rules here so execute enforcement can stay purely path/method-based.
+    const effectiveRestrictions = disabledApis.length > 0
+      ? [...restrictions, ...createOpenApiPartRestrictionRules(disabledApis)]
+      : restrictions
 
     const server = createC8YMcpServer()
 
     // Start the server with stdio transport
     const transport = new StdioTransport(server)
     consola.info('Starting MCP server over stdio transport...')
-    transport.listen({ restrictions, allowRules, enabledApis })
+    transport.listen({ restrictions: effectiveRestrictions, allowRules: parsedAllowRules, disabledApis })
   },
 })
 

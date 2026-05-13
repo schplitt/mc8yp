@@ -24,8 +24,9 @@ function getExecuteEnvironmentNote(): string {
 }
 
 function getOpenApiNote(server: McpServer<undefined, C8yMcpCustomContext>): string {
-  const enabledApis = server.ctx.custom?.enabledApis ?? []
-  return `This MCP currently exposes the ${getCoreOpenApiLabel()} bundled core OpenAPI snapshot together with the other bundled product specs for the query tool. Bundled specs on this connection: ${BUNDLED_OPENAPI_ENTRIES.map((entry) => `${entry.api} (${entry.version})`).join(', ')}. Enabled bundled OpenAPI parts for execute policy: ${enabledApis.length > 0 ? enabledApis.join(', ') : OPENAPI_PARTS.join(', ')}.
+  const disabledApis = server.ctx.custom?.disabledApis ?? []
+  const enabledApis = OPENAPI_PARTS.filter((api) => !disabledApis.includes(api))
+  return `This MCP currently exposes the ${getCoreOpenApiLabel()} bundled core OpenAPI snapshot together with the other bundled product specs for the query tool. Bundled specs on this connection: ${BUNDLED_OPENAPI_ENTRIES.map((entry) => `${entry.api} (${entry.version})`).join(', ')}. Enabled bundled OpenAPI parts for execute policy: ${enabledApis.join(', ')}.
 
 Use \`coreSpec\` for the main Cumulocity REST surface such as inventory, alarms, events, measurements, identity, device control, users, tenants, audit, and the broader platform APIs.
 Use \`dtmSpec\` for Digital Twin Manager work such as schema definitions, asset models, linked series, and DTM asset or definition APIs.`
@@ -125,7 +126,7 @@ Examples:
     }),
   }, async (input) => {
     try {
-      return tool.text(await query(input.code, server.ctx.custom?.restrictions ?? [], server.ctx.custom?.allowRules ?? [], server.ctx.custom?.enabledApis ?? []))
+      return tool.text(await query(input.code, server.ctx.custom?.restrictions ?? [], server.ctx.custom?.allowRules ?? [], server.ctx.custom?.disabledApis ?? []))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return tool.error(message)
@@ -204,7 +205,7 @@ async () => {
     })),
   }, async (input) => {
     try {
-      return tool.text(await execute(input.code, input, server.ctx.custom?.restrictions ?? [], server.ctx.custom?.allowRules ?? [], server.ctx.custom?.enabledApis ?? []))
+      return tool.text(await execute(input.code, input, server.ctx.custom?.restrictions ?? [], server.ctx.custom?.allowRules ?? [], server.ctx.custom?.disabledApis ?? []))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return tool.error(message)

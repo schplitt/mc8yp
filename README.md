@@ -275,26 +275,26 @@ mc8yp --allow "GET:/inventory/**" --allowed "POST:/alarm/**"
 mc8yp -a "/inventory/**" -r "/inventory/managedObjects"
 ```
 
-To narrow the bundled OpenAPI parts that `execute` may use, repeat `--openapi` (or `--api`) in CLI mode. `query` still sees all bundled specs and can inspect `specsEnabled` to understand which spec families are enabled for execute policy:
+To forbid one or more bundled OpenAPI parts for execute policy, repeat `--disable-openapi` (or `-d`) in CLI mode. `query` still sees all bundled specs and can inspect `specsEnabled` to understand which spec families remain enabled for execute policy:
 
 ```sh
-# Only enable bundled core APIs on this CLI connection
-mc8yp --openapi core
+# Disable bundled DTM APIs for execute policy on this CLI connection
+mc8yp -d dtm
 
-# Explicitly enable both bundled specs
-mc8yp --openapi core --openapi dtm
+# Disable multiple bundled specs if more are added in the future
+mc8yp -d dtm -d core
 ```
 
 ### Microservice Mode (HTTP)
 
 Pass restrictions as `restriction`, `restrict`, or `r` query parameters on the MCP endpoint URL.
 Pass allow rules as `allowed`, `allow`, or `a` query parameters.
-To narrow the bundled OpenAPI parts for the connection, pass `openapi` or `api` query parameters.
+To forbid bundled OpenAPI parts for execute policy, pass the `openapi-disabled` query parameter.
 You can also send project-scoped HTTP headers to avoid conflicts with well-known headers:
 
 - `mc8yp-restriction` for deny rules
 - `mc8yp-allow` for allow-list rules
-- `mc8yp-openapi` for bundled OpenAPI part selection
+- `mc8yp-openapi-disabled` for bundled OpenAPI part disablement
 
 Both headers accept either repeated header instances or a comma-separated list of values. Query parameters and headers can be combined on the same connection.
 
@@ -302,8 +302,8 @@ Both headers accept either repeated header instances or a comma-separated list o
 /mcp?restriction=/inventory/**&restrict=DELETE:/alarm/**
 /mcp?r=/inventory/**&r=DELETE:/alarm/**
 /mcp?allow=/inventory/**&allowed=POST:/alarm/**
-/mcp?openapi=core
-/mcp?api=core&api=dtm
+/mcp?openapi-disabled=dtm
+/mcp?openapi-disabled=dtm&openapi-disabled=core
 ```
 
 ```http
@@ -312,7 +312,7 @@ Authorization: Bearer <token>
 mc8yp-restriction: /inventory/**
 mc8yp-restriction: DELETE:/alarm/**
 mc8yp-allow: GET:/measurement/**
-mc8yp-openapi: core
+mc8yp-openapi-disabled: dtm
 ```
 
 ### How Access Policy Works
@@ -321,7 +321,7 @@ mc8yp-openapi: core
 
 2. **Sandbox request enforcement**: The `execute` tool checks restrictions and allow rules inside the generated sandbox request helper, where the actual HTTP method and normalized path are both available. Matching deny rules block first. If any allow rules are configured, requests must also match at least one allow rule.
 
-3. **Bundled spec enablement**: When the connection narrows bundled OpenAPI parts to a subset such as just `core`, `query` still shows all bundled specs, while the server expands that selection into additional allow rules so `execute` stays path-and-method based.
+3. **Bundled spec disablement**: When the connection disables bundled OpenAPI parts such as `dtm`, `query` still shows all bundled specs, while the server expands that selection into additional restrictions so `execute` stays path-and-method based.
 
 4. **Network boundary**: The secure-exec permission layer independently restricts network access to the configured tenant host. Other network operations are denied.
 

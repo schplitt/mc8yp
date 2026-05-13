@@ -2,17 +2,18 @@ import http from 'node:http'
 import { NodeRuntime, createNodeDriver, createNodeRuntimeDriverFactory } from 'secure-exec'
 import { describe, expect, it } from 'vitest'
 import { createNetworkPermissionDecision } from '../src/codemode/network-permissions'
-import { BUNDLED_OPENAPI_ENTRIES, createOpenApiPartAllowRules } from '../src/utils/openapi'
+import { BUNDLED_OPENAPI_ENTRIES, createOpenApiPartRestrictionRules } from '../src/utils/openapi'
 import { findBlockingRestrictions, findMatchingRules } from '../src/utils/restriction-matcher'
 import {
   ALLOW_HEADER,
-  OPENAPI_HEADER,
+  OPENAPI_DISABLED_HEADER,
+  OPENAPI_DISABLED_QUERY_KEY,
   RESTRICTION_HEADER,
   collectServerAllowSources,
-  collectServerOpenApiSources,
+  collectServerDisabledOpenApiSources,
   collectServerRestrictionSources,
   parseAllowRule,
-  parseEnabledOpenApiParts,
+  parseDisabledOpenApiParts,
   parseRestrictionRule,
 } from '../src/utils/restrictions'
 
@@ -127,26 +128,25 @@ describe('allow parsing', () => {
 })
 
 describe('bundled openapi selection parsing', () => {
-  it('parses enabled bundled openapi parts', () => {
-    expect(parseEnabledOpenApiParts(['core', 'dtm', 'core'])).toEqual({
-      enabledApis: ['core', 'dtm'],
+  it('parses disabled bundled openapi parts', () => {
+    expect(parseDisabledOpenApiParts(['core', 'dtm', 'core'])).toEqual({
+      disabledApis: ['core', 'dtm'],
       failedValues: [],
     })
   })
 
-  it('collects bundled openapi parts from query aliases and the project-scoped header', () => {
+  it('collects disabled bundled openapi parts from the query parameter and the project-scoped header', () => {
     const headers = new Headers()
-    headers.append(OPENAPI_HEADER, 'dtm, core')
+    headers.append(OPENAPI_DISABLED_HEADER, 'dtm, core')
 
-    expect(collectServerOpenApiSources({
-      openapi: 'core',
-      api: ['dtm'],
+    expect(collectServerDisabledOpenApiSources({
+      [OPENAPI_DISABLED_QUERY_KEY]: ['core', 'dtm'],
     }, headers)).toEqual(['core', 'dtm', 'dtm', 'core'])
   })
 
   it('reports unsupported bundled openapi parts', () => {
-    expect(parseEnabledOpenApiParts(['core', 'abc'])).toEqual({
-      enabledApis: ['core'],
+    expect(parseDisabledOpenApiParts(['core', 'abc'])).toEqual({
+      disabledApis: ['core'],
       failedValues: [{ value: 'abc', reason: 'Unsupported OpenAPI value "abc". Available: core, dtm.' }],
     })
   })
@@ -443,15 +443,15 @@ describe('network permission decisions', () => {
     })
   })
 
-  it('blocks requests when enabled bundled openapi parts were expanded into the allow list', () => {
+  it('blocks requests when disabled bundled openapi parts were expanded into restrictions', () => {
     expect(createNetworkPermissionDecision(tenantUrl, {
       op: 'connect',
       hostname: 'tenant.example.com',
       method: 'GET',
       url: 'https://tenant.example.com/assets?pageSize=5',
-    }, [], createOpenApiPartAllowRules(['core']))).toEqual({
+    }, createOpenApiPartRestrictionRules(['dtm']))).toEqual({
       allow: false,
-      reason: expect.stringContaining('Network connect blocked by MCP allow list: no allow rule matched GET /assets.'),
+      reason: expect.stringContaining('Network connect blocked by MCP restrictions:'),
     })
   })
 

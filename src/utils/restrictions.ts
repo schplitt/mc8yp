@@ -3,10 +3,10 @@ import { OPENAPI_PARTS } from './openapi'
 export const HTTP_METHODS = ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE'] as const
 export const RESTRICTION_QUERY_KEYS = ['restriction', 'restrict', 'r'] as const
 export const ALLOW_QUERY_KEYS = ['allowed', 'allow', 'a'] as const
-export const OPENAPI_QUERY_KEYS = ['openapi', 'api'] as const
+export const OPENAPI_DISABLED_QUERY_KEY = 'openapi-disabled' as const
 export const RESTRICTION_HEADER = 'mc8yp-restriction'
 export const ALLOW_HEADER = 'mc8yp-allow'
-export const OPENAPI_HEADER = 'mc8yp-openapi'
+export const OPENAPI_DISABLED_HEADER = 'mc8yp-openapi-disabled'
 
 export type HttpMethod = (typeof HTTP_METHODS)[number]
 export type RestrictionMethod = HttpMethod | '*'
@@ -43,10 +43,10 @@ export function collectServerAllowSources(query: Record<string, unknown>, header
   ]
 }
 
-export function collectServerOpenApiSources(query: Record<string, unknown>, headers: Headers): string[] {
+export function collectServerDisabledOpenApiSources(query: Record<string, unknown>, headers: Headers): string[] {
   return [
-    ...collectRuleSources(OPENAPI_QUERY_KEYS.map((key) => query[key])),
-    ...collectHeaderRuleSources(headers.get(OPENAPI_HEADER)),
+    ...collectRuleSources([query[OPENAPI_DISABLED_QUERY_KEY]]),
+    ...collectHeaderRuleSources(headers.get(OPENAPI_DISABLED_HEADER)),
   ]
 }
 
@@ -82,7 +82,7 @@ export interface AllowParseResult {
 }
 
 export interface OpenApiPartsParseResult {
-  enabledApis: string[]
+  disabledApis: string[]
   failedValues: Array<{ value: string, reason: string }>
 }
 
@@ -370,9 +370,9 @@ export function parseAllowRule(input: string | readonly string[]): AllowParseRes
   }
 }
 
-export function parseEnabledOpenApiParts(input: string | readonly string[]): OpenApiPartsParseResult {
+export function parseDisabledOpenApiParts(input: string | readonly string[]): OpenApiPartsParseResult {
   const inputs = typeof input === 'string' ? [input] : input
-  const enabledApis: string[] = []
+  const disabledApis: string[] = []
   const failedValues: Array<{ value: string, reason: string }> = []
 
   for (const source of inputs) {
@@ -393,13 +393,13 @@ export function parseEnabledOpenApiParts(input: string | readonly string[]): Ope
       continue
     }
 
-    if (!enabledApis.includes(normalized)) {
-      enabledApis.push(normalized)
+    if (!disabledApis.includes(normalized)) {
+      disabledApis.push(normalized)
     }
   }
 
   return {
-    enabledApis,
+    disabledApis,
     failedValues,
   }
 }

@@ -73,7 +73,7 @@ scripts/
   cumulocity.mjs             Updates cumulocity.json metadata from package.json
   package-microservices.mjs  Builds versioned Docker-based Cumulocity release zips
 tsdown.config.ts              CLI/server build configuration plus the `#core-openapi` and `#dtm-openapi` virtual module plugins
-src/core-openapi.d.ts         Ambient type declarations for both the `#core-openapi` and `#dtm-openapi` virtual modules
+src/openapi-modules.d.ts      Ambient type declarations for both the `#core-openapi` and `#dtm-openapi` virtual modules
 ```
 
 ### Runtime Flow
@@ -91,7 +91,7 @@ src/core-openapi.d.ts         Ambient type declarations for both the `#core-open
 
 1. `src/index.ts` starts the HTTP server and exposes `/mcp` and `/health`.
 2. It sets `globalThis.executionEnvironment = 'server'`.
-3. It extracts auth from request headers, restrictions from `restriction`, `restrict`, and `r` query parameters plus the `mc8yp-restriction` header, allow rules from `allowed`, `allow`, and `a` query parameters plus the `mc8yp-allow` header, and bundled OpenAPI selection from `openapi` / `api` query parameters plus the `mc8yp-openapi` header.
+3. It extracts auth from request headers, restrictions from `restriction`, `restrict`, and `r` query parameters plus the `mc8yp-restriction` header, allow rules from `allowed`, `allow`, and `a` query parameters plus the `mc8yp-allow` header, and bundled OpenAPI disablement from the `openapi-disabled` query parameter plus the `mc8yp-openapi-disabled` header.
 4. It stores auth in request-local context and forwards the request to the shared MCP server.
 5. It configures the HTTP transport in POST-only mode (`disableSse: true`) because the optional long-lived GET/SSE channel proved unstable behind Cumulocity microservice ingress.
 
@@ -120,7 +120,7 @@ src/core-openapi.d.ts         Ambient type declarations for both the `#core-open
   - For the CLI build the core plugin inlines all `openapi/core/*.json` snapshots and `setCoreOpenApiVersion` switches between them at runtime.
   - For the CLI build the DTM plugin currently inlines the bundled `openapi/dtm/release.json` snapshot.
   - For each server build, the plugins inline exactly the configured core+DTM combination for that build.
-- Types for both virtual modules live together in `src/core-openapi.d.ts`; no `tsconfig.paths` entry is needed.
+- Types for both virtual modules live together in `src/openapi-modules.d.ts`; no `tsconfig.paths` entry is needed.
 - `openapi-builds.json` is the source of truth for both the download URLs used by `scripts/update-openapi.mjs` and the server build/package matrix used by `tsdown.config.ts` and `scripts/package-microservices.mjs`.
 - `tsdown.config.ts` emits one server bundle per supported build version into `.output/<version>/`.
 - `scripts/package-microservices.mjs` turns those built server outputs into one Docker-based zip per build, for example `mc8yp-core-2026-dtm-v2.x.x.zip`.
@@ -144,8 +144,8 @@ Restrictions and allow rules both use the format `[METHOD:]<path-pattern>`.
 - Restrictions take priority over allow rules.
 - Root paths across the bundled core and DTM specs are intentionally treated as disjoint, so path-based rules are sufficient for request enforcement.
 - In microservice mode, prefer the project-scoped `mc8yp-restriction` and `mc8yp-allow` headers for HTTP policy transport; repeated headers and comma-separated values are both accepted.
-- Bundled spec visibility is controlled separately through the enabled OpenAPI parts for the connection, using `mc8yp-openapi` or the `openapi` / `api` query parameters.
-- In both `src/cli/index.ts` and `src/index.ts`, narrowed bundled OpenAPI selection is intentionally expanded into concrete allow rules so execute enforcement can remain purely path-and-method based.
+- Bundled spec execute-policy disablement is controlled separately through the disabled OpenAPI parts for the connection, using `mc8yp-openapi-disabled` or the `openapi-disabled` query parameter.
+- In both `src/cli/index.ts` and `src/index.ts`, disabled bundled OpenAPI selection is intentionally expanded into concrete restriction rules so execute enforcement can remain purely path-and-method based.
 
 The restriction system is implemented in two places:
 
@@ -217,8 +217,8 @@ pnpm prerelease    # lint + typecheck + build
 ### Practical editing guidance
 
 - If a change affects tool behavior, inspect both the tool definition and the codemode runtime.
-- If a change affects bundled OpenAPI selection, update the `#core-openapi` / `#dtm-openapi` plugins in `tsdown.config.ts`, the ambient declarations in `src/core-openapi.d.ts`, and the source/build matrix in `openapi-builds.json`.
-- If you add a third bundled OpenAPI spec in the future, extend these exact places together: add `openapi/<name>/...` files, add another virtual module in `tsdown.config.ts`, add its declaration to `src/core-openapi.d.ts`, extend `src/utils/openapi.ts`, extend the explicit `coreSpec`/`dtmSpec` messaging and typings in `src/tools/codemode.ts` and `src/prompts/codemode.ts`, update the query sandbox bindings in `src/codemode/execute.ts`, update enabled-OpenAPI parsing in `src/utils/restrictions.ts`, keep the allow-rule expansion points in `src/cli/index.ts` and `src/index.ts` aligned, and update `README.md` plus this file.
+- If a change affects bundled OpenAPI selection, update the `#core-openapi` / `#dtm-openapi` plugins in `tsdown.config.ts`, the ambient declarations in `src/openapi-modules.d.ts`, and the source/build matrix in `openapi-builds.json`.
+- If you add a third bundled OpenAPI spec in the future, extend these exact places together: add `openapi/<name>/...` files, add another virtual module in `tsdown.config.ts`, add its declaration to `src/openapi-modules.d.ts`, extend `src/utils/openapi.ts`, extend the explicit `coreSpec`/`dtmSpec` messaging and typings in `src/tools/codemode.ts` and `src/prompts/codemode.ts`, update the query sandbox bindings in `src/codemode/execute.ts`, update disabled-OpenAPI parsing in `src/utils/restrictions.ts`, keep the restriction expansion points in `src/cli/index.ts` and `src/index.ts` aligned, and update `README.md` plus this file.
 - If a change affects restrictions or allow rules, verify both policy messaging and live request blocking.
 - If a change affects auth, verify the CLI and server paths separately.
 - If a change affects public MCP behavior, update `README.md` as well as this file.
@@ -254,7 +254,7 @@ When working on this project:
 1. Start from the actual controlling surface. For most feature work that is `src/tools/`, `src/prompts/`, `src/codemode/execute.ts`, or restriction/auth utilities.
 2. Treat CLI mode and microservice mode as separate execution environments with different auth and tool availability.
 3. Run focused tests first when changing a narrow subsystem, then run the full validation set if the change is broader. Use this exact validation order: `pnpm test:run`, then `pnpm lint:fix`, then `pnpm typecheck`.
-4. The `query` tool exposes the raw bundled OpenAPI snapshots for the current connection; `specsEnabled` reports which spec families are enabled for execute policy, and restrictions and allow lists are enforced when requests are executed rather than by rewriting spec contents.
+4. The `query` tool exposes the raw bundled OpenAPI snapshots for the current connection; `specsEnabled` reports which spec families remain enabled for execute policy after bundled-spec disablement, and restrictions and allow lists are enforced when requests are executed rather than by rewriting spec contents.
 5. Keep public MCP tool and prompt descriptions aligned with actual runtime behavior.
 6. Preserve the current sandbox limits and request boundary logic unless the task explicitly changes them.
 7. Record recurring project-specific lessons in the section below when they are likely to prevent future mistakes.

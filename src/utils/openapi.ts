@@ -1,6 +1,6 @@
 import { getCoreOpenApiLabel, getCoreOpenApiSpec, getCoreOpenApiVersion } from '#core-openapi'
 import { getDtmOpenApiLabel, getDtmOpenApiSpec, getDtmOpenApiVersion } from '#dtm-openapi'
-import type { AllowRule } from './restrictions'
+import type { RestrictionRule } from './restrictions'
 
 const HTTP_METHODS = ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE'] as const
 export const OPENAPI_PARTS = ['core', 'dtm'] as const
@@ -60,13 +60,11 @@ export const BUNDLED_OPENAPI_OPERATIONS: BundledOpenApiOperation[] = BUNDLED_OPE
   })
 })
 
-export function createOpenApiPartAllowRules(enabledApis: readonly string[] = []): AllowRule[] {
-  const visibleApis: readonly string[] = enabledApis.length > 0 ? OPENAPI_PARTS.filter((api) => enabledApis.includes(api)) : [...OPENAPI_PARTS]
-
-  return BUNDLED_OPENAPI_OPERATIONS.filter((operation) => visibleApis.includes(operation.api)).map((operation) => ({
-    type: 'allow',
-    method: operation.method as AllowRule['method'],
+export function createOpenApiPartRestrictionRules(disabledApis: readonly string[] = []): RestrictionRule[] {
+  return BUNDLED_OPENAPI_OPERATIONS.filter((operation) => disabledApis.includes(operation.api)).map((operation) => ({
+    type: 'deny',
+    method: operation.method as RestrictionRule['method'],
     pathPattern: operation.pathPattern,
-    source: `openapi:${operation.api}:${operation.method}:${operation.pathPattern}`,
+    source: `${operation.method}:${operation.pathPattern}`,
   }))
 }

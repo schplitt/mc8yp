@@ -12,8 +12,9 @@ function getRuntimeSection(): string {
 }
 
 function getOpenApiSection(server: McpServer<undefined, C8yMcpCustomContext>): string {
-  const enabledApis = server.ctx.custom?.enabledApis ?? []
-  return `## Bundled OpenAPI Specs\nThe query tool currently exposes the ${getCoreOpenApiLabel()} bundled core OpenAPI snapshot together with the other bundled product specs. Bundled specs on this connection: ${BUNDLED_OPENAPI_ENTRIES.map((entry) => `${entry.api} (${entry.version})`).join(', ')}. Enabled bundled OpenAPI parts for execute policy: ${enabledApis.length > 0 ? enabledApis.join(', ') : OPENAPI_PARTS.join(', ')}.`
+  const disabledApis = server.ctx.custom?.disabledApis ?? []
+  const enabledApis = OPENAPI_PARTS.filter((api) => !disabledApis.includes(api))
+  return `## Bundled OpenAPI Specs\nThe query tool currently exposes the ${getCoreOpenApiLabel()} bundled core OpenAPI snapshot together with the other bundled product specs. Bundled specs on this connection: ${BUNDLED_OPENAPI_ENTRIES.map((entry) => `${entry.api} (${entry.version})`).join(', ')}. Enabled bundled OpenAPI parts for execute policy: ${enabledApis.join(', ')}.`
 }
 
 export function createCodeModeGuidePrompt(server: McpServer<undefined, C8yMcpCustomContext>) {
@@ -28,7 +29,7 @@ export function createCodeModeGuidePrompt(server: McpServer<undefined, C8yMcpCus
       ...allowRules.map((rule) => `- allow: \`${rule.source}\``),
     ]
     const restrictionSection = policyLines.length > 0
-      ? `\n## Current Connection Access Policy\n${policyLines.join('\n')}\n\nThe \`query\` tool still shows the raw bundled OpenAPI specs for this connection. These rules are enforced when requests are executed. Enabled bundled OpenAPI parts affect execute policy rather than hiding specs from query.\n`
+      ? `\n## Current Connection Access Policy\n${policyLines.join('\n')}\n\nThe \`query\` tool still shows the raw bundled OpenAPI specs for this connection. These rules are enforced when requests are executed. Disabled bundled OpenAPI parts affect execute policy rather than hiding specs from query.\n`
       : ''
 
     return prompt.message(
