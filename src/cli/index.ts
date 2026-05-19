@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { StdioTransport } from '@tmcp/transport-stdio'
 import { defineCommand, runMain } from 'citty'
 import consola from 'consola'
