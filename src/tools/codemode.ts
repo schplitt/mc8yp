@@ -78,7 +78,9 @@ declare const coreSpec: CoreSpec
 declare const dtmSpec: DtmSpec
 declare const specsEnabled: SpecsEnabled
 
-Your code must evaluate to a function. The top-level bindings \
+Your code must evaluate to a **zero-parameter** function — do NOT declare \`coreSpec\`, \`dtmSpec\`, or \`specsEnabled\` as function parameters. These are already declared as constants in the surrounding scope and are available inside the function body without any argument passing. Writing \`(dtmSpec) => ...\` would shadow the global binding with an undefined parameter and produce incorrect results.
+
+The top-level bindings \
 
 a) \`coreSpec\` — use this for the main Cumulocity REST APIs such as inventory, alarms, events, measurements, identity, device control, users, tenants, audit, and the broader platform REST surface
 \nb) \`dtmSpec\` — use this for Digital Twin Manager work such as schema definitions, asset models, linked series, and DTM asset or definition APIs
@@ -86,7 +88,7 @@ a) \`coreSpec\` — use this for the main Cumulocity REST APIs such as inventory
 
 are available automatically. The sandbox assigns your function to a local variable, invokes it, and returns its result.
 
-Recommended shapes:
+Recommended shapes (zero parameters — bindings come from scope, not arguments):
 \`(() => { ... })\`
 \`async () => { ... }\`
 
@@ -122,7 +124,7 @@ Examples:
 }
 `,
     schema: v.object({
-      code: createCodeSchema('A JavaScript function expression. The top-level bindings `coreSpec`, `dtmSpec`, and `specsEnabled` are available automatically. Return the final result from that function. Async functions are supported.'),
+      code: createCodeSchema('A zero-parameter JavaScript function expression. Do NOT declare `coreSpec`, `dtmSpec`, or `specsEnabled` as function parameters — they are already declared as top-level constants in the surrounding scope and are available in the function body automatically. Writing `(dtmSpec) => ...` would shadow the global binding with an undefined parameter and produce incorrect results. Return the final result from that function. Async functions are supported.'),
     }),
   }, async (input) => {
     try {
