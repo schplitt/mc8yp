@@ -11320,7 +11320,7 @@
                       "password": {
                         "format": "password",
                         "type": "string",
-                        "description": "The user's password. Only latin1 characters are allowed.\nThe password can only be updated for the current user.\n"
+                        "description": "The user's password. Allowed characters are: Latin letters (a–z, A–Z), digits (0–9), and the following special characters: ` ~ ! @ # $ % ^ & * ( ) _ | + - = ? ; : ' \" , . < > { } [ ] \\ /\nThe password can only be updated for the current user.\n"
                       },
                       "email": {
                         "type": "string",
@@ -24211,7 +24211,7 @@
             "readOnly": true
           },
           "password": {
-            "description": "The user's password. Only Latin1 characters are allowed.",
+            "description": "The user's password. Allowed characters are: Latin letters (a–z, A–Z), digits (0–9), and the following special characters: ` ~ ! @ # $ % ^ & * ( ) _ | + - = ? ; : ' \" , . < > { } [ ] \\ /",
             "type": "string",
             "format": "password",
             "writeOnly": true,
@@ -26178,7 +26178,7 @@
             "readOnly": true
           },
           "password": {
-            "description": "The user's password. Only Latin1 characters are allowed.\n\nIf you do not specify a password when creating a new user with a POST request, it must contain the property `sendPasswordResetEmail` with a value of `true`.\n",
+            "description": "The user's password. Allowed characters are: Latin letters (a–z, A–Z), digits (0–9), and the following special characters: ` ~ ! @ # $ % ^ & * ( ) _ | + - = ? ; : ' \" , . < > { } [ ] \\ /\n\nIf you do not specify a password when creating a new user with a POST request, it must contain the property `sendPasswordResetEmail` with a value of `true`.\n",
             "type": "string",
             "format": "password",
             "writeOnly": true,
