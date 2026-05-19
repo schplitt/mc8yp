@@ -40,8 +40,9 @@ You have exactly two MCP tools available.
 ## query
 Use \`query\` when you need to inspect the bundled OpenAPI specs.
 
-- Input: a JavaScript function expression
-- The top-level bindings \`coreSpec\`, \`dtmSpec\`, and \`specsEnabled\` are available automatically
+- Input: a **zero-parameter** JavaScript function expression
+- Do NOT declare \`coreSpec\`, \`dtmSpec\`, or \`specsEnabled\` as function parameters — they are already declared as top-level constants in the surrounding scope. Writing \`(dtmSpec) => ...\` would shadow the global with an undefined parameter and produce incorrect results
+- The top-level bindings \`coreSpec\`, \`dtmSpec\`, and \`specsEnabled\` are available automatically inside the function body
 - \`coreSpec\` is for the main Cumulocity REST surface such as inventory, alarms, events, measurements, identity, device control, users, tenants, audit, and the broader platform APIs
 - \`dtmSpec\` is for Digital Twin Manager work such as schema definitions, asset models, linked series, and DTM asset or definition APIs
 - Return the exact value you want back from that function
@@ -51,6 +52,9 @@ Use \`query\` when you need to inspect the bundled OpenAPI specs.
 - The current MCP connection may still block \`execute\` requests through deny rules and/or an allow list even when an operation exists in a visible spec
 
 ### Available Shape
+
+The function must accept **no parameters**. The bindings below are scope-level constants, not function arguments.
+
 \`\`\`ts
 type OperationInfo = {
   summary?: string
@@ -87,7 +91,7 @@ declare const dtmSpec: DtmSpec
 declare const specsEnabled: SpecsEnabled
 \`\`\`
 
-Examples:
+Examples (all zero-parameter — note no arguments in the arrow function signatures):
 \`\`\`js
 () => specsEnabled
 \`\`\`
@@ -98,6 +102,7 @@ Examples:
 
 \`\`\`js
 () => {
+  // dtmSpec is already in scope — do NOT write (dtmSpec) => { ... }
   const op = dtmSpec.paths['/assets']?.get
   return op?.parameters
 }
