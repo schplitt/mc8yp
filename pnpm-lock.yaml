@@ -10,8 +10,8 @@ catalogs:
       specifier: ^1023.82.4
       version: 1023.82.4
     '@clack/prompts':
-      specifier: ^1.3.0
-      version: 1.3.0
+      specifier: ^1.4.0
+      version: 1.4.0
     '@napi-rs/keyring':
       specifier: ^1.3.0
       version: 1.3.0
@@ -22,8 +22,8 @@ catalogs:
       specifier: ^0.1.6
       version: 0.1.6
     '@tmcp/transport-http':
-      specifier: ^0.8.5
-      version: 0.8.5
+      specifier: ^0.8.6
+      version: 0.8.6
     '@tmcp/transport-stdio':
       specifier: ^0.4.3
       version: 0.4.3
@@ -85,7 +85,7 @@ importers:
         version: 1023.82.4
       '@clack/prompts':
         specifier: 'catalog:'
-        version: 1.3.0
+        version: 1.4.0
       '@napi-rs/keyring':
         specifier: 'catalog:'
         version: 1.3.0
@@ -94,7 +94,7 @@ importers:
         version: 0.1.6(tmcp@1.19.4(typescript@6.0.3))(valibot@1.4.1(typescript@6.0.3))
       '@tmcp/transport-http':
         specifier: 'catalog:'
-        version: 0.8.5(tmcp@1.19.4(typescript@6.0.3))
+        version: 0.8.6(tmcp@1.19.4(typescript@6.0.3))
       '@tmcp/transport-stdio':
         specifier: 'catalog:'
         version: 0.4.3(tmcp@1.19.4(typescript@6.0.3))
@@ -364,12 +364,12 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@clack/core@1.3.0':
-    resolution: {integrity: sha512-xJPHpAmEQUBrXSLx0gF+q5K/IyihXpsHZcha+jB+tyahsKRK3Dxo4D0coZDewHo12NhiuzC3dTtMPbm53GEAAA==}
+  '@clack/core@1.3.1':
+    resolution: {integrity: sha512-fT1qHVGAag4IEkrupZ6lRRbNCs1vS9P01KB/sG8zKgvUztbYtFBtQpjSITNwooDZ83tpsPzP0mRNs1/KVszCRA==}
     engines: {node: '>= 20.12.0'}
 
-  '@clack/prompts@1.3.0':
-    resolution: {integrity: sha512-GgcWwRCs/xPtaqlMy8qRhPnZf9vlWcWZNHAitnVQ3yk7JmSralSiq5q07yaffYE8SogtDm7zFeKccx1QNVARpw==}
+  '@clack/prompts@1.4.0':
+    resolution: {integrity: sha512-S0My7XPGIgpRWMDG8uRqalbgT+a6FmCUdOW+HaIOVVpUPHOb7RrpvjTjiODadKp06fsrVDJZlIzc6yCTp4AnxA==}
     engines: {node: '>= 20.12.0'}
 
   '@emnapi/core@1.10.0':
@@ -1225,13 +1225,13 @@ packages:
       tmcp: ^1.17.0
       valibot: ^1.1.0
 
-  '@tmcp/session-manager@0.2.1':
-    resolution: {integrity: sha512-DOGy9LfufXCy1wfpGHZ6qPSDQtRnTVwOb71+41ffovTqzLMZlK3iLK/LIsekHxIiku+iIAUiqEKN+DHbqEm8IA==}
+  '@tmcp/session-manager@0.2.2':
+    resolution: {integrity: sha512-UrCRpTsxh5XnMbplspvftEYboiZWgAiXqqAUbyFTHoHMJ0LoNDy8bQd0+7qtxtT4S5Qsnv650gvs/Nbec5NTCQ==}
     peerDependencies:
       tmcp: ^1.16.3
 
-  '@tmcp/transport-http@0.8.5':
-    resolution: {integrity: sha512-qQLqiCTtbxtTSswqOn/782df7O57RxI/yLUtCDQ++kHEhbmDUc8glmmtGJ3mrb7yPSPoM5VF2Pc2Q5cA6quzLA==}
+  '@tmcp/transport-http@0.8.6':
+    resolution: {integrity: sha512-iLcxu+tEMbkVHbhFfyXQhxfPDDTfm+F0kEw8Xg/a1rm29s4cBg1vwcpbtk02XTxsdDh8RJ1AZkQwF9WDGeb/IA==}
     peerDependencies:
       '@tmcp/auth': ^0.3.3 || ^0.4.0
       tmcp: ^1.18.0
@@ -4601,14 +4601,14 @@ snapshots:
   '@cbor-extract/cbor-extract-win32-x64@2.2.2':
     optional: true
 
-  '@clack/core@1.3.0':
+  '@clack/core@1.3.1':
     dependencies:
       fast-wrap-ansi: 0.2.0
       sisteransi: 1.0.5
 
-  '@clack/prompts@1.3.0':
+  '@clack/prompts@1.4.0':
     dependencies:
-      '@clack/core': 1.3.0
+      '@clack/core': 1.3.1
       fast-string-width: 3.0.2
       fast-wrap-ansi: 0.2.0
       sisteransi: 1.0.5
@@ -5367,13 +5367,13 @@ snapshots:
       tmcp: 1.19.4(typescript@6.0.3)
       valibot: 1.4.1(typescript@6.0.3)
 
-  '@tmcp/session-manager@0.2.1(tmcp@1.19.4(typescript@6.0.3))':
+  '@tmcp/session-manager@0.2.2(tmcp@1.19.4(typescript@6.0.3))':
     dependencies:
       tmcp: 1.19.4(typescript@6.0.3)
 
-  '@tmcp/transport-http@0.8.5(tmcp@1.19.4(typescript@6.0.3))':
+  '@tmcp/transport-http@0.8.6(tmcp@1.19.4(typescript@6.0.3))':
     dependencies:
-      '@tmcp/session-manager': 0.2.1(tmcp@1.19.4(typescript@6.0.3))
+      '@tmcp/session-manager': 0.2.2(tmcp@1.19.4(typescript@6.0.3))
       esm-env: 1.2.2
       tmcp: 1.19.4(typescript@6.0.3)
 
@@ -5496,8 +5496,8 @@ snapshots:
 
   '@typescript-eslint/project-service@8.59.0(typescript@6.0.3)':
     dependencies:
-      '@typescript-eslint/tsconfig-utils': 8.59.2(typescript@6.0.3)
-      '@typescript-eslint/types': 8.59.2
+      '@typescript-eslint/tsconfig-utils': 8.60.0(typescript@6.0.3)
+      '@typescript-eslint/types': 8.60.0
       debug: 4.4.3
       typescript: 6.0.3
     transitivePeerDependencies:
