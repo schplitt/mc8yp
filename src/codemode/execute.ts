@@ -4,6 +4,7 @@ import { AsyncSemaphore } from './semaphore'
 import { createNetworkPermissionDecision } from './network-permissions'
 import { createC8yAuthHeaders, resolveC8yAuth } from '../utils/client'
 import { c8yMcpServer } from '../server-instance'
+import type { DiscoveredApiSpec } from '../utils/api-discovery'
 import {
   compileRestrictionRule,
   compileRestrictionSegment,
@@ -104,12 +105,14 @@ function normalizeCode(functionCode: string): string {
   return normalized
 }
 
-function buildQueryScript(sourceCode: string): string {
+function buildQueryScript(sourceCode: string, discoveredSpecs?: readonly DiscoveredApiSpec[]): string {
   const functionExpression = normalizeCode(sourceCode)
 
-  const discoveredSpecs = c8yMcpServer.ctx.custom?.discoveredSpecs ?? []
+  // Server mode: read from per-request context (set by H3 handler).
+  // CLI mode: caller resolves the right tenant's specs and passes them in.
+  const resolvedSpecs = discoveredSpecs ?? c8yMcpServer.ctx.custom?.discoveredSpecs ?? []
   const serviceSpecsMap: Record<string, { label: string, contextPath: string, spec: unknown }> = {}
-  for (const ds of discoveredSpecs) {
+  for (const ds of resolvedSpecs) {
     serviceSpecsMap[ds.contextPath] = { label: ds.specLabel, contextPath: ds.contextPath, spec: ds.spec }
   }
 
@@ -387,8 +390,8 @@ async function runModule(code: string, entryPath: string, runtime: NodeRuntime):
   }
 }
 
-export async function query(functionCode: string): Promise<string> {
-  const result = await runQueryScript(buildQueryScript(functionCode))
+export async function query(functionCode: string, discoveredSpecs?: readonly DiscoveredApiSpec[]): Promise<string> {
+  const result = await runQueryScript(buildQueryScript(functionCode, discoveredSpecs))
   return typeof result === 'string' ? result : JSON.stringify(result)
 }
 

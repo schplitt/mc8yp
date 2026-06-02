@@ -2,6 +2,10 @@ import { defineTool } from 'tmcp/tool'
 import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
 import { getCoreOpenApiLabel } from '#core-openapi'
+import type { DiscoveredApiSpec } from '../utils/api-discovery'
+import { getAllReadySpecs, getReadySpecs, startDiscovery } from '../utils/api-discovery'
+import { createC8yAuthHeaders } from '../utils/client'
+import { c8yMcpServer } from '../server-instance'
 import { execute, query } from '../codemode/execute'
 
 import { BUNDLED_OPENAPI_ENTRIES } from '../utils/openapi'
@@ -24,6 +28,30 @@ function getExecuteEnvironmentNote(): string {
 
 function getOpenApiNote(): string {
   return `This MCP exposes the ${getCoreOpenApiLabel()} bundled core OpenAPI snapshot (${BUNDLED_OPENAPI_ENTRIES.map((entry) => `${entry.api} ${entry.version}`).join(', ')}). Use \`coreSpec\` for inventory, alarms, events, measurements, users, tenants, and the broader Cumulocity REST surface. Microservice APIs discovered on the current tenant are available via \`serviceSpecs\` in the query tool.`
+}
+
+/**
+ * Resolve the discovered specs to inject into the query sandbox.
+ * - Server mode: already in the per-request context (set by the H3 handler).
+ * - CLI mode: tenantUrl is passed by the caller so we can look up or await
+ *   that specific tenant's cache. Falls back to the merged snapshot of all
+ *   ready tenants when no tenantUrl is provided.
+ * @param input - Tool input, optionally containing tenantUrl in CLI mode
+ */
+async function resolveQuerySpecs(input: unknown): Promise<DiscoveredApiSpec[]> {
+  if (globalThis.executionEnvironment !== 'cli') {
+    return c8yMcpServer.ctx.custom?.discoveredSpecs ?? []
+  }
+  const tenantUrl = (input as { tenantUrl?: string }).tenantUrl
+  if (!tenantUrl) {
+    return getAllReadySpecs()
+  }
+  const ready = getReadySpecs(tenantUrl)
+  if (ready !== null)
+    return ready
+  // Not cached yet — trigger discovery and await it
+  const creds = await globalThis._getCredentialsByTenantUrl(tenantUrl)
+  return startDiscovery(tenantUrl, createC8yAuthHeaders(creds))
 }
 
 export function createQueryTool() {
@@ -96,12 +124,13 @@ Examples:
 }
 \`\`\`
 `,
-    schema: v.object({
+    schema: addTenantURLToSchema(v.object({
       code: createCodeSchema('A zero-parameter JavaScript function expression. The bindings coreSpec and serviceSpecs are already declared as top-level constants in the surrounding scope. Do not redeclare them as function parameters. Return the final result. Async functions are supported.'),
-    }),
+    })),
   }, async (input) => {
     try {
-      return tool.text(await query(input.code))
+      const discoveredSpecs = await resolveQuerySpecs(input)
+      return tool.text(await query(input.code, discoveredSpecs))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return tool.error(message)
