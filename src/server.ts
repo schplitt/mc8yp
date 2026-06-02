@@ -1,39 +1,21 @@
-import { ValibotJsonSchemaAdapter } from '@tmcp/adapter-valibot'
-import { McpServer } from 'tmcp'
 import consola from 'consola'
-import pkgjson from '../package.json' with { type: 'json' }
+import { c8yMcpServer } from './server-instance'
 import { createPrompts } from './prompts'
 import { createTools } from './tools'
 import { createListCredentialsTool } from './tools/credentials'
-import type { C8yMcpCustomContext } from './types/mcp-context'
 
-export function createC8YMcpServer(): McpServer<undefined, C8yMcpCustomContext> {
-  const adapter = new ValibotJsonSchemaAdapter()
+export { c8yMcpServer } from './server-instance'
 
-  const server = new McpServer(
-    {
-      name: `${pkgjson.name}-server`,
-      version: pkgjson.version,
-      description: pkgjson.description,
-    },
-    {
-      adapter,
-      capabilities: {
-        tools: { listChanged: true },
-        prompts: { listChanged: true },
-        resources: { listChanged: true },
-      },
-    },
-  ).withContext<C8yMcpCustomContext>()
+/**
+ * Register tools and prompts on the shared server instance.
+ * Must be called after globalThis.executionEnvironment is set.
+ */
+export function setupMcpServer(): void {
+  c8yMcpServer.tools(createTools())
+  c8yMcpServer.prompts(createPrompts())
+  consola.info('Running in execution environment:', globalThis.executionEnvironment)
 
-  server.tools(createTools(server))
-  server.prompts(createPrompts(server))
-  const executionEnvironment = globalThis.executionEnvironment
-  consola.info('Running in execution environment:', executionEnvironment)
-
-  if (executionEnvironment === 'cli') {
-    server.tool(createListCredentialsTool())
+  if (globalThis.executionEnvironment === 'cli') {
+    c8yMcpServer.tool(createListCredentialsTool())
   }
-
-  return server
 }

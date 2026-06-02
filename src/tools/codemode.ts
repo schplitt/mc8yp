@@ -1,11 +1,14 @@
-import type { McpServer } from 'tmcp'
 import { defineTool } from 'tmcp/tool'
 import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
 import { getCoreOpenApiLabel } from '#core-openapi'
+import type { DiscoveredApiSpec } from '../utils/api-discovery'
+import { getAllReadySpecs, getReadySpecs, startDiscovery } from '../utils/api-discovery'
+import { createC8yAuthHeaders } from '../utils/client'
+import { c8yMcpServer } from '../server-instance'
 import { execute, query } from '../codemode/execute'
-import type { C8yMcpCustomContext } from '../types/mcp-context'
-import { BUNDLED_OPENAPI_ENTRIES, OPENAPI_PARTS } from '../utils/openapi'
+
+import { BUNDLED_OPENAPI_ENTRIES } from '../utils/openapi'
 import { addTenantURLToSchema } from '../utils/schema'
 
 // TODO: remove
@@ -23,25 +26,47 @@ function getExecuteEnvironmentNote(): string {
     : 'This deployed MCP server executes requests against the current tenant using the service user attached to this MCP connection. Do not pass tenant-specific credentials or tenant URLs yourself.'
 }
 
-function getOpenApiNote(server: McpServer<undefined, C8yMcpCustomContext>): string {
-  const disabledApis = server.ctx.custom?.disabledApis ?? []
-  const enabledApis = OPENAPI_PARTS.filter((api) => !disabledApis.includes(api))
-  return `This MCP currently exposes the ${getCoreOpenApiLabel()} bundled core OpenAPI snapshot together with the other bundled product specs for the query tool. Bundled specs on this connection: ${BUNDLED_OPENAPI_ENTRIES.map((entry) => `${entry.api} (${entry.version})`).join(', ')}. Enabled bundled OpenAPI parts for execute policy: ${enabledApis.join(', ')}.
-
-Use \`coreSpec\` for the main Cumulocity REST surface such as inventory, alarms, events, measurements, identity, device control, users, tenants, audit, and the broader platform APIs.
-Use \`dtmSpec\` for Digital Twin Manager work such as schema definitions, asset models, linked series, and DTM asset or definition APIs.`
+function getOpenApiNote(): string {
+  return `This MCP exposes the ${getCoreOpenApiLabel()} bundled core OpenAPI snapshot (${BUNDLED_OPENAPI_ENTRIES.map((entry) => `${entry.api} ${entry.version}`).join(', ')}). Use \`coreSpec\` for inventory, alarms, events, measurements, users, tenants, and the broader Cumulocity REST surface. Microservice APIs discovered on the current tenant are available via \`serviceSpecs\` in the query tool.`
 }
 
-export function createQueryTool(server: McpServer<undefined, C8yMcpCustomContext>) {
+/**
+ * Resolve the discovered specs to inject into the query sandbox.
+ * - Server mode: already in the per-request context (set by the H3 handler).
+ * - CLI mode: tenantUrl is passed by the caller so we can look up or await
+ *   that specific tenant's cache. Falls back to the merged snapshot of all
+ *   ready tenants when no tenantUrl is provided.
+ * @param input - Tool input, optionally containing tenantUrl in CLI mode
+ */
+async function resolveQuerySpecs(input: unknown): Promise<DiscoveredApiSpec[]> {
+  if (globalThis.executionEnvironment !== 'cli') {
+    return c8yMcpServer.ctx.custom?.discoveredSpecs ?? []
+  }
+  const tenantUrl = (input as { tenantUrl?: string }).tenantUrl
+  if (!tenantUrl) {
+    return getAllReadySpecs()
+  }
+  const ready = getReadySpecs(tenantUrl)
+  if (ready !== null)
+    return ready
+  // Not cached yet — trigger discovery and await it
+  const creds = await globalThis._getCredentialsByTenantUrl(tenantUrl)
+  return startDiscovery(tenantUrl, createC8yAuthHeaders(creds))
+}
+
+export function createQueryTool() {
   return defineTool({
     name: 'query',
-    title: 'Query Bundled OpenAPI Specs',
-    description: `Search the bundled OpenAPI specs by evaluating a JavaScript function.
+    title: 'Query OpenAPI Specs',
+    // defineTool accepts a lazy () => string for description at runtime;
+    // the TypeScript overload only declares string so we cast.
+    description: `Search the bundled and discovered OpenAPI specs by evaluating a JavaScript function.
 
-${getOpenApiNote(server)}
+${getOpenApiNote()}
 
-Available in your function:
+Available bindings (all zero-parameter — do NOT declare these as function parameters):
 
+\`\`\`ts
 type OperationInfo = {
   summary?: string
   description?: string
@@ -64,71 +89,48 @@ type CoreSpec = {
   tags?: Array<{ name: string, description?: string }>
 }
 
-type DtmSpec = {
-  paths: Record<string, PathItem>
-  tags?: Array<{ name: string, description?: string }>
-}
-
-type SpecsEnabled = {
-  core: boolean
-  dtm: boolean
+type ServiceSpecEntry = {
+  label: string
+  contextPath: string
+  spec: { paths: Record<string, PathItem> }
 }
 
 declare const coreSpec: CoreSpec
-declare const dtmSpec: DtmSpec
-declare const specsEnabled: SpecsEnabled
+declare const serviceSpecs: Record<string, ServiceSpecEntry>
+\`\`\`
 
-Your code must evaluate to a **zero-parameter** function — do NOT declare \`coreSpec\`, \`dtmSpec\`, or \`specsEnabled\` as function parameters. These are already declared as constants in the surrounding scope and are available inside the function body without any argument passing. Writing \`(dtmSpec) => ...\` would shadow the global binding with an undefined parameter and produce incorrect results.
-
-The top-level bindings \
-
-a) \`coreSpec\` — use this for the main Cumulocity REST APIs such as inventory, alarms, events, measurements, identity, device control, users, tenants, audit, and the broader platform REST surface
-\nb) \`dtmSpec\` — use this for Digital Twin Manager work such as schema definitions, asset models, linked series, and DTM asset or definition APIs
-\nc) \`specsEnabled\` — tells you which bundled spec families are enabled for execute policy on this connection
-
-are available automatically. The sandbox assigns your function to a local variable, invokes it, and returns its result.
-
-Recommended shapes (zero parameters — bindings come from scope, not arguments):
-\`(() => { ... })\`
-\`async () => { ... }\`
+- \`coreSpec\` — the main Cumulocity REST surface (inventory, alarms, events, measurements, identity, device control, users, tenants, audit)
+- \`serviceSpecs\` — microservice APIs discovered on the current tenant, keyed by contextPath. Paths are prefixed with the service route (e.g. \`/service/dtm/assets\`) and can be passed directly to \`cumulocity.request()\`.
 
 If your function returns a string, it is returned as-is. Otherwise the result is returned as JSON text.
-
-The specs exposed by \`query\` are the raw bundled OpenAPI snapshots. They are never hidden or rewritten for the current MCP connection policy.
-The current MCP connection may still block \`execute\` calls through restrictions and/or an allow list, so do not assume every operation visible in a spec is executable on this connection.
-Use \`specsEnabled\` to see which bundled spec families are enabled for execute policy on this connection.
+The current MCP connection may still block \`execute\` calls even when an operation is visible in a spec.
 
 Examples:
-() => specsEnabled
+\`() => Object.keys(serviceSpecs)\`
+\`() => Object.keys(coreSpec.paths).filter((p) => p.includes('inventory'))\`
 
+\`\`\`js
 () => {
-  return Object.keys(coreSpec.paths).filter((path) => path.includes('inventory'))
+  return Object.entries(serviceSpecs).flatMap(([ctx, entry]) =>
+    Object.keys(entry.spec.paths).map((p) => ({ service: ctx, path: p }))
+  )
 }
+\`\`\`
 
-() => {
-  const results = []
-  for (const [path, methods] of Object.entries(dtmSpec.paths)) {
-    for (const [method, op] of Object.entries(methods)) {
-      if (op?.tags?.some(tag => tag.toLowerCase().includes('asset'))) {
-        results.push({ method: method.toUpperCase(), path, summary: op.summary })
-      }
-    }
-  }
-
-  return results
-}
-
+\`\`\`js
 () => {
   const op = coreSpec.paths['/inventory/managedObjects']?.get
-  return { summary: op?.summary, parameters: op?.parameters, responses: op?.responses }
+  return { summary: op?.summary, parameters: op?.parameters }
 }
+\`\`\`
 `,
-    schema: v.object({
-      code: createCodeSchema('A zero-parameter JavaScript function expression. Do NOT declare `coreSpec`, `dtmSpec`, or `specsEnabled` as function parameters — they are already declared as top-level constants in the surrounding scope and are available in the function body automatically. Writing `(dtmSpec) => ...` would shadow the global binding with an undefined parameter and produce incorrect results. Return the final result from that function. Async functions are supported.'),
-    }),
+    schema: addTenantURLToSchema(v.object({
+      code: createCodeSchema('A zero-parameter JavaScript function expression. The bindings coreSpec and serviceSpecs are already declared as top-level constants in the surrounding scope. Do not redeclare them as function parameters. Return the final result. Async functions are supported.'),
+    })),
   }, async (input) => {
     try {
-      return tool.text(await query(input.code, server.ctx.custom?.restrictions ?? [], server.ctx.custom?.allowRules ?? [], server.ctx.custom?.disabledApis ?? []))
+      const discoveredSpecs = await resolveQuerySpecs(input)
+      return tool.text(await query(input.code, discoveredSpecs))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return tool.error(message)
@@ -136,13 +138,13 @@ Examples:
   })
 }
 
-export function createExecuteTool(server: McpServer<undefined, C8yMcpCustomContext>) {
+export function createExecuteTool() {
   return defineTool({
     name: 'execute',
     title: 'Execute Cumulocity API Call',
     description: `Execute JavaScript code against the Cumulocity API. First use the query tool to find the right endpoint, then write an async JavaScript function expression that uses cumulocity.request().
 
-${getOpenApiNote(server)}
+${getOpenApiNote()}
 
 Available in your module:
 
@@ -196,7 +198,7 @@ async () => {
 async () => {
   const asset = await cumulocity.request({
     method: 'GET',
-    path: '/assets?pageSize=5',
+    path: '/service/dtm/assets?pageSize=5',
   })
 
   return asset
@@ -207,7 +209,7 @@ async () => {
     })),
   }, async (input) => {
     try {
-      return tool.text(await execute(input.code, input, server.ctx.custom?.restrictions ?? [], server.ctx.custom?.allowRules ?? [], server.ctx.custom?.disabledApis ?? []))
+      return tool.text(await execute(input.code, input))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return tool.error(message)
