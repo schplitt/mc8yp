@@ -36,6 +36,7 @@ interface OpenApiSourceEntry {
   version: string
   label: string
   url: string
+  servicePrefix?: string
   default?: boolean
 }
 
@@ -62,8 +63,31 @@ function getSourceConfig(api: OpenApiModuleName, version: string): OpenApiSource
   return entry
 }
 
+function rewriteSpecPaths(specJson: string, servicePrefix: string): string {
+  const spec = JSON.parse(specJson) as {
+    paths?: Record<string, unknown>
+    servers?: Array<{ url: string, description?: string }>
+  }
+  if (spec.paths) {
+    const rewritten: Record<string, unknown> = {}
+    for (const [p, item] of Object.entries(spec.paths)) {
+      rewritten[`${servicePrefix}${p}`] = item
+    }
+    spec.paths = rewritten
+  }
+  if (spec.servers) {
+    spec.servers = spec.servers.map((server) => ({
+      ...server,
+      url: server.url.replace('<TENANT_DOMAIN>', `<TENANT_DOMAIN>${servicePrefix}`),
+    }))
+  }
+  return JSON.stringify(spec)
+}
+
 function readSpecJson(api: OpenApiModuleName, version: string): string {
-  return readFileSync(path.join(rootDir, 'openapi', api, `${version}.json`), 'utf8').trim()
+  const raw = readFileSync(path.join(rootDir, 'openapi', api, `${version}.json`), 'utf8').trim()
+  const source = getSourceConfig(api, version)
+  return source.servicePrefix ? rewriteSpecPaths(raw, source.servicePrefix) : raw
 }
 
 function generateEntries(api: OpenApiModuleName, versions: readonly string[]): string {

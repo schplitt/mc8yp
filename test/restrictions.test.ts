@@ -448,7 +448,7 @@ describe('network permission decisions', () => {
       op: 'connect',
       hostname: 'tenant.example.com',
       method: 'GET',
-      url: 'https://tenant.example.com/assets?pageSize=5',
+      url: 'https://tenant.example.com/service/dtm/assets?pageSize=5',
     }, createOpenApiPartRestrictionRules(['dtm']))).toEqual({
       allow: false,
       reason: expect.stringContaining('Network connect blocked by MCP restrictions:'),

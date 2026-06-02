@@ -28,6 +28,7 @@
         "version": "release",
         "label": "release (latest)",
         "url": "https://cumulocity.com/api/dtm/dist/c8y-dtm-oas.json",
+        "servicePrefix": "/service/dtm",
         "default": true
       }
     ]
