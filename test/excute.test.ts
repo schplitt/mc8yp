@@ -373,7 +373,7 @@ describe('buildExecuteScript', () => {
       'installFetchTrap();',
       'return await cumulocity.request({',
       '  method: "GET",',
-      '  path: "/assets?pageSize=5",',
+      '  path: "/service/dtm/assets?pageSize=5",',
       '});',
       '}',
     ].join('\n'), generatedRestrictions, [], { Authorization: 'Bearer test' }, ['dtm'])
@@ -395,9 +395,9 @@ describe('buildExecuteScript', () => {
       '',
       'Blocked operation:',
       'Method: GET',
-      'Path: /assets',
+      'Path: /service/dtm/assets',
       'Matching restrictions:',
-      '- GET:/assets',
+      '- GET:/service/dtm/assets',
     ].join('\n')))
   })
 
@@ -467,10 +467,10 @@ describe('buildExecuteScript', () => {
       'installFetchTrap();',
       'return await cumulocity.request({',
       '  method: "GET",',
-      '  path: "/assets?pageSize=5",',
+      '  path: "/service/dtm/assets?pageSize=5",',
       '});',
       '}',
-    ].join('\n'), generatedRestrictions, [parseSingleAllowRule('GET:/assets')], { Authorization: 'Bearer test' }, ['dtm'])
+    ].join('\n'), generatedRestrictions, [parseSingleAllowRule('GET:/service/dtm/assets')], { Authorization: 'Bearer test' }, ['dtm'])
 
     expect(result.called).toBe(false)
     expect(result.result).toEqual(expectedBlockedResult([
@@ -489,9 +489,9 @@ describe('buildExecuteScript', () => {
       '',
       'Blocked operation:',
       'Method: GET',
-      'Path: /assets',
+      'Path: /service/dtm/assets',
       'Matching restrictions:',
-      '- GET:/assets',
+      '- GET:/service/dtm/assets',
     ].join('\n')))
   })
 
