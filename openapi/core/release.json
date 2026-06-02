@@ -1206,6 +1206,112 @@
         }
       }
     },
+    "/alarm/alarms/upsert": {
+      "post": {
+        "operationId": "postAlarmUpsertResource",
+        "x-codegen-resource-name": "upsertAlarm",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/acceptHeader"
+          },
+          {
+            "$ref": "#/components/parameters/processingModeHeader"
+          }
+        ],
+        "tags": [
+          "Alarms"
+        ],
+        "security": [
+          {
+            "Basic": []
+          },
+          {
+            "OAI-Secure": []
+          },
+          {
+            "SSO": []
+          },
+          {
+            "JWT-IAM": []
+          }
+        ],
+        "summary": "Create or update an alarm",
+        "description": "Upserts an alarm based on the provided representation. If a non-cleared alarm with the same type and source already exists, it is updated; otherwise, a new alarm is created.\n\n<section><h5>Required roles</h5>\nROLE_ALARM_ADMIN <b>OR</b> owner of the source <b>OR</b> ALARM_ADMIN permission on the source\n</section>\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/vnd.com.nsn.cumulocity.alarm+json": {
+              "example": {
+                "source": {
+                  "id": "251982"
+                },
+                "type": "c8y_UnavailabilityAlarm",
+                "text": "No data received from the device within the required interval.",
+                "severity": "MAJOR",
+                "status": "ACTIVE",
+                "time": "2020-03-19T12:03:27.845Z"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/alarmUpsert"
+              }
+            }
+          }
+        },
+        "x-code-samples": [
+          {
+            "lang": "cURL",
+            "source": "curl --location --request POST \"https://<TENANT_DOMAIN>/alarm/alarms/upsert\" \\\n--header \"Authorization: Basic <AUTHORIZATION>\" \\\n--header \"Accept: application/json\" \\\n--header \"Content-Type: application/json\" \\\n--data-raw '<Payload>'\n"
+          },
+          {
+            "lang": "C#",
+            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/alarm/alarms/upsert\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.POST);\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\nrequest.AddHeader(\"Content-Type\", \"application/json\");\nrequest.AddHeader(\"Accept\", \"application/json\");\nrequest.AddParameter(\"application/json\", \"<Payload>\",  ParameterType.RequestBody);\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
+          },
+          {
+            "lang": "Java",
+            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.post(\"https://<TENANT_DOMAIN>/alarm/alarms/upsert\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\")\n    .header(\"Content-Type\", \"application/json\")\n    .header(\"Accept\", \"application/json\")\n    .body(\"<Payload>\")\n    .asString();\nSystem.out.println(response);\n"
+          },
+          {
+            "lang": "Node.js",
+            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"POST\", \"https://<TENANT_DOMAIN>/alarm/alarms/upsert\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\",\n        \"Accept\": \"application/json\",\n        \"Content-Type\": \"application/json\"\n    })\n    .send(JSON.stringify( <Payload> ))\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
+          },
+          {
+            "lang": "Python",
+            "source": "import requests\nimport json\n\nurl = \"https://<TENANT_DOMAIN>/alarm/alarms/upsert\"\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\",\n  \"Accept\": \"application/json\",\n  \"Content-Type\": \"application/json\"\n}\nresponse = requests.request(\"POST\", url, headers=headers, data = json.dumps(<Payload>))\nprint(response.text.encode(\"utf8\"))\n"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "An existing alarm was updated.",
+            "content": {
+              "application/vnd.com.nsn.cumulocity.alarm+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/alarm"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "An alarm was created.",
+            "content": {
+              "application/vnd.com.nsn.cumulocity.alarm+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/alarm"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/operationNotAuthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/invalidPayload"
+          }
+        }
+      }
+    },
     "/alarm/alarms/count": {
       "get": {
         "operationId": "getAlarmCollectionCountResource",
@@ -11120,6 +11226,9 @@
             "$ref": "#/components/parameters/queryParam_users_username"
           },
           {
+            "$ref": "#/components/parameters/queryParam_users_usernameContains"
+          },
+          {
             "$ref": "#/components/parameters/queryParam_users_withSubusersCount"
           },
           {
@@ -11183,6 +11292,9 @@
           },
           "403": {
             "$ref": "#/components/responses/accessDenied"
+          },
+          "422": {
+            "$ref": "#/components/responses/invalidData"
           }
         }
       }
@@ -21640,11 +21752,21 @@
       "queryParam_users_username": {
         "name": "username",
         "in": "query",
-        "description": "Prefix or full username",
+        "description": "Prefix or full username (or alias). The search is case-insensitive.",
         "schema": {
           "type": "string",
           "minLength": 1,
           "example": "jdoe"
+        }
+      },
+      "queryParam_users_usernameContains": {
+        "name": "usernameContains",
+        "in": "query",
+        "description": "Allows to search for users whose username (or alias) contains the provided string. The search is case-insensitive. Only one parameter (`username` or `usernameContains`) can be used in the request.",
+        "schema": {
+          "type": "string",
+          "minLength": 3,
+          "example": "doe"
         }
       },
       "queryParam_users_groups": {
@@ -23074,6 +23196,63 @@
           "text": "No data received from the device within the required interval.",
           "time": "2020-03-19T00:00:00.000Z",
           "type": "c8y_UnavailabilityAlarm"
+        }
+      },
+      "alarmUpsert": {
+        "type": "object",
+        "required": [
+          "source",
+          "type"
+        ],
+        "properties": {
+          "source": {
+            "description": "The managed object to which the alarm is associated.",
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/desc_objectId"
+              }
+            }
+          },
+          "type": {
+            "description": "Identifies the type of this alarm.",
+            "type": "string"
+          },
+          "severity": {
+            "description": "The severity of the alarm. If not specified, a new alarm will be created as MAJOR.",
+            "type": "string",
+            "enum": [
+              "CRITICAL",
+              "MAJOR",
+              "MINOR",
+              "WARNING"
+            ]
+          },
+          "status": {
+            "description": "The status of the alarm. If not specified, a new alarm will be created as ACTIVE.",
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "ACKNOWLEDGED",
+              "CLEARED"
+            ]
+          },
+          "time": {
+            "description": "The date and time when the alarm is triggered. Only applied when the alarm is created; ignored on update. If not provided, defaults to the current time.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "text": {
+            "description": "Description of the alarm.",
+            "type": "string"
+          }
+        },
+        "additionalProperties": {
+          "description": "It is possible to add an arbitrary number of additional properties as a list of key-value pairs, for example, `\"property1\": {}`, `\"property2\": \"value\"`. These properties are known as custom fragments and can be of any type, for example, object or string. Each custom fragment is identified by a unique name.\n\nReview [Getting started > Technical concepts > Cumulocity's domain model > Inventory > Fragments > Naming conventions of fragments](https://www.cumulocity.com/docs/concepts/domain-model/#naming-conventions-of-fragments) in the Cumulocity user documentation as there are characters that can not be used when naming custom fragments.\n",
+          "x-additionalPropertiesName": "customFragments"
         }
       },
       "auditApiResource": {
