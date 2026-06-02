@@ -17,17 +17,6 @@ const OPENAPI_MODULES = {
     getLabel: 'getCoreOpenApiLabel',
     pluginName: 'mc8yp:core-openapi',
   },
-  dtm: {
-    virtualId: '#dtm-openapi',
-    resolvedId: '\0virtual:dtm-openapi',
-    entryType: 'DtmOpenApiEntry',
-    entryConst: 'specs',
-    getSpec: 'getDtmOpenApiSpec',
-    getVersion: 'getDtmOpenApiVersion',
-    setVersion: 'setDtmOpenApiVersion',
-    getLabel: 'getDtmOpenApiLabel',
-    pluginName: 'mc8yp:dtm-openapi',
-  },
 } as const
 
 type OpenApiModuleName = keyof typeof OPENAPI_MODULES
@@ -169,10 +158,6 @@ export function coreOpenApiPlugin(options: { mode: 'cli' } | { mode: 'server', b
   return createOpenApiPlugin('core', options)
 }
 
-export function dtmOpenApiPlugin(options: { mode: 'cli' } | { mode: 'server', build: OpenApiBuildEntry }) {
-  return createOpenApiPlugin('dtm', options)
-}
-
 const serverBuilds = OPENAPI_CONFIG.builds.map((build) => ({
   name: `mc8yp-server-build-${build.version}`,
   entry: { server: './src/index.ts' },
@@ -180,7 +165,7 @@ const serverBuilds = OPENAPI_CONFIG.builds.map((build) => ({
   clean: build.version === OPENAPI_CONFIG.builds[0]?.version,
   dts: false,
   format: 'module' as const,
-  plugins: [coreOpenApiPlugin({ mode: 'server', build }), dtmOpenApiPlugin({ mode: 'server', build })],
+  plugins: [coreOpenApiPlugin({ mode: 'server', build })],
   outDir: `.output/${build.version}`,
 }))
 
@@ -193,7 +178,7 @@ export default defineConfig([
     clean: true,
     dts: false,
     format: 'module',
-    plugins: [coreOpenApiPlugin({ mode: 'cli' }), dtmOpenApiPlugin({ mode: 'cli' })],
+    plugins: [coreOpenApiPlugin({ mode: 'cli' })],
     // no external -> everything starting with @c8y/ should be bundled for cli usage
     noExternal: [/^@c8y\/.*$/],
     outDir: 'dist',

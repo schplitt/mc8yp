@@ -1,12 +1,14 @@
 /* eslint-disable no-template-curly-in-string */
 /* eslint-disable no-new-func */
 import { encode } from '@toon-format/toon'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildExecutePrelude, buildExecuteScript, execute, query } from '../src/codemode/execute'
-import { createOpenApiPartRestrictionRules } from '../src/utils/openapi'
+import { bustApiSpecCache, setCachedApiSpecs } from '../src/utils/api-discovery'
 import { parseAllowRule, parseRestrictionRule } from '../src/utils/restrictions'
 import type { AllowRule, RestrictionRule } from '../src/utils/restrictions'
 import * as client from '../src/utils/client'
+
+const TEST_TENANT = 'https://tenant.example.com'
 
 function parseSingleRule(input: string): RestrictionRule {
   const result = parseRestrictionRule([input])
@@ -81,12 +83,11 @@ async function runGeneratedExecuteScript(
   restrictions: readonly RestrictionRule[] = [],
   allowRules: readonly AllowRule[] = [],
   headers: Record<string, string> = { Authorization: 'Bearer test' },
-  disabledApis: readonly string[] = [],
 ): Promise<ExecuteHarnessResult> {
   resetTestGlobals()
 
   const run = new Function([
-    buildExecutePrelude('https://tenant.example.com', headers, restrictions, allowRules, disabledApis),
+    buildExecutePrelude('https://tenant.example.com', headers, restrictions, allowRules),
     `const __mc8ypExecute = (${sourceCode});`,
     'globalThis.__done = (async () => {',
     '  try {',
@@ -145,8 +146,14 @@ function installEchoFetch() {
   }
 }
 
+beforeEach(() => {
+  // Pre-seed an empty cache so execute() skips live discovery in tests.
+  setCachedApiSpecs(TEST_TENANT, [])
+})
+
 afterEach(() => {
   resetTestGlobals()
+  bustApiSpecCache()
 })
 
 function expectedRestrictedRequestMessage(method: string, path: string, matchingRules: readonly string[]): string {
@@ -365,211 +372,6 @@ describe('buildExecuteScript', () => {
     })
   })
 
-  it('blocks requests inside disabled bundled openapi parts before fetch is called', async () => {
-    const generatedRestrictions = createOpenApiPartRestrictionRules(['dtm'])
-    const result = await runGeneratedExecuteScript([
-      'async () => {',
-      `${installFetchTrap.toString()}`,
-      'installFetchTrap();',
-      'return await cumulocity.request({',
-      '  method: "GET",',
-      '  path: "/service/dtm/assets?pageSize=5",',
-      '});',
-      '}',
-    ].join('\n'), generatedRestrictions, [], { Authorization: 'Bearer test' }, ['dtm'])
-
-    expect(result.called).toBe(false)
-    expect(result.result).toEqual(expectedBlockedResult([
-      'Request blocked by MCP connection policy.',
-      '',
-      'This operation is intentionally denied by the current MCP connection configuration.',
-      'It did not fail at the Cumulocity API and it was not executed against the tenant.',
-      'Retrying or trying the same operation again through this connection will not succeed.',
-      '',
-      'Report this to the user as a connection-level access restriction.',
-      'If the operation is needed, the MCP restrictions for this connection must be updated by whoever manages that configuration.',
-      '',
-      'Disabled bundled OpenAPI parts for execute policy on this connection:',
-      '- dtm',
-      'Endpoints from those bundled specs are blocked by connection-level bundled OpenAPI policy.',
-      '',
-      'Blocked operation:',
-      'Method: GET',
-      'Path: /service/dtm/assets',
-      'Matching restrictions:',
-      '- GET:/service/dtm/assets',
-    ].join('\n')))
-  })
-
-  it('does not turn disabled bundled specs into an implicit allow list for enabled specs', async () => {
-    const generatedRestrictions = createOpenApiPartRestrictionRules(['dtm'])
-    const result = await runGeneratedExecuteScript([
-      'async () => {',
-      `${installEchoFetch.toString()}`,
-      'installEchoFetch();',
-      'return await cumulocity.request({',
-      '  method: "GET",',
-      '  path: "/event/events?pageSize=5",',
-      '});',
-      '}',
-    ].join('\n'), generatedRestrictions, [], { Authorization: 'Bearer test' }, ['dtm'])
-
-    expect(result.called).toBe(true)
-    expect(result.url).toBe('https://tenant.example.com/event/events?pageSize=5')
-    expect(result.method).toBe('GET')
-    expect(result.result).toEqual({
-      status: 'success',
-      result: { ok: true },
-    })
-  })
-
-  it('does not turn disabled bundled specs into extra allow rules when an explicit allow list already exists', async () => {
-    const generatedRestrictions = createOpenApiPartRestrictionRules(['dtm'])
-    const result = await runGeneratedExecuteScript([
-      'async () => {',
-      `${installFetchTrap.toString()}`,
-      'installFetchTrap();',
-      'return await cumulocity.request({',
-      '  method: "GET",',
-      '  path: "/alarm/alarms?pageSize=5",',
-      '});',
-      '}',
-    ].join('\n'), generatedRestrictions, [parseSingleAllowRule('GET:/inventory/**')], { Authorization: 'Bearer test' }, ['dtm'])
-
-    expect(result.called).toBe(false)
-    expect(result.result).toEqual(expectedBlockedResult([
-      'Request blocked by MCP connection policy.',
-      '',
-      'This operation is intentionally blocked because it is not included in the current MCP connection allow list.',
-      'It did not fail at the Cumulocity API and it was not executed against the tenant.',
-      'Retrying or trying the same operation again through this connection will not succeed.',
-      '',
-      'Report this to the user as a connection-level access restriction.',
-      'If the operation is needed, the MCP allow list for this connection must be updated by whoever manages that configuration.',
-      '',
-      'Disabled bundled OpenAPI parts for execute policy on this connection:',
-      '- dtm',
-      'Endpoints from those bundled specs are blocked by connection-level bundled OpenAPI policy.',
-      '',
-      'Blocked operation:',
-      'Method: GET',
-      'Path: /alarm/alarms',
-      'Configured allow rules:',
-      '- GET:/inventory/**',
-    ].join('\n')))
-  })
-
-  it('keeps disabled bundled spec restrictions ahead of matching allow rules', async () => {
-    const generatedRestrictions = createOpenApiPartRestrictionRules(['dtm'])
-    const result = await runGeneratedExecuteScript([
-      'async () => {',
-      `${installFetchTrap.toString()}`,
-      'installFetchTrap();',
-      'return await cumulocity.request({',
-      '  method: "GET",',
-      '  path: "/service/dtm/assets?pageSize=5",',
-      '});',
-      '}',
-    ].join('\n'), generatedRestrictions, [parseSingleAllowRule('GET:/service/dtm/assets')], { Authorization: 'Bearer test' }, ['dtm'])
-
-    expect(result.called).toBe(false)
-    expect(result.result).toEqual(expectedBlockedResult([
-      'Request blocked by MCP connection policy.',
-      '',
-      'This operation is intentionally denied by the current MCP connection configuration.',
-      'It did not fail at the Cumulocity API and it was not executed against the tenant.',
-      'Retrying or trying the same operation again through this connection will not succeed.',
-      '',
-      'Report this to the user as a connection-level access restriction.',
-      'If the operation is needed, the MCP restrictions for this connection must be updated by whoever manages that configuration.',
-      '',
-      'Disabled bundled OpenAPI parts for execute policy on this connection:',
-      '- dtm',
-      'Endpoints from those bundled specs are blocked by connection-level bundled OpenAPI policy.',
-      '',
-      'Blocked operation:',
-      'Method: GET',
-      'Path: /service/dtm/assets',
-      'Matching restrictions:',
-      '- GET:/service/dtm/assets',
-    ].join('\n')))
-  })
-
-  it('does not widen allow-list access on enabled bundled specs when another bundled spec is disabled', async () => {
-    const generatedRestrictions = createOpenApiPartRestrictionRules(['dtm'])
-    const result = await runGeneratedExecuteScript([
-      'async () => {',
-      `${installFetchTrap.toString()}`,
-      'installFetchTrap();',
-      'return await cumulocity.request({',
-      '  method: "GET",',
-      '  path: "/event/events?pageSize=5",',
-      '});',
-      '}',
-    ].join('\n'), generatedRestrictions, [parseSingleAllowRule('GET:/inventory/**')], { Authorization: 'Bearer test' }, ['dtm'])
-
-    expect(result.called).toBe(false)
-    expect(result.result).toEqual(expectedBlockedResult([
-      'Request blocked by MCP connection policy.',
-      '',
-      'This operation is intentionally blocked because it is not included in the current MCP connection allow list.',
-      'It did not fail at the Cumulocity API and it was not executed against the tenant.',
-      'Retrying or trying the same operation again through this connection will not succeed.',
-      '',
-      'Report this to the user as a connection-level access restriction.',
-      'If the operation is needed, the MCP allow list for this connection must be updated by whoever manages that configuration.',
-      '',
-      'Disabled bundled OpenAPI parts for execute policy on this connection:',
-      '- dtm',
-      'Endpoints from those bundled specs are blocked by connection-level bundled OpenAPI policy.',
-      '',
-      'Blocked operation:',
-      'Method: GET',
-      'Path: /event/events',
-      'Configured allow rules:',
-      '- GET:/inventory/**',
-    ].join('\n')))
-  })
-
-  it('still allows enabled bundled spec requests that match the explicit allow list when another bundled spec is disabled', async () => {
-    const generatedRestrictions = createOpenApiPartRestrictionRules(['dtm'])
-    const result = await runGeneratedExecuteScript([
-      'async () => {',
-      `${installEchoFetch.toString()}`,
-      'installEchoFetch();',
-      'return await cumulocity.request({',
-      '  method: "GET",',
-      '  path: "/inventory/managedObjects?pageSize=5",',
-      '});',
-      '}',
-    ].join('\n'), generatedRestrictions, [parseSingleAllowRule('GET:/inventory/**')], { Authorization: 'Bearer test' }, ['dtm'])
-
-    expect(result.called).toBe(true)
-    expect(result.url).toBe('https://tenant.example.com/inventory/managedObjects?pageSize=5')
-    expect(result.method).toBe('GET')
-    expect(result.result).toEqual({
-      status: 'success',
-      result: { ok: true },
-    })
-  })
-
-  it('blocks query-derived restrictions for same-origin absolute URLs before fetch is called', async () => {
-    const restrictions = parseRestrictionRule(['GET:/inventory/**']).parsedRules
-    const result = await runGeneratedExecuteScript([
-      'async () => {',
-      `${installFetchTrap.toString()}`,
-      'installFetchTrap();',
-      'return await cumulocity.request({',
-      '  method: "GET",',
-      '  path: "https://tenant.example.com/inventory/managedObjects?pageSize=5",',
-      '});',
-      '}',
-    ].join('\n'), restrictions)
-
-    expect(result.called).toBe(false)
-    expect(result.result).toEqual(expectedBlockedResult(expectedRestrictedRequestMessage('GET', '/inventory/managedObjects', ['GET:/inventory/**'])))
-  })
-
   it.each(INVALID_RESTRICTION_QUERY_PAYLOADS)('reports invalid malicious restriction text from query params: %s', (payload) => {
     expect(parseRestrictionRule([payload])).toEqual({
       parsedRules: [],
@@ -600,16 +402,10 @@ describe('buildExecuteScript', () => {
 })
 
 describe('query', () => {
-  it('exposes every bundled spec through the query sandbox', async () => {
-    const result = await query('() => ({ hasCore: !!coreSpec, hasDtm: !!dtmSpec, specsEnabled })')
+  it('exposes coreSpec and serviceSpecs through the query sandbox', async () => {
+    const result = await query('() => ({ hasCore: !!coreSpec, hasServiceSpecs: typeof serviceSpecs === "object" })')
 
-    expect(JSON.parse(result)).toEqual({ hasCore: true, hasDtm: true, specsEnabled: { core: true, dtm: true } })
-  })
-
-  it('keeps all bundled specs visible while exposing enabled execute-policy spec families', async () => {
-    const result = await query('() => ({ hasCore: !!coreSpec, hasDtm: !!dtmSpec, specsEnabled })', [], [], ['dtm'])
-
-    expect(JSON.parse(result)).toEqual({ hasCore: true, hasDtm: true, specsEnabled: { core: true, dtm: false } })
+    expect(JSON.parse(result)).toEqual({ hasCore: true, hasServiceSpecs: true })
   })
 })
 

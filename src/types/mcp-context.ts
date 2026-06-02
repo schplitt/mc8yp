@@ -1,7 +1,8 @@
+import type { DiscoveredApiSpec } from '../utils/api-discovery'
 import type { AllowRule, RestrictionRule } from '../utils/restrictions'
 
 export interface C8yMcpCustomContext extends Record<string, unknown> {
   restrictions: RestrictionRule[]
   allowRules: AllowRule[]
-  disabledApis: string[]
+  discoveredSpecs: DiscoveredApiSpec[]
 }

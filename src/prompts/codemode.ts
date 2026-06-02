@@ -1,9 +1,9 @@
-import type { McpServer } from 'tmcp'
 import { definePrompt } from 'tmcp/prompt'
 import { prompt } from 'tmcp/utils'
 import { getCoreOpenApiLabel } from '#core-openapi'
-import type { C8yMcpCustomContext } from '../types/mcp-context'
-import { BUNDLED_OPENAPI_ENTRIES, OPENAPI_PARTS } from '../utils/openapi'
+import { c8yMcpServer } from '../server-instance'
+import { getAllReadySpecs } from '../utils/api-discovery'
+import { BUNDLED_OPENAPI_ENTRIES } from '../utils/openapi'
 
 function getRuntimeSection(): string {
   return globalThis.executionEnvironment === 'cli'
@@ -11,19 +11,23 @@ function getRuntimeSection(): string {
     : '## Server Runtime\nThis deployed MCP server uses the current tenant and the service user attached to this MCP connection. Do not pass tenant-specific credentials or tenant URLs yourself.'
 }
 
-function getOpenApiSection(server: McpServer<undefined, C8yMcpCustomContext>): string {
-  const disabledApis = server.ctx.custom?.disabledApis ?? []
-  const enabledApis = OPENAPI_PARTS.filter((api) => !disabledApis.includes(api))
-  return `## Bundled OpenAPI Specs\nThe query tool currently exposes the ${getCoreOpenApiLabel()} bundled core OpenAPI snapshot together with the other bundled product specs. Bundled specs on this connection: ${BUNDLED_OPENAPI_ENTRIES.map((entry) => `${entry.api} (${entry.version})`).join(', ')}. Enabled bundled OpenAPI parts for execute policy: ${enabledApis.join(', ')}.`
+function getOpenApiSection(): string {
+  return `## OpenAPI Specs\nThe query tool exposes the ${getCoreOpenApiLabel()} bundled core snapshot (${BUNDLED_OPENAPI_ENTRIES.map((entry) => `${entry.api} ${entry.version}`).join(', ')}) via \`coreSpec\`, and any microservice APIs discovered on the tenant via \`serviceSpecs\`.`
 }
 
-export function createCodeModeGuidePrompt(server: McpServer<undefined, C8yMcpCustomContext>) {
+export function createCodeModeGuidePrompt() {
   return definePrompt({
     name: 'code-mode-guide',
     description: 'Guide for the two code-mode tools: query and execute, including available shapes and examples.',
   }, () => {
-    const restrictions = server.ctx.custom?.restrictions ?? []
-    const allowRules = server.ctx.custom?.allowRules ?? []
+    const restrictions = c8yMcpServer.ctx.custom?.restrictions ?? []
+    const allowRules = c8yMcpServer.ctx.custom?.allowRules ?? []
+    const discoveredSpecs = globalThis.executionEnvironment === 'cli'
+      ? getAllReadySpecs()
+      : (c8yMcpServer.ctx.custom?.discoveredSpecs ?? [])
+    const serviceSpecsType = discoveredSpecs.length === 0
+      ? 'Record<string, ServiceSpecEntry>'
+      : `{\n${discoveredSpecs.map((ds) => `  ${ds.contextPath}: ServiceSpecEntry`).join('\n')}\n}`
     const policyLines = [
       ...restrictions.map((rule) => `- deny: \`${rule.source}\``),
       ...allowRules.map((rule) => `- allow: \`${rule.source}\``),
@@ -35,16 +39,15 @@ export function createCodeModeGuidePrompt(server: McpServer<undefined, C8yMcpCus
     return prompt.message(
       `# Cumulocity Code Mode
 
-You have exactly two MCP tools available.
+You have two MCP tools available.
 
 ## query
-Use \`query\` when you need to inspect the bundled OpenAPI specs.
+Use \`query\` to inspect OpenAPI specs (bundled core or discovered microservices).
 
 - Input: a **zero-parameter** JavaScript function expression
-- Do NOT declare \`coreSpec\`, \`dtmSpec\`, or \`specsEnabled\` as function parameters — they are already declared as top-level constants in the surrounding scope. Writing \`(dtmSpec) => ...\` would shadow the global with an undefined parameter and produce incorrect results
-- The top-level bindings \`coreSpec\`, \`dtmSpec\`, and \`specsEnabled\` are available automatically inside the function body
-- \`coreSpec\` is for the main Cumulocity REST surface such as inventory, alarms, events, measurements, identity, device control, users, tenants, audit, and the broader platform APIs
-- \`dtmSpec\` is for Digital Twin Manager work such as schema definitions, asset models, linked series, and DTM asset or definition APIs
+- Do NOT declare \`coreSpec\` or \`serviceSpecs\` as function parameters — they are already declared as top-level constants in the surrounding scope
+- \`coreSpec\` is for the main Cumulocity REST surface: inventory, alarms, events, measurements, identity, device control, users, tenants, audit
+- \`serviceSpecs\` contains microservice APIs discovered on the current tenant, keyed by contextPath (e.g. \`serviceSpecs['dtm']\`). Paths are already prefixed for direct use with \`cumulocity.request()\`
 - Return the exact value you want back from that function
 - Sync and async functions are both supported
 - Strings are returned as-is; other results are returned as JSON text
@@ -77,33 +80,24 @@ type CoreSpec = {
   paths: Record<string, PathItem>
 }
 
-type DtmSpec = {
-  paths: Record<string, PathItem>
-}
-
-type SpecsEnabled = {
-  core: boolean
-  dtm: boolean
+type ServiceSpecEntry = {
+  label: string
+  contextPath: string
+  spec: { paths: Record<string, PathItem> }
 }
 
 declare const coreSpec: CoreSpec
-declare const dtmSpec: DtmSpec
-declare const specsEnabled: SpecsEnabled
+declare const serviceSpecs: ${serviceSpecsType}
 \`\`\`
 
 Examples (all zero-parameter — note no arguments in the arrow function signatures):
-\`\`\`js
-() => specsEnabled
-\`\`\`
-
 \`\`\`js
 () => Object.keys(coreSpec.paths).filter((path) => path.includes('inventory'))
 \`\`\`
 
 \`\`\`js
 () => {
-  // dtmSpec is already in scope — do NOT write (dtmSpec) => { ... }
-  const op = dtmSpec.paths['/assets']?.get
+  const op = serviceSpecs['dtm']?.spec.paths['/service/dtm/assets']?.get
   return op?.parameters
 }
 \`\`\`
@@ -118,8 +112,7 @@ Use \`execute\` when you want to call the real Cumulocity API.
 - Return the value you want from that function; async functions are usually the right choice here
 - On success, the returned value is sent back in Toon format
 - If execution is blocked or fails, execute returns a plain text error message
-- The current MCP connection may reject restricted method/path combinations before network access, and it may also reject requests that are outside a configured allow list
-- If a request is blocked by MCP connection policy, \`execute\` returns an explanatory text message. That is an intentional connection-level access restriction, not a Cumulocity API failure, and retrying through the same connection will not help
+- If a request is blocked by MCP connection policy, \`execute\` returns an explanatory text message — that is an access restriction, not a Cumulocity API failure
 
 ### Available Shape
 \`\`\`ts
@@ -160,14 +153,14 @@ async () => {
 async () => {
   return await cumulocity.request({
     method: 'GET',
-    path: '/assets?pageSize=20',
+    path: '/service/dtm/assets?pageSize=20',
   })
 }
 \`\`\`
 
 ${getRuntimeSection()}
 
-${getOpenApiSection(server)}
+${getOpenApiSection()}
 
 ## Working Pattern
 1. Use \`query\` to find the right endpoint, parameters, and response shape.
