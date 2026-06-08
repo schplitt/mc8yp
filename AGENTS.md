@@ -47,6 +47,7 @@ src/
   types/
     mcp-context.ts            MCP custom context shape
   utils/
+    api-discovery.ts          Per-tenant live OpenAPI discovery with 30-min refresh cache
     auth.ts                   Authorization header parsing for server mode
     c8y-types.ts              Cumulocity-specific shared types
     client.ts                 Auth/header resolution for live requests
@@ -54,6 +55,7 @@ src/
     restriction-matcher.ts    Restriction compilation and path matching helpers
     restrictions.ts           Restriction parsing and query handling
     schema.ts                 Shared schema helpers
+    spec-resolution.ts        `resolveSpecs` plus the shared `Spec`/`PathItem`/`OperationInfo` types
 test/
   excute.test.ts
   restriction-core.test.ts
@@ -72,8 +74,8 @@ openapi-builds.json           Build matrix plus download URLs for bundled OpenAP
 scripts/
   cumulocity.mjs             Updates cumulocity.json metadata from package.json
   package-microservices.mjs  Builds versioned Docker-based Cumulocity release zips
-tsdown.config.ts              CLI/server build configuration plus the `#core-openapi` and `#dtm-openapi` virtual module plugins
-src/openapi-modules.d.ts      Ambient type declarations for both the `#core-openapi` and `#dtm-openapi` virtual modules
+tsdown.config.ts              CLI/server build configuration plus the `#core-openapi` and `#bundled-services` virtual module plugins
+src/openapi-modules.d.ts      Ambient type declarations for the `#core-openapi` and `#bundled-services` virtual modules
 ```
 
 ### Runtime Flow
@@ -114,24 +116,30 @@ src/openapi-modules.d.ts      Ambient type declarations for both the `#core-open
 
 ### Bundled OpenAPI Selection
 
-- Consumers import from the virtual modules `#core-openapi` and `#dtm-openapi`.
-- Both modules use the same module-local interface shape: `specs`, one active `get...Spec()`, one active `get...Version()`, one `set...Version()`, and one `get...Label()`.
-- The module bodies are synthesized by small tsdown plugins in `tsdown.config.ts`:
-  - For the CLI build the core plugin inlines all `openapi/core/*.json` snapshots and `setCoreOpenApiVersion` switches between them at runtime.
-  - For the CLI build the DTM plugin currently inlines the bundled `openapi/dtm/release.json` snapshot.
-  - For each server build, the plugins inline exactly the configured core+DTM combination for that build.
-- Types for both virtual modules live together in `src/openapi-modules.d.ts`; no `tsconfig.paths` entry is needed.
-- `openapi-builds.json` is the source of truth for both the download URLs used by `scripts/update-openapi.mjs` and the server build/package matrix used by `tsdown.config.ts` and `scripts/package-microservices.mjs`.
-- `tsdown.config.ts` emits one server bundle per supported build version into `.output/<version>/`.
-- `scripts/package-microservices.mjs` turns those built server outputs into one Docker-based zip per build, for example `mc8yp-core-2026-dtm-v2.x.x.zip`.
-- The packaging script writes a temporary generated Dockerfile under `.c8y/`, builds from the repository root, copies the selected `.output/<version>/` bundle into `/app/server/`, and installs production dependencies inside the Linux image with pnpm before copying them into the runtime stage.
-- The packaging script builds Docker images for `linux/amd64` by default so release zips created on Apple Silicon remain deployable in typical Cumulocity environments; override with `DOCKER_PLATFORM` only when you intentionally need a different target.
+There are exactly two virtual modules:
+
+- **`#core-openapi`** — the always-available core spec. Exports `specs`, `getCoreOpenApiSpec()`, `getCoreOpenApiVersion()`, `setCoreOpenApiVersion()`, `getCoreOpenApiLabel()`. Core is the only spec with a named sandbox binding (`coreSpec`).
+- **`#bundled-services`** — a generic registry of all bundled service-backed specs (DTM today). Exports `BUNDLED_SERVICE_SPECS: ReadonlyArray<BundledServiceSpec>` where each entry has `{ contextPath, appLabel, specLabel, servicePrefix, spec }`. The plugin loops every entry in `openapi-builds.json` `sources.*` that has a `servicePrefix` and inlines the resolved version for that build, with paths already rewritten via `rewriteSpecPaths`.
+
+Both modules return `Spec`-typed data (not `unknown`); the `Spec`/`PathItem`/`OperationInfo` types live in `src/utils/spec-resolution.ts` and are referenced from `src/openapi-modules.d.ts`.
+
+Build-time behaviour:
+
+- For the CLI build the core plugin inlines all `openapi/core/*.json` snapshots and `setCoreOpenApiVersion` switches between them at runtime. The bundled-services plugin inlines the `default` version of each service-backed source.
+- For each server build, the plugins inline exactly the configured core+services combination for that build, taken from `builds[].apis`.
+  - Types for both virtual modules live together in `src/openapi-modules.d.ts`; no `tsconfig.paths` entry is needed.
+  - `openapi-builds.json` is the source of truth for both the download URLs used by `scripts/update-openapi.mjs` and the server build/package matrix used by `tsdown.config.ts` and `scripts/package-microservices.mjs`.
+  - `tsdown.config.ts` emits one server bundle per supported build version into `.output/<version>/`.
+  - `scripts/package-microservices.mjs` turns those built server outputs into one Docker-based zip per build, for example `mc8yp-core-2026-dtm-v2.x.x.zip`.
+  - The packaging script writes a temporary generated Dockerfile under `.c8y/`, builds from the repository root, copies the selected `.output/<version>/` bundle into `/app/server/`, and installs production dependencies inside the Linux image with pnpm before copying them into the runtime stage.
+  - The packaging script builds Docker images for `linux/amd64` by default so release zips created on Apple Silicon remain deployable in typical Cumulocity environments; override with `DOCKER_PLATFORM` only when you intentionally need a different target.
 
 ### Query vs Execute
 
 - `query` expects a JavaScript function expression and returns strings directly or other values as JSON text.
-- `query` injects three deterministic top-level bindings into the sandbox: `coreSpec`, `dtmSpec`, and `specsEnabled`.
-- `coreSpec` is the main Cumulocity REST surface, `dtmSpec` is the Digital Twin Manager surface, and `specsEnabled` reports which spec families are enabled for execute policy.
+- `query` injects three deterministic top-level bindings into the sandbox: `coreSpec`, `serviceSpecs`, and `specsEnabled`.
+- `coreSpec` is the main Cumulocity REST surface (always present). `serviceSpecs` is a `Record<string, { label, contextPath, spec }>` keyed by contextPath; bundled service specs like DTM land here as `serviceSpecs.dtm` (only when actually available on the tenant). `specsEnabled` is `{ core: true, [contextPath]: true }` for every spec the sandbox can read.
+- An unavailable spec is **absent** from `serviceSpecs`/`specsEnabled`, not `null`. Agent code should check `specsEnabled.dtm` (or `serviceSpecs.dtm`) before reaching into a bundled-but-optional surface.
 - `execute` expects a JavaScript function expression and returns successful results in Toon format.
 - Visible operations remain raw OpenAPI data; blocked live requests fail before network access.
 
@@ -143,7 +151,7 @@ Restrictions and allow rules both use the format `[METHOD:]<path-pattern>`.
 - Allow rules are allow-list entries. When any allow rule exists, requests must match at least one allow rule unless a restriction blocks them first.
 - Restrictions take priority over allow rules.
 - In microservice mode, prefer the project-scoped `mc8yp-restriction` and `mc8yp-allow` headers for HTTP policy transport; repeated headers and comma-separated values are both accepted.
-- Auto-restriction rules for known bundled services not installed on the tenant are generated by `createServiceUnavailableRestrictionRules` in `src/utils/openapi.ts` and merged into `effectiveRestrictions` in `src/index.ts` before every request.
+- Bundled services that are not installed on the tenant are simply absent from `serviceSpecs` and `specsEnabled`. There is no pre-emptive auto-restriction layer — if an `execute` call ends up hitting an uninstalled service route, the Cumulocity API itself returns the failure and the sandbox propagates it. The connection-level restriction/allow policy is the only layer above that.
 
 The restriction system is implemented in two places:
 
@@ -214,8 +222,9 @@ pnpm prerelease    # lint + typecheck + build
 ### Practical editing guidance
 
 - If a change affects tool behavior, inspect both the tool definition and the codemode runtime.
-- If a change affects bundled OpenAPI selection, update the `#core-openapi` / `#dtm-openapi` plugins in `tsdown.config.ts`, the ambient declarations in `src/openapi-modules.d.ts`, and the source/build matrix in `openapi-builds.json`.
-- If you add a new bundled OpenAPI spec in the future: add `openapi/<name>/...` files, add a virtual module in `tsdown.config.ts` + its declaration in `src/openapi-modules.d.ts`, add one entry to `BUNDLED_SPEC_REGISTRY` in `src/utils/openapi.ts` with `contextPath`/`servicePrefix` if it is service-backed. That is all — `resolveAvailableSpecs`, `resolveServiceSpecs`, `buildQueryScript`, and the auto-restriction logic all handle new entries generically without further changes.
+- If a change affects bundled OpenAPI selection, update the `#core-openapi` / `#bundled-services` plugins in `tsdown.config.ts`, the ambient declarations in `src/openapi-modules.d.ts`, and the source/build matrix in `openapi-builds.json`.
+- If you add a new bundled **service-backed** OpenAPI spec in the future: drop the JSON under `openapi/<key>/<version>.json` and add one entry under `sources.<key>` in `openapi-builds.json` with a `servicePrefix` (e.g. `"servicePrefix": "/service/<key>"`). `bundledServicesPlugin` picks it up automatically; `resolveSpecs`, `buildQueryScript`, and the auto-restriction logic all handle new entries generically. No code edits required.
+- If you add a new always-available (non-service-backed) bundled spec like core: that needs a new virtual module wired into `tsdown.config.ts`, `src/openapi-modules.d.ts`, and a new named binding in `buildQueryScript`. This is a much bigger change and the bundled-services flow is _not_ the right place for it.
 - If a change affects restrictions or allow rules, verify both policy messaging and live request blocking.
 - If a change affects auth, verify the CLI and server paths separately.
 - If a change affects public MCP behavior, update `README.md` as well as this file.
@@ -253,7 +262,7 @@ When working on this project:
 1. Start from the actual controlling surface. For most feature work that is `src/tools/`, `src/prompts/`, `src/codemode/execute.ts`, or restriction/auth utilities.
 2. Treat CLI mode and microservice mode as separate execution environments with different auth and tool availability.
 3. Run focused tests first when changing a narrow subsystem, then run the full validation set if the change is broader. Use this exact validation order: `pnpm test:run`, then `pnpm lint:fix`, then `pnpm typecheck`.
-4. The `query` sandbox receives pre-resolved `availableSpecs` (from `resolveAvailableSpecs`) and `serviceSpecs` (from `resolveServiceSpecs`). In server mode these are computed per-request by the H3 handler. In CLI mode they are computed per tool call by `resolveQueryContext` in `src/tools/codemode.ts`. `buildQueryScript` is pure injection — no resolution logic belongs there.
+4. The `query` sandbox reads `ResolvedSpecs` (`{ core: Spec, specs: Record<string, Spec> }`) from `c8yMcpServer.ctx.custom?.specs`. In server mode it is computed per-request by the H3 handler via `resolveSpecs(discoveredSpecs, installedContextPaths, true)`. In CLI mode it is set on tenant activation by `setCliTenantContext` and falls back to `getCliInitialResolvedSpecs()` (bundled-only, respects `--no-spec-removal`) before any tenant is active. `buildQueryScript` is pure injection — no resolution logic belongs there.
 5. Keep public MCP tool and prompt descriptions aligned with actual runtime behavior.
 6. Preserve the current sandbox limits and request boundary logic unless the task explicitly changes them.
 7. Record recurring project-specific lessons in the section below when they are likely to prevent future mistakes.
@@ -279,8 +288,10 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 
 - `execute` uses a generated ESM module entry and reads the default export from sandbox execution.
 - `query` and `execute` accept function-expression style code and normalize fenced code input before evaluation.
-- `#core-openapi` and `#dtm-openapi` are virtual modules synthesized by tsdown plugins; consumers must not import the JSON snapshots directly.
-- The CLI build inlines all bundled core snapshots plus the bundled DTM snapshot; each server build inlines exactly the configured combination for that build.
+- `#core-openapi` and `#bundled-services` are virtual modules synthesized by tsdown plugins; consumers must not import the JSON snapshots directly.
+- The CLI build inlines all bundled core snapshots plus the default version of every service-backed source (currently DTM `release`); each server build inlines exactly the configured combination for that build.
+- Bundled service specs land in the query sandbox as `serviceSpecs[contextPath]`, alongside any non-bundled services discovered live on the tenant. Core is the only named binding (`coreSpec`).
+- `resolveSpecs` returns a single `{ core, specs }` object. An absent key in `specs` means the spec is unavailable for this tenant; there are no `null` values.
 - Server builds should not use `noExternal: [/^.*$/]`. The microservice bundle is allowed to depend on runtime `node_modules`, and the release image must install those dependencies inside the Linux image rather than copying host `node_modules` from macOS.
 - `scripts/package-microservices.mjs` intentionally targets `linux/amd64` by default to avoid Apple Silicon release images failing with `exec format error` in Cumulocity.
 - Restrictions and allow rules are both discoverability metadata and enforcement logic; both layers matter.
