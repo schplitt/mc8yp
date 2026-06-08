@@ -15,7 +15,6 @@ import {
   parseRestrictionRule,
 } from './utils/restrictions'
 import { Buffer } from 'node:buffer'
-import { BUNDLED_SERVICE_SPECS } from '#bundled-services'
 import { refreshApiSpecs, startDiscovery } from './utils/api-discovery'
 import { createC8yAuthHeaders } from './utils/client'
 import { resolveSpecs } from './utils/spec-resolution'
@@ -60,16 +59,6 @@ const app = new H3().all('/mcp', async (event) => {
   const discoveryResult = await startDiscovery(credentials.tenantUrl, createC8yAuthHeaders(credentials))
   const { specs: discoveredSpecs, installedContextPaths } = discoveryResult
 
-  // Auto-restrict execute access to bundled services not installed on this tenant.
-  const autoRestrictions = BUNDLED_SERVICE_SPECS
-    .filter((s) => !installedContextPaths.has(s.contextPath))
-    .map((s) => ({
-      type: 'deny' as const,
-      method: '*' as const,
-      pathPattern: `${s.servicePrefix}/**`,
-      source: `*:${s.servicePrefix}/**`,
-    }))
-
   // specRemoval=true: bundled service specs absent from this tenant collapse to null.
   const specs = resolveSpecs(discoveredSpecs, installedContextPaths, true)
 
@@ -102,12 +91,10 @@ const app = new H3().all('/mcp', async (event) => {
     })
   }
 
-  const effectiveRestrictions = autoRestrictions.length > 0 ? [...restrictions, ...autoRestrictions] : restrictions
-
   return transport.respond(event.req, {
     env: 'server' as const,
     auth: { tenantUrl: credentials.tenantUrl, authorizationHeader: credentials.authorizationHeader },
-    restrictions: effectiveRestrictions,
+    restrictions,
     allowRules: parsedAllowRules,
     specs,
   })
