@@ -1,8 +1,6 @@
 import { definePrompt } from 'tmcp/prompt'
 import { prompt } from 'tmcp/utils'
-import { getCoreOpenApiLabel } from '#core-openapi'
 import { c8yMcpServer } from '../server-instance'
-import { BUNDLED_OPENAPI_ENTRIES, BUNDLED_SPEC_REGISTRY } from '../utils/openapi'
 
 function getRuntimeSection(): string {
   return c8yMcpServer.ctx.custom?.env === 'cli'
@@ -11,7 +9,7 @@ function getRuntimeSection(): string {
 }
 
 function getOpenApiSection(): string {
-  return `## OpenAPI Specs\nThe query tool exposes the ${getCoreOpenApiLabel()} bundled core snapshot (${BUNDLED_OPENAPI_ENTRIES.map((entry) => `${entry.api} ${entry.version}`).join(', ')}) via \`coreSpec\`, and any microservice APIs discovered on the tenant via \`serviceSpecs\`.`
+  return `## OpenAPI Specs\nThe query tool exposes a bundled Cumulocity core snapshot via \`coreSpec\`, and any microservice APIs (bundled or live-discovered) available on the tenant via \`serviceSpecs\`.`
 }
 
 export function createCodeModeGuidePrompt() {
@@ -21,9 +19,8 @@ export function createCodeModeGuidePrompt() {
   }, () => {
     const restrictions = c8yMcpServer.ctx.custom?.restrictions ?? []
     const allowRules = c8yMcpServer.ctx.custom?.allowRules ?? []
-    const specs = c8yMcpServer.ctx.custom?.specs ?? {}
-    const bundledKeys = new Set(BUNDLED_SPEC_REGISTRY.map((e) => e.key))
-    const serviceKeys = Object.keys(specs).filter((k) => !bundledKeys.has(k) && specs[k] !== null)
+    const resolvedSpecs = c8yMcpServer.ctx.custom?.specs!
+    const serviceKeys = Object.keys(resolvedSpecs.specs)
     const serviceSpecsType = serviceKeys.length === 0
       ? 'Record<string, ServiceSpecEntry>'
       : `{\n${serviceKeys.map((k) => `  ${k}: ServiceSpecEntry`).join('\n')}\n}`

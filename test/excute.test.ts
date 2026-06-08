@@ -3,7 +3,7 @@
 import { encode } from '@toon-format/toon'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildExecutePrelude, buildExecuteScript, execute, query } from '../src/codemode/execute'
-import type { Specs } from '../src/utils/spec-resolution'
+import type { ResolvedSpecs } from '../src/utils/spec-resolution'
 import { resolveSpecs } from '../src/utils/spec-resolution'
 import { bustApiSpecCache, setCachedApiSpecs } from '../src/utils/api-discovery'
 import { c8yMcpServer } from '../src/server-instance'
@@ -405,42 +405,78 @@ describe('buildExecuteScript', () => {
 })
 
 describe('query', () => {
-  it('exposes coreSpec, specsEnabled, and serviceSpecs through the query sandbox', async () => {
-    const specs: Specs = { core: { paths: {} } }
-    const result = await query(
-      '() => ({ hasCore: !!coreSpec, hasSpecsEnabled: typeof specsEnabled === "object", hasServiceSpecs: typeof serviceSpecs === "object" })',
-      specs,
-    )
-    expect(JSON.parse(result)).toEqual({ hasCore: true, hasSpecsEnabled: true, hasServiceSpecs: true })
-  })
-
-  it('injects each bundled registry key as a named ${key}Spec binding', async () => {
-    const result = await query('() => ({ hasCore: !!coreSpec })', { core: { paths: {} } } satisfies Specs)
-    expect(JSON.parse(result)).toEqual({ hasCore: true })
-  })
-
-  it('injects null for bundled entries marked unavailable; specsEnabled reflects that', async () => {
-    const result = await query('() => ({ coreSpec, specsEnabled })', { core: null } satisfies Specs)
-    expect(JSON.parse(result)).toEqual({ coreSpec: null, specsEnabled: { core: false } })
-  })
-
-  it('reads specs from c8yMcpServer.ctx.custom when no specsOverride is passed', async () => {
-    // ctx is an AsyncLocalStorage-backed getter — mock it instead of mutating.
-    const mockSpecs = resolveSpecs([], new Set(), true)
+  /**
+   * Helper: stub the MCP context so buildQueryScript reads our specs.
+   * @param specs - The ResolvedSpecs to expose to the sandbox.
+   */
+  function withSpecs(specs: ResolvedSpecs): () => void {
     const ctxSpy = vi.spyOn(c8yMcpServer, 'ctx', 'get').mockReturnValue({
-      custom: { env: 'cli' as const, restrictions: [], allowRules: [], specs: mockSpecs },
+      custom: { env: 'cli' as const, restrictions: [], allowRules: [], specs },
     } as unknown as ReturnType<typeof c8yMcpServer['ctx']['valueOf']>)
+    return () => ctxSpy.mockRestore()
+  }
+
+  it('exposes coreSpec, specsEnabled, and serviceSpecs through the query sandbox', async () => {
+    const restore = withSpecs({ core: { paths: {} }, specs: {} })
+    try {
+      const result = await query(
+        '() => ({ hasCore: !!coreSpec, hasSpecsEnabled: typeof specsEnabled === "object", hasServiceSpecs: typeof serviceSpecs === "object" })',
+      )
+      expect(JSON.parse(result)).toEqual({ hasCore: true, hasSpecsEnabled: true, hasServiceSpecs: true })
+    } finally {
+      restore()
+    }
+  })
+
+  it('exposes core as the coreSpec binding', async () => {
+    const restore = withSpecs({ core: { paths: { '/inventory/managedObjects': {} } }, specs: {} })
+    try {
+      const result = await query('() => Object.keys(coreSpec.paths)')
+      expect(JSON.parse(result)).toEqual(['/inventory/managedObjects'])
+    } finally {
+      restore()
+    }
+  })
+
+  it('reads specs from c8yMcpServer.ctx.custom (no override path exists)', async () => {
+    const restore = withSpecs(resolveSpecs([], new Set(), true))
     try {
       const result = await query('() => typeof coreSpec !== "undefined"')
       expect(JSON.parse(result)).toBe(true)
     } finally {
-      ctxSpy.mockRestore()
+      restore()
     }
   })
 
-  it('puts non-bundled-registry entries into serviceSpecs', async () => {
-    const result = await query('() => Object.keys(serviceSpecs)', { core: { paths: {} }, svc: { paths: {} } } satisfies Specs)
-    expect(JSON.parse(result)).toEqual(['svc'])
+  it('puts service-map entries into serviceSpecs keyed by contextPath', async () => {
+    const restore = withSpecs({ core: { paths: {} }, specs: { svc: { paths: {} } } })
+    try {
+      const result = await query('() => Object.keys(serviceSpecs)')
+      expect(JSON.parse(result)).toEqual(['svc'])
+    } finally {
+      restore()
+    }
+  })
+
+  it('specsEnabled lists every available spec (core + serviceSpecs keys)', async () => {
+    const restore = withSpecs({ core: { paths: {} }, specs: { dtm: { paths: {} }, svc: { paths: {} } } })
+    try {
+      const result = await query('() => specsEnabled')
+      expect(JSON.parse(result)).toEqual({ core: true, dtm: true, svc: true })
+    } finally {
+      restore()
+    }
+  })
+
+  it('unavailable services are simply absent from serviceSpecs/specsEnabled', async () => {
+    // dtm not installed and specRemoval=true → dtm not in the resolved map at all.
+    const restore = withSpecs({ core: { paths: {} }, specs: {} })
+    try {
+      const result = await query('() => ({ keys: Object.keys(serviceSpecs), enabled: specsEnabled })')
+      expect(JSON.parse(result)).toEqual({ keys: [], enabled: { core: true } })
+    } finally {
+      restore()
+    }
   })
 })
 

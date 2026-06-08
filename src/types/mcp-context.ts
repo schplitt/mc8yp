@@ -1,4 +1,4 @@
-import type { Specs } from '../utils/spec-resolution'
+import type { ResolvedSpecs } from '../utils/spec-resolution'
 import type { AllowRule, RestrictionRule } from '../utils/restrictions'
 
 /**
@@ -17,11 +17,12 @@ export interface C8yMcpCustomContext extends Record<string, unknown> {
   restrictions: RestrictionRule[]
   allowRules: AllowRule[]
   /**
-   * Flat resolved spec map for the query sandbox (bundled + discovered, paths
-   * already prefixed). Always present — empty object until a tenant is activated
-   * in CLI mode; set per-request in server mode.
+   * Resolved specs for the query sandbox: always-available `core` plus a
+   * service-spec map keyed by contextPath (bundled service entries + any
+   * non-bundled discovered services). Paths are already prefixed.
+   * Set per-request in server mode; set on tenant activation in CLI mode.
    */
-  specs: Specs
+  specs: ResolvedSpecs
   /**
    * Tenant auth for the current connection.
    * Always set in server mode (per-request from the Authorization header).

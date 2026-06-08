@@ -2,7 +2,6 @@ import http from 'node:http'
 import { NodeRuntime, createNodeDriver, createNodeRuntimeDriverFactory } from 'secure-exec'
 import { describe, expect, it } from 'vitest'
 import { createNetworkPermissionDecision } from '../src/codemode/network-permissions'
-import { BUNDLED_OPENAPI_ENTRIES } from '../src/utils/openapi'
 import { findBlockingRestrictions, findMatchingRules } from '../src/utils/restriction-matcher'
 import {
   ALLOW_HEADER,
@@ -120,12 +119,6 @@ describe('allow parsing', () => {
         { rule: '', reason: 'Allow value must not be empty.' },
       ],
     })
-  })
-})
-
-describe('bundled openapi entries', () => {
-  it('core is the only bundled spec entry', () => {
-    expect(BUNDLED_OPENAPI_ENTRIES.map((e) => e.api)).toEqual(['core'])
   })
 })
 

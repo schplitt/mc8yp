@@ -15,7 +15,7 @@
 
 import { startDiscovery } from '../utils/api-discovery'
 import { createC8yAuthHeaders } from '../utils/client'
-import type { Specs } from '../utils/spec-resolution'
+import type { ResolvedSpecs } from '../utils/spec-resolution'
 import { resolveSpecs } from '../utils/spec-resolution'
 
 export interface CliTenantContext {
@@ -27,20 +27,10 @@ export interface CliTenantContext {
   /**
    * Fully resolved specs (bundled + discovered, paths pre-prefixed).
    */
-  specs: Specs
+  specs: ResolvedSpecs
 }
 
 let _context: CliTenantContext | null = null
-let _specRemoval: boolean = true
-
-/**
- * Configure the specRemoval setting used when resolving specs.
- * Call once at CLI startup before any tenant context is set.
- * @param specRemoval
- */
-export function configureSpecRemoval(specRemoval: boolean): void {
-  _specRemoval = specRemoval
-}
 
 /**
  * Return the current CLI tenant context, or null if none has been set.
@@ -56,8 +46,9 @@ export function getCliTenantContext(): CliTenantContext | null {
  * memory so subsequent tool calls can read it synchronously.
  *
  * @param tenantUrl - Base URL of the Cumulocity tenant to activate
+ * @param specRemoval - Whether to remove specs for services that are not installed on the tenant (true by default)
  */
-export async function setCliTenantContext(tenantUrl: string): Promise<CliTenantContext> {
+export async function setCliTenantContext(tenantUrl: string, specRemoval: boolean): Promise<CliTenantContext> {
   const creds = await globalThis._getCredentialsByTenantUrl(tenantUrl)
   const authHeaders = createC8yAuthHeaders(creds)
 
@@ -72,7 +63,7 @@ export async function setCliTenantContext(tenantUrl: string): Promise<CliTenantC
   _context = {
     tenantUrl,
     authorizationHeader: authHeaders.Authorization!,
-    specs: resolveSpecs(discovered, installedContextPaths, _specRemoval),
+    specs: resolveSpecs(discovered, installedContextPaths, specRemoval),
   }
 
   return _context

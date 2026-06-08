@@ -4,66 +4,71 @@ import { resolveSpecs } from '../src/utils/spec-resolution'
 
 const EMPTY_INSTALLED = new Set<string>()
 
-function makeDiscovered(contextPath: string, spec: object = {}): DiscoveredApiSpec {
+function makeDiscovered(contextPath: string, spec: object = { paths: {} }): DiscoveredApiSpec {
   return { contextPath, appLabel: contextPath, specLabel: contextPath, servicePrefix: `/service/${contextPath}`, spec }
 }
 
 // ---------------------------------------------------------------------------
-// resolveSpecs — flat unified map (bundled + discovered services)
+// resolveSpecs — { core, specs } shape, "absent key = unavailable" semantics
 // ---------------------------------------------------------------------------
 
-describe('resolveSpecs — core (always-available, no contextPath)', () => {
-  it('always includes core regardless of discovery results or specRemoval', () => {
-    const result = resolveSpecs([], EMPTY_INSTALLED, true)
-    expect(result.core).not.toBeNull()
-    expect(result.core).not.toBeUndefined()
-    expect(result.core).toBeTruthy()
-  })
-
-  it('core is always true in specsEnabled (derived by buildQueryScript)', () => {
-    const result = resolveSpecs([], EMPTY_INSTALLED, true)
-    expect(result.core !== null).toBe(true)
+describe('resolveSpecs — core', () => {
+  it('core is always populated regardless of discovery results or specRemoval', () => {
+    const a = resolveSpecs([], EMPTY_INSTALLED, true)
+    const b = resolveSpecs([], EMPTY_INSTALLED, false)
+    expect(a.core).toBeTruthy()
+    expect(b.core).toBeTruthy()
+    expect(a.core).toEqual(b.core)
   })
 })
 
-describe('resolveSpecs — output shape', () => {
-  it('only bundled keys when no services discovered', () => {
-    const result = resolveSpecs([], EMPTY_INSTALLED, true)
-    expect(Object.keys(result)).toEqual(['core'])
+describe('resolveSpecs — service map (bundled + discovered)', () => {
+  it('omits absent bundled services from the map when specRemoval=true', () => {
+    const { specs } = resolveSpecs([], EMPTY_INSTALLED, true)
+    expect(specs.dtm).toBeUndefined()
+    expect(Object.hasOwn(specs, 'dtm')).toBe(false)
   })
 
   it('adds non-bundled discovered services as additional flat entries', () => {
     const discovered = [makeDiscovered('svcA'), makeDiscovered('svcB')]
-    const result = resolveSpecs(discovered, new Set(['svcA', 'svcB']), true)
-    expect(Object.keys(result).sort()).toEqual(['core', 'svcA', 'svcB'])
-    expect(result.svcA).not.toBeNull()
-    expect(result.svcB).not.toBeNull()
+    const { specs } = resolveSpecs(discovered, new Set(['svcA', 'svcB']), true)
+    expect(specs.svcA).toBeTruthy()
+    expect(specs.svcB).toBeTruthy()
+    expect(Object.keys(specs).sort()).toEqual(['svcA', 'svcB'])
   })
 
   it('non-bundled service entry value is the spec object directly', () => {
     const spec = { paths: { '/items': {} } }
-    const discovered = [makeDiscovered('myservice', spec)]
-    const result = resolveSpecs(discovered, new Set(['myservice']), true)
-    expect(result.myservice).toEqual(spec)
-  })
-
-  it('core always present even with service discoveries', () => {
-    const discovered = [makeDiscovered('svc')]
-    const result = resolveSpecs(discovered, new Set(['svc']), true)
-    expect(result.core).toBeTruthy()
+    const { specs } = resolveSpecs([makeDiscovered('myservice', spec)], new Set(['myservice']), true)
+    expect(specs.myservice).toEqual(spec)
   })
 })
 
-describe('resolveSpecs — service-backed bundled entries (e.g. dtm once added)', () => {
-  it('specRemoval flag does not affect core (no contextPath = always present)', () => {
-    const withRemoval = resolveSpecs([], EMPTY_INSTALLED, true)
-    const withoutRemoval = resolveSpecs([], EMPTY_INSTALLED, false)
-    expect(withRemoval.core).toEqual(withoutRemoval.core)
+describe('resolveSpecs — dtm (bundled service spec)', () => {
+  it('absent when not installed and specRemoval=true', () => {
+    const { specs } = resolveSpecs([], EMPTY_INSTALLED, true)
+    expect(specs.dtm).toBeUndefined()
   })
 
-  it('non-bundled discovered services are included regardless of specRemoval', () => {
-    const discovered = [makeDiscovered('ext')]
-    const result = resolveSpecs(discovered, new Set(['ext']), true)
-    expect(result.ext).not.toBeNull()
+  it('bundled spec present when not installed and specRemoval=false', () => {
+    const { specs } = resolveSpecs([], EMPTY_INSTALLED, false)
+    expect(specs.dtm).toBeTruthy()
+  })
+
+  it('live discovered spec wins when service is installed and a live spec was found', () => {
+    const liveSpec = { paths: { '/service/dtm/assets': {} } }
+    const { specs } = resolveSpecs([makeDiscovered('dtm', liveSpec)], new Set(['dtm']), true)
+    expect(specs.dtm).toEqual(liveSpec)
+  })
+
+  it('bundled fallback when installed but no live spec', () => {
+    const { specs } = resolveSpecs([], new Set(['dtm']), true)
+    expect(specs.dtm).toBeTruthy()
+  })
+
+  it('dtm with live spec is not duplicated as a non-bundled entry', () => {
+    const liveSpec = { paths: { '/service/dtm/assets': {} } }
+    const { specs } = resolveSpecs([makeDiscovered('dtm', liveSpec)], new Set(['dtm']), true)
+    expect(Object.keys(specs).filter((k) => k === 'dtm')).toHaveLength(1)
   })
 })

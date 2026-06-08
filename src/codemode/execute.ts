@@ -4,8 +4,6 @@ import { AsyncSemaphore } from './semaphore'
 import { createNetworkPermissionDecision } from './network-permissions'
 import { createC8yAuthHeaders, resolveC8yAuth } from '../utils/client'
 import { c8yMcpServer } from '../server-instance'
-import type { Specs } from '../utils/spec-resolution'
-import { BUNDLED_SPEC_REGISTRY } from '../utils/openapi'
 import {
   compileRestrictionRule,
   compileRestrictionSegment,
@@ -15,6 +13,7 @@ import {
 } from '../utils/restriction-matcher'
 import { HTTP_METHODS } from '../utils/restrictions'
 import type { AllowRule, RestrictionRule } from '../utils/restrictions'
+import type { Spec } from '../utils/spec-resolution'
 
 const NO_DEFAULT_EXPORT_MESSAGE = 'Execution completed without returning a value.'
 const QUERY_ENTRY_PATH = '/codemode-query.mjs'
@@ -97,29 +96,24 @@ function normalizeCode(functionCode: string): string {
   return normalized
 }
 
-function buildQueryScript(sourceCode: string, specsOverride?: Specs): string {
+function buildQueryScript(sourceCode: string): string {
   const functionExpression = normalizeCode(sourceCode)
-  // Read specs from the server context; tests may pass a direct override.
-  const specs = specsOverride ?? c8yMcpServer.ctx.custom?.specs ?? {}
+  const resolved = c8yMcpServer.ctx.custom?.specs!
+  const core = resolved.core
+  const serviceMap = resolved.specs
 
-  // Bundled registry keys get individual named bindings (coreSpec, dtmSpec…)
-  // and contribute to specsEnabled. Everything else goes into serviceSpecs.
-  const bundledKeys = new Set(BUNDLED_SPEC_REGISTRY.map((e) => e.key))
-  const specBindings: string[] = []
-  const specsEnabled: Record<string, boolean> = {}
-  const serviceSpecsMap: Record<string, { label: string, contextPath: string, spec: unknown }> = {}
-
-  for (const [key, spec] of Object.entries(specs)) {
-    if (bundledKeys.has(key)) {
-      specBindings.push(`const ${key}Spec = ${JSON.stringify(spec)};`)
-      specsEnabled[key] = spec !== null
-    } else if (spec !== null) {
-      serviceSpecsMap[key] = { label: key, contextPath: key, spec }
-    }
+  // coreSpec is the only named binding. Every other spec lands in serviceSpecs
+  // keyed by contextPath. specsEnabled reports availability for all of them so
+  // agent code can check before reading any optional spec.
+  const specsEnabled: Record<string, boolean> = { core: true }
+  const serviceSpecsMap: Record<string, { label: string, contextPath: string, spec: Spec }> = {}
+  for (const [contextPath, spec] of Object.entries(serviceMap)) {
+    specsEnabled[contextPath] = true
+    serviceSpecsMap[contextPath] = { label: contextPath, contextPath, spec }
   }
 
   return [
-    ...specBindings,
+    `const coreSpec = ${JSON.stringify(core)};`,
     `const specsEnabled = ${JSON.stringify(specsEnabled)};`,
     `const serviceSpecs = ${JSON.stringify(serviceSpecsMap)};`,
     `const __mc8ypQuery = (${functionExpression});`,
@@ -393,8 +387,8 @@ async function runModule(code: string, entryPath: string, runtime: NodeRuntime):
   }
 }
 
-export async function query(functionCode: string, specsOverride?: Specs): Promise<string> {
-  const result = await runQueryScript(buildQueryScript(functionCode, specsOverride))
+export async function query(functionCode: string): Promise<string> {
+  const result = await runQueryScript(buildQueryScript(functionCode))
   return typeof result === 'string' ? result : JSON.stringify(result)
 }
 

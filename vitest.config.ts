@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config'
-import { coreOpenApiPlugin } from './tsdown.config'
+import { bundledServicesPlugin, coreOpenApiPlugin } from './tsdown.config'
 
 export default defineConfig({
-  plugins: [coreOpenApiPlugin({ mode: 'cli' })],
+  plugins: [coreOpenApiPlugin({ mode: 'cli' }), bundledServicesPlugin({ mode: 'cli' })],
 })
