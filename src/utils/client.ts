@@ -5,38 +5,26 @@
 
 import { Buffer } from 'node:buffer'
 import { Client } from '@c8y/client'
-import type { AuthContext, C8yAuth } from './credentials'
-import { useAuth } from '../ctx/auth'
-import * as v from 'valibot'
+import type { C8yAuth } from './credentials'
+import { c8yMcpServer } from '../server-instance'
+import type { RequestAuth } from '../types/mcp-context'
 
-const tenantUrlSchema = v.object({
-  tenantUrl: v.string(),
-})
+export type { RequestAuth }
 
-export async function resolveC8yAuth(input: unknown): Promise<C8yAuth | AuthContext>
-export async function resolveC8yAuth(): Promise<C8yAuth | AuthContext>
-export async function resolveC8yAuth(input?: unknown): Promise<C8yAuth | AuthContext> {
-  const executionEnvironment = globalThis.executionEnvironment
-
-  if (executionEnvironment === 'server') {
-    const auth = useAuth()
-
-    if (!auth) {
-      throw new Error('No authentication context available')
-    }
-
-    return auth
+export async function resolveC8yAuth(): Promise<C8yAuth | RequestAuth> {
+  const custom = c8yMcpServer.ctx.custom
+  const auth = custom?.auth
+  if (!auth) {
+    throw new Error(
+      custom?.env === 'cli'
+        ? 'No active tenant set. Call the set-active-tenant tool with your Cumulocity tenant URL first.'
+        : 'No tenant context available. This is a server configuration issue — the MCP connection is missing required auth context.',
+    )
   }
-
-  const parsed = v.safeParse(tenantUrlSchema, input)
-  if (!parsed.success) {
-    throw new Error('tenantUrl is required in CLI mode')
-  }
-
-  return globalThis._getCredentialsByTenantUrl(parsed.output.tenantUrl)
+  return auth
 }
 
-export function createC8yAuthHeaders(auth: C8yAuth | AuthContext): Record<string, string> {
+export function createC8yAuthHeaders(auth: C8yAuth | RequestAuth): Record<string, string> {
   if ('authorizationHeader' in auth) {
     return {
       Authorization: auth.authorizationHeader,
@@ -63,13 +51,10 @@ export function createC8yAuthHeaders(auth: C8yAuth | AuthContext): Record<string
  * Get an authenticated Cumulocity client.
  * In CLI mode, tenantUrl is required and credentials are fetched from keystore.
  * In server mode, credentials are extracted from the auth context.
- * @param input - Optional input containing tenantUrl (required only in CLI mode)
  * @returns Authenticated Cumulocity client instance
  */
-export async function getAuthenticatedClient(input: unknown): Promise<Client>
-export async function getAuthenticatedClient(): Promise<Client>
-export async function getAuthenticatedClient(input?: unknown): Promise<Client> {
-  const auth = await resolveC8yAuth(input)
+export async function getAuthenticatedClient(): Promise<Client> {
+  const auth = await resolveC8yAuth() as C8yAuth
 
   if ('token' in auth && auth.token) {
     const client = await Client.authenticate({

@@ -4,7 +4,8 @@ import { AsyncSemaphore } from './semaphore'
 import { createNetworkPermissionDecision } from './network-permissions'
 import { createC8yAuthHeaders, resolveC8yAuth } from '../utils/client'
 import { c8yMcpServer } from '../server-instance'
-import type { DiscoveredApiSpec } from '../utils/api-discovery'
+import type { Specs } from '../utils/spec-resolution'
+import { BUNDLED_SPEC_REGISTRY } from '../utils/openapi'
 import {
   compileRestrictionRule,
   compileRestrictionSegment,
@@ -12,17 +13,8 @@ import {
   matchCompiledSegments,
   matchesCompiledRule,
 } from '../utils/restriction-matcher'
-import { BUNDLED_OPENAPI_SPECS } from '../utils/openapi'
 import { HTTP_METHODS } from '../utils/restrictions'
 import type { AllowRule, RestrictionRule } from '../utils/restrictions'
-
-function getContextRestrictions(): readonly RestrictionRule[] {
-  return c8yMcpServer.ctx.custom?.restrictions ?? []
-}
-
-function getContextAllowRules(): readonly AllowRule[] {
-  return c8yMcpServer.ctx.custom?.allowRules ?? []
-}
 
 const NO_DEFAULT_EXPORT_MESSAGE = 'Execution completed without returning a value.'
 const QUERY_ENTRY_PATH = '/codemode-query.mjs'
@@ -105,19 +97,30 @@ function normalizeCode(functionCode: string): string {
   return normalized
 }
 
-function buildQueryScript(sourceCode: string, discoveredSpecs?: readonly DiscoveredApiSpec[]): string {
+function buildQueryScript(sourceCode: string, specsOverride?: Specs): string {
   const functionExpression = normalizeCode(sourceCode)
+  // Read specs from the server context; tests may pass a direct override.
+  const specs = specsOverride ?? c8yMcpServer.ctx.custom?.specs ?? {}
 
-  // Server mode: read from per-request context (set by H3 handler).
-  // CLI mode: caller resolves the right tenant's specs and passes them in.
-  const resolvedSpecs = discoveredSpecs ?? c8yMcpServer.ctx.custom?.discoveredSpecs ?? []
+  // Bundled registry keys get individual named bindings (coreSpec, dtmSpec…)
+  // and contribute to specsEnabled. Everything else goes into serviceSpecs.
+  const bundledKeys = new Set(BUNDLED_SPEC_REGISTRY.map((e) => e.key))
+  const specBindings: string[] = []
+  const specsEnabled: Record<string, boolean> = {}
   const serviceSpecsMap: Record<string, { label: string, contextPath: string, spec: unknown }> = {}
-  for (const ds of resolvedSpecs) {
-    serviceSpecsMap[ds.contextPath] = { label: ds.specLabel, contextPath: ds.contextPath, spec: ds.spec }
+
+  for (const [key, spec] of Object.entries(specs)) {
+    if (bundledKeys.has(key)) {
+      specBindings.push(`const ${key}Spec = ${JSON.stringify(spec)};`)
+      specsEnabled[key] = spec !== null
+    } else if (spec !== null) {
+      serviceSpecsMap[key] = { label: key, contextPath: key, spec }
+    }
   }
 
   return [
-    `const coreSpec = ${JSON.stringify(BUNDLED_OPENAPI_SPECS.core)};`,
+    ...specBindings,
+    `const specsEnabled = ${JSON.stringify(specsEnabled)};`,
     `const serviceSpecs = ${JSON.stringify(serviceSpecsMap)};`,
     `const __mc8ypQuery = (${functionExpression});`,
     '',
@@ -390,19 +393,16 @@ async function runModule(code: string, entryPath: string, runtime: NodeRuntime):
   }
 }
 
-export async function query(functionCode: string, discoveredSpecs?: readonly DiscoveredApiSpec[]): Promise<string> {
-  const result = await runQueryScript(buildQueryScript(functionCode, discoveredSpecs))
+export async function query(functionCode: string, specsOverride?: Specs): Promise<string> {
+  const result = await runQueryScript(buildQueryScript(functionCode, specsOverride))
   return typeof result === 'string' ? result : JSON.stringify(result)
 }
 
-export async function execute(
-  functionCode: string,
-  input?: unknown,
-): Promise<string> {
-  const auth = await resolveC8yAuth(input)
+export async function execute(functionCode: string): Promise<string> {
+  const auth = await resolveC8yAuth()
   const authHeaders = createC8yAuthHeaders(auth)
-  const restrictions = getContextRestrictions()
-  const allowRules = getContextAllowRules()
+  const restrictions = c8yMcpServer.ctx.custom?.restrictions ?? []
+  const allowRules = c8yMcpServer.ctx.custom?.allowRules ?? []
 
   const result = await runExecuteScript(
     buildExecuteScript(functionCode, auth.tenantUrl, authHeaders, restrictions, allowRules),

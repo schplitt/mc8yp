@@ -7,5 +7,4 @@ import type {
 declare global {
   var _getStoredC8yAuth: typeof getStoredC8yAuth
   var _getCredentialsByTenantUrl: typeof getCredentialsByTenantUrl
-  var executionEnvironment: 'cli' | 'server'
 }

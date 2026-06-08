@@ -2,12 +2,11 @@ import { definePrompt } from 'tmcp/prompt'
 import { prompt } from 'tmcp/utils'
 import { getCoreOpenApiLabel } from '#core-openapi'
 import { c8yMcpServer } from '../server-instance'
-import { getAllReadySpecs } from '../utils/api-discovery'
-import { BUNDLED_OPENAPI_ENTRIES } from '../utils/openapi'
+import { BUNDLED_OPENAPI_ENTRIES, BUNDLED_SPEC_REGISTRY } from '../utils/openapi'
 
 function getRuntimeSection(): string {
-  return globalThis.executionEnvironment === 'cli'
-    ? '## CLI Runtime\nUse `list-credentials` to see available tenants when needed. Then pass the chosen `tenantUrl` to `execute`.'
+  return c8yMcpServer.ctx.custom?.env === 'cli'
+    ? '## CLI Runtime\nUse `list-credentials` to see stored tenant URLs. Use `set-active-tenant` to connect to a tenant. Once set, query and execute use that tenant automatically.'
     : '## Server Runtime\nThis deployed MCP server uses the current tenant and the service user attached to this MCP connection. Do not pass tenant-specific credentials or tenant URLs yourself.'
 }
 
@@ -22,12 +21,12 @@ export function createCodeModeGuidePrompt() {
   }, () => {
     const restrictions = c8yMcpServer.ctx.custom?.restrictions ?? []
     const allowRules = c8yMcpServer.ctx.custom?.allowRules ?? []
-    const discoveredSpecs = globalThis.executionEnvironment === 'cli'
-      ? getAllReadySpecs()
-      : (c8yMcpServer.ctx.custom?.discoveredSpecs ?? [])
-    const serviceSpecsType = discoveredSpecs.length === 0
+    const specs = c8yMcpServer.ctx.custom?.specs ?? {}
+    const bundledKeys = new Set(BUNDLED_SPEC_REGISTRY.map((e) => e.key))
+    const serviceKeys = Object.keys(specs).filter((k) => !bundledKeys.has(k) && specs[k] !== null)
+    const serviceSpecsType = serviceKeys.length === 0
       ? 'Record<string, ServiceSpecEntry>'
-      : `{\n${discoveredSpecs.map((ds) => `  ${ds.contextPath}: ServiceSpecEntry`).join('\n')}\n}`
+      : `{\n${serviceKeys.map((k) => `  ${k}: ServiceSpecEntry`).join('\n')}\n}`
     const policyLines = [
       ...restrictions.map((rule) => `- deny: \`${rule.source}\``),
       ...allowRules.map((rule) => `- allow: \`${rule.source}\``),
@@ -76,17 +75,19 @@ type PathItem = {
   delete?: OperationInfo
 }
 
-type CoreSpec = {
+type Spec = {
   paths: Record<string, PathItem>
+  tags?: Array<{ name: string, description?: string }>
 }
 
 type ServiceSpecEntry = {
   label: string
   contextPath: string
-  spec: { paths: Record<string, PathItem> }
+  spec: Spec
 }
 
-declare const coreSpec: CoreSpec
+declare const coreSpec: Spec
+declare const specsEnabled: Record<string, boolean>
 declare const serviceSpecs: ${serviceSpecsType}
 \`\`\`
 
