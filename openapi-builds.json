@@ -1,6 +1,6 @@
 {
-  "sources": {
-    "core": [
+  "core": {
+    "versions": [
       {
         "version": "release",
         "label": "release (latest)",
@@ -24,39 +24,35 @@
       }
     ]
   },
+  "services": [
+    {
+      "key": "dtm",
+      "label": "Digital Twin Manager",
+      "url": "https://cumulocity.com/api/dtm/dist/c8y-dtm-oas.json",
+      "servicePrefix": "/service/dtm"
+    }
+  ],
   "builds": [
     {
       "version": "release",
       "label": "release (latest)",
-      "artifact": "core-release",
-      "default": true,
-      "apis": {
-        "core": "release"
-      }
+      "core": "release",
+      "default": true
     },
     {
       "version": "2026",
       "label": "2026",
-      "artifact": "core-2026",
-      "apis": {
-        "core": "2026"
-      }
+      "core": "2026"
     },
     {
       "version": "2025",
       "label": "2025",
-      "artifact": "core-2025",
-      "apis": {
-        "core": "2025"
-      }
+      "core": "2025"
     },
     {
       "version": "2024",
       "label": "2024",
-      "artifact": "core-2024",
-      "apis": {
-        "core": "2024"
-      }
+      "core": "2024"
     }
   ]
 }

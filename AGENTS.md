@@ -66,14 +66,15 @@ openapi/
     2026.json                Bundled 2026 Cumulocity core OpenAPI snapshot
     2025.json                Bundled 2025 Cumulocity core OpenAPI snapshot
     2024.json                Bundled 2024 Cumulocity core OpenAPI snapshot
-  dtm/
-    release.json             Bundled latest Cumulocity DTM OpenAPI snapshot
-openapi-builds.json           Build matrix plus download URLs for bundled OpenAPI sources
+  services/
+    dtm.json                 Bundled Digital Twin Manager spec (one file per service)
+openapi-builds.json           Single source of truth: core versions, bundled services, build matrix
 scripts/
   cumulocity.mjs             Updates cumulocity.json metadata from package.json
+  update-openapi.mjs         Fetches all bundled OpenAPI specs from upstream
   package-microservices.mjs  Builds versioned Docker-based Cumulocity release zips
-tsdown.config.ts              CLI/server build configuration plus the `#core-openapi` and `#dtm-openapi` virtual module plugins
-src/openapi-modules.d.ts      Ambient type declarations for both the `#core-openapi` and `#dtm-openapi` virtual modules
+tsdown.config.ts              CLI/server build config + two virtual module plugins: `#core-openapi` (versioned, switchable) and `#bundled-services` (generic, derived from openapi-builds.json#services)
+src/openapi-modules.d.ts      Ambient type declarations for the virtual modules
 ```
 
 ### Runtime Flow
@@ -98,7 +99,7 @@ src/openapi-modules.d.ts      Ambient type declarations for both the `#core-open
 #### Shared MCP surface
 
 - `src/server.ts` creates the MCP server, registers tools and prompts, and conditionally enables `list-credentials` only in CLI mode.
-- `openapi/core/` and `openapi/dtm/` contain the bundled OpenAPI snapshots consumed by the build.
+- `openapi/core/` holds versioned core snapshots; `openapi/services/` holds one snapshot per bundled microservice (e.g. `dtm.json`).
 - `src/tools/codemode.ts` defines the `query` and `execute` tools.
 - `src/prompts/codemode.ts` defines the `code-mode-guide` prompt.
 
@@ -114,24 +115,24 @@ src/openapi-modules.d.ts      Ambient type declarations for both the `#core-open
 
 ### Bundled OpenAPI Selection
 
-- Consumers import from the virtual modules `#core-openapi` and `#dtm-openapi`.
+- Consumers import from two virtual modules: `#core-openapi` (versioned, switchable in CLI mode) and `#bundled-services` (generic, exports `BUNDLED_SERVICE_SPECS: DiscoveredApiSpec[]` synthesised from every entry under `openapi-builds.json#services`).
 - Both modules use the same module-local interface shape: `specs`, one active `get...Spec()`, one active `get...Version()`, one `set...Version()`, and one `get...Label()`.
 - The module bodies are synthesized by small tsdown plugins in `tsdown.config.ts`:
   - For the CLI build the core plugin inlines all `openapi/core/*.json` snapshots and `setCoreOpenApiVersion` switches between them at runtime.
-  - For the CLI build the DTM plugin currently inlines the bundled `openapi/dtm/release.json` snapshot.
-  - For each server build, the plugins inline exactly the configured core+DTM combination for that build.
+  - The `#bundled-services` plugin reads every `openapi/services/<key>.json` and emits them in the same `DiscoveredApiSpec` shape that live discovery produces (paths already prefixed with `servicePrefix` at build time). Identical content in CLI and server builds — bundled services have no version axis.
+  - For each server build, the core plugin inlines only the configured core version; bundled services are always inlined as-is.
 - Types for both virtual modules live together in `src/openapi-modules.d.ts`; no `tsconfig.paths` entry is needed.
 - `openapi-builds.json` is the source of truth for both the download URLs used by `scripts/update-openapi.mjs` and the server build/package matrix used by `tsdown.config.ts` and `scripts/package-microservices.mjs`.
 - `tsdown.config.ts` emits one server bundle per supported build version into `.output/<version>/`.
-- `scripts/package-microservices.mjs` turns those built server outputs into one Docker-based zip per build, for example `mc8yp-core-2026-dtm-v2.x.x.zip`.
+- `scripts/package-microservices.mjs` turns those built server outputs into one Docker-based zip per build. The artifact name is computed: `core-<coreVersion>` plus each bundled service key (sorted) appended, e.g. `mc8yp-core-2026-dtm-v2.x.x.zip`.
 - The packaging script writes a temporary generated Dockerfile under `.c8y/`, builds from the repository root, copies the selected `.output/<version>/` bundle into `/app/server/`, and installs production dependencies inside the Linux image with pnpm before copying them into the runtime stage.
 - The packaging script builds Docker images for `linux/amd64` by default so release zips created on Apple Silicon remain deployable in typical Cumulocity environments; override with `DOCKER_PLATFORM` only when you intentionally need a different target.
 
 ### Query vs Execute
 
 - `query` expects a JavaScript function expression and returns strings directly or other values as JSON text.
-- `query` injects three deterministic top-level bindings into the sandbox: `coreSpec`, `dtmSpec`, and `specsEnabled`.
-- `coreSpec` is the main Cumulocity REST surface, `dtmSpec` is the Digital Twin Manager surface, and `specsEnabled` reports which spec families are enabled for execute policy.
+- `query` injects three top-level bindings into the sandbox: `coreSpec`, `specsEnabled`, and `serviceSpecs`. `core` is the only spec with a named binding — everything else (bundled service specs like DTM and live-discovered services) lives in `serviceSpecs` keyed by contextPath.
+- `specsEnabled` reports per-bundled-service availability on the current tenant. `specsEnabled.dtm === false` means execute calls to `/service/dtm/**` will be blocked by auto-restriction (even when `--no-spec-removal` keeps the bundled spec visible for reference).
 - `execute` expects a JavaScript function expression and returns successful results in Toon format.
 - Visible operations remain raw OpenAPI data; blocked live requests fail before network access.
 
@@ -198,7 +199,7 @@ pnpm prerelease    # lint + typecheck + build
 - `tsdown.config.ts` builds the CLI bundle into `dist/`
 - Server bundles intentionally keep runtime dependencies external.
 - Release zip artifacts are created in the repository root by `pnpm package:microservices`
-- `pnpm package:microservices` names artifacts from the bundled API combination, for example `mc8yp-core-2026-dtm-v2.x.x.zip`.
+- `pnpm package:microservices` computes artifact names from each build's `core` version plus every entry in `openapi-builds.json#services` (sorted), e.g. `mc8yp-core-2026-dtm-v2.x.x.zip`.
 - `pnpm package:microservices` uses a temporary `.c8y/` staging directory, deletes old root `*.zip` artifacts before creating fresh ones, installs production dependencies inside a Linux Docker build so platform-specific optional native packages resolve correctly, and builds `linux/amd64` images unless `DOCKER_PLATFORM` is set explicitly.
 
 ## Code Style And Conventions
@@ -214,8 +215,8 @@ pnpm prerelease    # lint + typecheck + build
 ### Practical editing guidance
 
 - If a change affects tool behavior, inspect both the tool definition and the codemode runtime.
-- If a change affects bundled OpenAPI selection, update the `#core-openapi` / `#dtm-openapi` plugins in `tsdown.config.ts`, the ambient declarations in `src/openapi-modules.d.ts`, and the source/build matrix in `openapi-builds.json`.
-- If you add a new bundled OpenAPI spec in the future: add `openapi/<name>/...` files, add a virtual module in `tsdown.config.ts` + its declaration in `src/openapi-modules.d.ts`, add one entry to `BUNDLED_SPEC_REGISTRY` in `src/utils/openapi.ts` with `contextPath`/`servicePrefix` if it is service-backed. That is all — `resolveAvailableSpecs`, `resolveServiceSpecs`, `buildQueryScript`, and the auto-restriction logic all handle new entries generically without further changes.
+- If a change affects bundled OpenAPI selection or the core build matrix, update `openapi-builds.json` and the `#core-openapi` plugin in `tsdown.config.ts` only. Service-backed bundled specs do not need plugin or registry edits.
+- **Adding a new bundled service spec:** drop the JSON at `openapi/services/<key>.json` (or wait for the nightly action), then add **one** entry to `openapi-builds.json#services`: `{ key, label, url, servicePrefix }`. That is all. The `#bundled-services` plugin loops services generically, `resolveSpecs` handles the A/B/C resolution against discovery, and auto-restrictions fire automatically when the service is absent. **No code changes anywhere in `src/`.**
 - If a change affects restrictions or allow rules, verify both policy messaging and live request blocking.
 - If a change affects auth, verify the CLI and server paths separately.
 - If a change affects public MCP behavior, update `README.md` as well as this file.
@@ -253,7 +254,7 @@ When working on this project:
 1. Start from the actual controlling surface. For most feature work that is `src/tools/`, `src/prompts/`, `src/codemode/execute.ts`, or restriction/auth utilities.
 2. Treat CLI mode and microservice mode as separate execution environments with different auth and tool availability.
 3. Run focused tests first when changing a narrow subsystem, then run the full validation set if the change is broader. Use this exact validation order: `pnpm test:run`, then `pnpm lint:fix`, then `pnpm typecheck`.
-4. The `query` sandbox receives pre-resolved `availableSpecs` (from `resolveAvailableSpecs`) and `serviceSpecs` (from `resolveServiceSpecs`). In server mode these are computed per-request by the H3 handler. In CLI mode they are computed per tool call by `resolveQueryContext` in `src/tools/codemode.ts`. `buildQueryScript` is pure injection — no resolution logic belongs there.
+4. The `query` sandbox receives pre-resolved `specs` and `specsEnabled` from `resolveSpecs` in `src/utils/spec-resolution.ts`. Server mode computes these per-request in the H3 handler. CLI mode computes them in `setCliTenantContext` (CLI singleton) when the active tenant is set or switched. `buildQueryScript` is pure injection — no resolution logic belongs in `src/codemode/execute.ts`.
 5. Keep public MCP tool and prompt descriptions aligned with actual runtime behavior.
 6. Preserve the current sandbox limits and request boundary logic unless the task explicitly changes them.
 7. Record recurring project-specific lessons in the section below when they are likely to prevent future mistakes.
@@ -279,7 +280,7 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 
 - `execute` uses a generated ESM module entry and reads the default export from sandbox execution.
 - `query` and `execute` accept function-expression style code and normalize fenced code input before evaluation.
-- `#core-openapi` and `#dtm-openapi` are virtual modules synthesized by tsdown plugins; consumers must not import the JSON snapshots directly.
+- `#core-openapi` and `#bundled-services` are virtual modules synthesised by tsdown plugins; consumers must not import the JSON snapshots directly. `#core-openapi` is the only versioned/switchable spec module; every other bundled spec flows generically through `#bundled-services` in the same `DiscoveredApiSpec` shape as live discovery.
 - The CLI build inlines all bundled core snapshots plus the bundled DTM snapshot; each server build inlines exactly the configured combination for that build.
 - Server builds should not use `noExternal: [/^.*$/]`. The microservice bundle is allowed to depend on runtime `node_modules`, and the release image must install those dependencies inside the Linux image rather than copying host `node_modules` from macOS.
 - `scripts/package-microservices.mjs` intentionally targets `linux/amd64` by default to avoid Apple Silicon release images failing with `exec format error` in Cumulocity.

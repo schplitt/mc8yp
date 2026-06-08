@@ -5,53 +5,78 @@ import { defineConfig } from 'tsdown'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
-const OPENAPI_MODULES = {
-  core: {
-    virtualId: '#core-openapi',
-    resolvedId: '\0virtual:core-openapi',
-    entryType: 'CoreOpenApiEntry',
-    entryConst: 'specs',
-    getSpec: 'getCoreOpenApiSpec',
-    getVersion: 'getCoreOpenApiVersion',
-    setVersion: 'setCoreOpenApiVersion',
-    getLabel: 'getCoreOpenApiLabel',
-    pluginName: 'mc8yp:core-openapi',
-  },
-} as const
+// ---------------------------------------------------------------------------
+// openapi-builds.json schema
+// ---------------------------------------------------------------------------
 
-type OpenApiModuleName = keyof typeof OPENAPI_MODULES
-
-interface OpenApiSourceEntry {
+interface CoreVersionEntry {
   version: string
   label: string
   url: string
-  servicePrefix?: string
   default?: boolean
 }
 
-interface OpenApiBuildEntry {
+interface ServiceEntry {
+  /**
+   * Microservice context path key (also the file name under openapi/services/).
+   */
+  key: string
+  label: string
+  url: string
+  /**
+   * URL prefix prepended to spec paths at build time.
+   */
+  servicePrefix: string
+}
+
+interface BuildEntry {
   version: string
   label: string
-  artifact: string
-  apis: Record<string, string>
+  /**
+   * Which core version this build inlines. Bundled services are always included as-is.
+   */
+  core: string
   default?: boolean
+}
+
+interface OpenApiConfig {
+  core: { versions: CoreVersionEntry[] }
+  services: ServiceEntry[]
+  builds: BuildEntry[]
 }
 
 const OPENAPI_CONFIG = JSON.parse(
   readFileSync(path.join(rootDir, 'openapi-builds.json'), 'utf8'),
-) as {
-  sources: Record<string, OpenApiSourceEntry[]>
-  builds: OpenApiBuildEntry[]
-}
+) as OpenApiConfig
 
-function getSourceConfig(api: OpenApiModuleName, version: string): OpenApiSourceEntry {
-  const entry = OPENAPI_CONFIG.sources[api]?.find((candidate) => candidate.version === version)
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+function getCoreVersion(version: string): CoreVersionEntry {
+  const entry = OPENAPI_CONFIG.core.versions.find((v) => v.version === version)
   if (!entry) {
-    throw new Error(`Unknown ${api} OpenAPI version ${version}.`)
+    throw new Error(`Unknown core OpenAPI version: ${version}`)
   }
   return entry
 }
 
+function readCoreSpecJson(version: string): string {
+  return readFileSync(path.join(rootDir, 'openapi', 'core', `${version}.json`), 'utf8').trim()
+}
+
+function readServiceSpecJson(key: string): string {
+  return readFileSync(path.join(rootDir, 'openapi', 'services', `${key}.json`), 'utf8').trim()
+}
+
+/**
+ * Rewrite an OpenAPI spec so every `paths` key is prefixed with `servicePrefix`,
+ * and any `servers[].url` template placeholder includes the prefix too.
+ * Applied to bundled service specs at build time so they look identical to
+ * what live discovery produces in src/utils/api-discovery.ts.
+ * @param specJson
+ * @param servicePrefix
+ */
 function rewriteSpecPaths(specJson: string, servicePrefix: string): string {
   const spec = JSON.parse(specJson) as {
     paths?: Record<string, unknown>
@@ -73,90 +98,120 @@ function rewriteSpecPaths(specJson: string, servicePrefix: string): string {
   return JSON.stringify(spec)
 }
 
-function readSpecJson(api: OpenApiModuleName, version: string): string {
-  const raw = readFileSync(path.join(rootDir, 'openapi', api, `${version}.json`), 'utf8').trim()
-  const source = getSourceConfig(api, version)
-  return source.servicePrefix ? rewriteSpecPaths(raw, source.servicePrefix) : raw
-}
+// ---------------------------------------------------------------------------
+// #core-openapi — special-cased: version-switchable in CLI, single-version in server
+// ---------------------------------------------------------------------------
 
-function generateEntries(api: OpenApiModuleName, versions: readonly string[]): string {
+const CORE_VIRTUAL_ID = '#core-openapi'
+const CORE_RESOLVED_ID = '\0virtual:core-openapi'
+
+function generateCoreEntries(versions: readonly string[]): string {
   return versions.map((version) => {
-    const source = getSourceConfig(api, version)
-    return `  { version: ${JSON.stringify(version)}, label: ${JSON.stringify(source.label)}, spec: ${readSpecJson(api, version)} },`
+    const source = getCoreVersion(version)
+    return `  { version: ${JSON.stringify(version)}, label: ${JSON.stringify(source.label)}, spec: ${readCoreSpecJson(version)} },`
   }).join('\n')
 }
 
-function generateCliModule(api: OpenApiModuleName): string {
-  const moduleInfo = OPENAPI_MODULES[api]
-  const versions = OPENAPI_CONFIG.sources[api].map((entry) => entry.version)
-  const defaultVersion = OPENAPI_CONFIG.sources[api].find((entry) => entry.default)?.version ?? versions[0] ?? 'release'
+function generateCoreCliModule(): string {
+  const versions = OPENAPI_CONFIG.core.versions.map((v) => v.version)
+  const defaultVersion = OPENAPI_CONFIG.core.versions.find((v) => v.default)?.version ?? versions[0] ?? 'release'
 
-  return `export const ${moduleInfo.entryConst} = Object.freeze([\n${generateEntries(api, versions)}\n]);
+  return `export const specs = Object.freeze([
+${generateCoreEntries(versions)}
+]);
 let activeVersion = ${JSON.stringify(defaultVersion)};
-export function ${moduleInfo.getSpec}() {
-  return ${moduleInfo.entryConst}.find((entry) => entry.version === activeVersion)?.spec ?? ${moduleInfo.entryConst}[0]?.spec;
+export function getCoreOpenApiSpec() {
+  return specs.find((entry) => entry.version === activeVersion)?.spec ?? specs[0]?.spec;
 }
-export function ${moduleInfo.getVersion}() {
+export function getCoreOpenApiVersion() {
   return activeVersion;
 }
-export function ${moduleInfo.setVersion}(version) {
-  if (!${moduleInfo.entryConst}.some((entry) => entry.version === version)) {
-    throw new Error("Unknown ${api} OpenAPI version: " + version + ". Available: " + ${moduleInfo.entryConst}.map((entry) => entry.version).join(", "));
+export function setCoreOpenApiVersion(version) {
+  if (!specs.some((entry) => entry.version === version)) {
+    throw new Error("Unknown core OpenAPI version: " + version + ". Available: " + specs.map((entry) => entry.version).join(", "));
   }
   activeVersion = version;
 }
-export function ${moduleInfo.getLabel}() {
-  return ${moduleInfo.entryConst}.find((entry) => entry.version === activeVersion)?.label ?? ${moduleInfo.entryConst}[0]?.label ?? activeVersion;
+export function getCoreOpenApiLabel() {
+  return specs.find((entry) => entry.version === activeVersion)?.label ?? specs[0]?.label ?? activeVersion;
 }
 `
 }
 
-function generateServerModule(api: OpenApiModuleName, build: OpenApiBuildEntry): string {
-  const moduleInfo = OPENAPI_MODULES[api]
-  const version = build.apis[api]
-  const label = getSourceConfig(api, version).label
+function generateCoreServerModule(build: BuildEntry): string {
+  const version = build.core
+  const label = getCoreVersion(version).label
 
-  return `export const ${moduleInfo.entryConst} = Object.freeze([\n${generateEntries(api, [version])}\n]);
-export function ${moduleInfo.getSpec}() {
-  return ${moduleInfo.entryConst}[0]?.spec;
+  return `export const specs = Object.freeze([
+${generateCoreEntries([version])}
+]);
+export function getCoreOpenApiSpec() {
+  return specs[0]?.spec;
 }
-export function ${moduleInfo.getVersion}() {
-  return ${moduleInfo.entryConst}[0]?.version ?? ${JSON.stringify(version)};
+export function getCoreOpenApiVersion() {
+  return specs[0]?.version ?? ${JSON.stringify(version)};
 }
-export function ${moduleInfo.setVersion}() {
-  throw new Error("This server build is locked to ${api} OpenAPI version " + (${moduleInfo.entryConst}[0]?.version ?? ${JSON.stringify(version)}) + ".");
+export function setCoreOpenApiVersion() {
+  throw new Error("This server build is locked to core OpenAPI version " + (specs[0]?.version ?? ${JSON.stringify(version)}) + ".");
 }
-export function ${moduleInfo.getLabel}() {
-  return ${moduleInfo.entryConst}[0]?.label ?? ${JSON.stringify(label)};
+export function getCoreOpenApiLabel() {
+  return specs[0]?.label ?? ${JSON.stringify(label)};
 }
 `
 }
 
-function createOpenApiPlugin(api: OpenApiModuleName, options: { mode: 'cli' } | { mode: 'server', build: OpenApiBuildEntry }) {
-  const moduleInfo = OPENAPI_MODULES[api]
-
+export function coreOpenApiPlugin(options: { mode: 'cli' } | { mode: 'server', build: BuildEntry }) {
   return {
-    name: moduleInfo.pluginName,
+    name: 'mc8yp:core-openapi',
     resolveId(id: string) {
-      if (id === moduleInfo.virtualId) {
-        return moduleInfo.resolvedId
-      }
-      return null
+      return id === CORE_VIRTUAL_ID ? CORE_RESOLVED_ID : null
     },
     load(id: string) {
-      if (id !== moduleInfo.resolvedId) {
+      if (id !== CORE_RESOLVED_ID)
         return null
-      }
-      return options.mode === 'cli'
-        ? generateCliModule(api)
-        : generateServerModule(api, options.build)
+      return options.mode === 'cli' ? generateCoreCliModule() : generateCoreServerModule(options.build)
     },
   }
 }
 
-export function coreOpenApiPlugin(options: { mode: 'cli' } | { mode: 'server', build: OpenApiBuildEntry }) {
-  return createOpenApiPlugin('core', options)
+// ---------------------------------------------------------------------------
+// #bundled-services — generic: emits BUNDLED_SERVICE_SPECS as DiscoveredApiSpec[]
+// Identical content for CLI and server builds — bundled services have no version axis.
+// ---------------------------------------------------------------------------
+
+const SERVICES_VIRTUAL_ID = '#bundled-services'
+const SERVICES_RESOLVED_ID = '\0virtual:bundled-services'
+
+function generateBundledServicesModule(): string {
+  const entries = OPENAPI_CONFIG.services.map((service) => {
+    const rawSpec = readServiceSpecJson(service.key)
+    const rewrittenSpec = rewriteSpecPaths(rawSpec, service.servicePrefix)
+    return `  { contextPath: ${JSON.stringify(service.key)}, appLabel: ${JSON.stringify(service.label)}, specLabel: ${JSON.stringify(service.label)}, servicePrefix: ${JSON.stringify(service.servicePrefix)}, spec: ${rewrittenSpec} },`
+  }).join('\n')
+
+  return `export const BUNDLED_SERVICE_SPECS = Object.freeze([
+${entries}
+]);
+`
 }
+
+export function bundledServicesPlugin() {
+  return {
+    name: 'mc8yp:bundled-services',
+    resolveId(id: string) {
+      return id === SERVICES_VIRTUAL_ID ? SERVICES_RESOLVED_ID : null
+    },
+    load(id: string) {
+      if (id !== SERVICES_RESOLVED_ID)
+        return null
+      return generateBundledServicesModule()
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Build matrix
+// ---------------------------------------------------------------------------
 
 const serverBuilds = OPENAPI_CONFIG.builds.map((build) => ({
   name: `mc8yp-server-build-${build.version}`,
@@ -165,7 +220,7 @@ const serverBuilds = OPENAPI_CONFIG.builds.map((build) => ({
   clean: build.version === OPENAPI_CONFIG.builds[0]?.version,
   dts: false,
   format: 'module' as const,
-  plugins: [coreOpenApiPlugin({ mode: 'server', build })],
+  plugins: [coreOpenApiPlugin({ mode: 'server', build }), bundledServicesPlugin()],
   outDir: `.output/${build.version}`,
 }))
 
@@ -178,7 +233,7 @@ export default defineConfig([
     clean: true,
     dts: false,
     format: 'module',
-    plugins: [coreOpenApiPlugin({ mode: 'cli' })],
+    plugins: [coreOpenApiPlugin({ mode: 'cli' }), bundledServicesPlugin()],
     // no external -> everything starting with @c8y/ should be bundled for cli usage
     noExternal: [/^@c8y\/.*$/],
     outDir: 'dist',

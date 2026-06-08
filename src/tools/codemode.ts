@@ -10,7 +10,7 @@ function createCodeSchema(description: string) {
 }
 
 function getOpenApiNote(): string {
-  return `This MCP exposes the ${getCoreOpenApiLabel()} bundled core OpenAPI snapshot (${BUNDLED_OPENAPI_ENTRIES.map((e) => `${e.api} ${e.version}`).join(', ')}). Use \`coreSpec\` for inventory, alarms, events, measurements, users, tenants, and the broader Cumulocity REST surface. Microservice APIs discovered on the current tenant are available via \`serviceSpecs\`.`
+  return `This MCP exposes the ${getCoreOpenApiLabel()} bundled core OpenAPI snapshot plus bundled service specs (${BUNDLED_OPENAPI_ENTRIES.map((e) => `${e.api} ${e.version}`).join(', ')}). Use \`coreSpec\` for the main Cumulocity REST surface. Bundled and live-discovered microservices are available via \`serviceSpecs\` keyed by contextPath; live discovery on the current tenant overrides the bundled fallback when both exist.`
 }
 
 export function createQueryTool() {
@@ -59,9 +59,9 @@ declare const specsEnabled: SpecsEnabled
 declare const serviceSpecs: Record<string, ServiceSpecEntry>
 \`\`\`
 
-- \`coreSpec\` — the main Cumulocity REST surface. Always present.
-- \`specsEnabled\` — which bundled specs are available on this tenant (e.g. \`specsEnabled.dtm\`). Check before using optional specs.
-- \`serviceSpecs\` — additional microservice APIs discovered on the tenant, keyed by contextPath. Paths are already prefixed (e.g. \`/service/myservice/items\`).
+- \`coreSpec\` — the bundled Cumulocity core REST surface. Always present.
+- \`specsEnabled\` — per known bundled service: is it actually installed on this tenant? (e.g. \`specsEnabled.dtm\`). Check this before calling execute against a known service; if false the request will be blocked by connection policy.
+- \`serviceSpecs\` — microservice APIs available on the tenant, keyed by contextPath. Includes bundled service specs (e.g. \`serviceSpecs.dtm\` for Digital Twin Manager) and any live-discovered services. Paths are already prefixed (e.g. \`/service/dtm/assets\`). Live discovery on the tenant overrides the bundled fallback when present.
 
 If your function returns a string it is returned as-is. Any other value is returned as JSON.
 The current MCP connection may still block \`execute\` calls even when an operation is visible in a spec.

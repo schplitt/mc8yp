@@ -7,6 +7,7 @@ import { getCoreOpenApiLabel, getCoreOpenApiVersion, setCoreOpenApiVersion, spec
 import { c8yMcpServer, setupMcpServer } from '../server'
 import { getCredentialsByTenantUrl, getStoredC8yAuth } from '../utils/credentials'
 import { parseAllowRule, parseRestrictionRule } from '../utils/restrictions'
+import { resolveSpecs } from '../utils/spec-resolution'
 import { readActiveTenantUrl } from './active-tenant'
 import { configureSpecRemoval, getCliTenantContext, setCliTenantContext } from './tenant-context'
 
@@ -107,12 +108,17 @@ const main = defineCommand({
 
     const transport = new StdioTransport(c8yMcpServer)
     const active = getCliTenantContext()
+    // No active tenant yet — seed the sandbox with the bundled-only resolution so
+    // coreSpec is always present. Live tenant data is pushed into the context by
+    // set-active-tenant on first invocation.
+    const fallback = active ? null : resolveSpecs([], new Set(), specRemoval)
     consola.info('Starting MCP server over stdio transport...')
     transport.listen({
       env: 'cli' as const,
       restrictions,
       allowRules: parsedAllowRules,
-      specs: active?.specs ?? {},
+      specs: active?.specs ?? fallback!.specs,
+      specsEnabled: active?.specsEnabled ?? fallback!.specsEnabled,
       auth: active ? { tenantUrl: active.tenantUrl, authorizationHeader: active.authorizationHeader } : undefined,
     })
   },

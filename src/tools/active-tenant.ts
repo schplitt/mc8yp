@@ -45,6 +45,7 @@ export function createSetActiveTenantTool() {
 
         custom.auth = { tenantUrl: ctx.tenantUrl, authorizationHeader: ctx.authorizationHeader }
         custom.specs = ctx.specs
+        custom.specsEnabled = ctx.specsEnabled
 
         const specKeys = Object.entries(ctx.specs)
           .filter(([, v]) => v !== null)

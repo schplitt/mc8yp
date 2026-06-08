@@ -223,11 +223,12 @@ This only changes the bundled OpenAPI data that `query` sees. The `execute` tool
 
 ### Tools
 
-| Tool               | Description                                                                                                                                                                                                                                        |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `query`            | Search and inspect the bundled OpenAPI specs by running a JavaScript function expression. The sandbox exposes `coreSpec`, `dtmSpec`, and `specsEnabled`, and it never hides bundled specs from the query surface.                                  |
-| `execute`          | Execute JavaScript against the live Cumulocity API. Provide an async JavaScript function expression. A top-level `cumulocity` binding provides `cumulocity.request({ method, path, body?, headers? })`. Return the final value from that function. |
-| `list-credentials` | _(CLI mode only)_ List stored credentials from your system keyring.                                                                                                                                                                                |
+| Tool                | Description                                                                                                                                                                                                                                                                                                                                    |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `query`             | Search and inspect bundled and live-discovered OpenAPI specs by running a JavaScript function expression. The sandbox exposes `coreSpec` (always), `specsEnabled` (per-service availability on the tenant), and `serviceSpecs` (bundled service specs like Digital Twin Manager plus any live-discovered microservices, keyed by contextPath). |
+| `execute`           | Execute JavaScript against the live Cumulocity API. Provide an async JavaScript function expression. A top-level `cumulocity` binding provides `cumulocity.request({ method, path, body?, headers? })`. Return the final value from that function.                                                                                             |
+| `list-credentials`  | _(CLI mode only)_ List stored credentials from your system keyring.                                                                                                                                                                                                                                                                            |
+| `set-active-tenant` | _(CLI mode only)_ Select which stored tenant `query` and `execute` operate against. Persists to `~/.config/mc8yp/active-tenant.json` so the selection survives restarts.                                                                                                                                                                       |
 
 Both code-mode tools run in a sandboxed runtime ([secure-exec](https://github.com/nicepkg/secure-exec)).
 
@@ -382,26 +383,16 @@ mc8yp --allow "GET:/inventory/**" --allowed "POST:/alarm/**"
 mc8yp -a "/inventory/**" -r "/inventory/managedObjects"
 ```
 
-To forbid one or more bundled OpenAPI parts for execute policy, repeat `--disable-openapi` (or `-d`) in CLI mode. `query` still sees all bundled specs and can inspect `specsEnabled` to understand which spec families remain enabled for execute policy:
-
-```sh
-# Disable bundled DTM APIs for execute policy on this CLI connection
-mc8yp -d dtm
-
-# Disable multiple bundled specs if more are added in the future
-mc8yp -d dtm -d core
-```
+By default, bundled service specs for services **not** installed on the current tenant are removed from the `query` sandbox and `execute` is automatically restricted from calling their routes. Pass `--no-spec-removal` in CLI mode to keep the bundled spec visible in `query` for reference (execute restrictions still apply). `specsEnabled` always reflects what's actually callable.
 
 ### Microservice Mode (HTTP)
 
 Pass restrictions as `restriction`, `restrict`, or `r` query parameters on the MCP endpoint URL.
 Pass allow rules as `allowed`, `allow`, or `a` query parameters.
-To forbid bundled OpenAPI parts for execute policy, pass the `openapi-disabled` query parameter.
 You can also send project-scoped HTTP headers to avoid conflicts with well-known headers:
 
 - `mc8yp-restriction` for deny rules
 - `mc8yp-allow` for allow-list rules
-- `mc8yp-openapi-disabled` for bundled OpenAPI part disablement
 
 Both headers accept either repeated header instances or a comma-separated list of values. Query parameters and headers can be combined on the same connection.
 
@@ -409,8 +400,6 @@ Both headers accept either repeated header instances or a comma-separated list o
 /mcp?restriction=/inventory/**&restrict=DELETE:/alarm/**
 /mcp?r=/inventory/**&r=DELETE:/alarm/**
 /mcp?allow=/inventory/**&allowed=POST:/alarm/**
-/mcp?openapi-disabled=dtm
-/mcp?openapi-disabled=dtm&openapi-disabled=core
 ```
 
 ```http
@@ -419,16 +408,15 @@ Authorization: Bearer <token>
 mc8yp-restriction: /inventory/**
 mc8yp-restriction: DELETE:/alarm/**
 mc8yp-allow: GET:/measurement/**
-mc8yp-openapi-disabled: dtm
 ```
 
 ### How Access Policy Works
 
-1. **Query visibility**: The `query` tool exposes the raw bundled OpenAPI specs for the current MCP connection. Bundled specs are not hidden or rewritten, and the query sandbox exposes `specsEnabled` so the model can see which spec families are enabled for execute policy.
+1. **Query visibility**: `query` exposes `coreSpec` (always), `serviceSpecs` keyed by contextPath (bundled service specs like DTM plus any live-discovered services), and `specsEnabled` (per-service installation flag on the current tenant). Live discovery overrides bundled specs per contextPath when both exist.
 
-2. **Sandbox request enforcement**: The `execute` tool checks restrictions and allow rules inside the generated sandbox request helper, where the actual HTTP method and normalized path are both available. Matching deny rules block first. If any allow rules are configured, requests must also match at least one allow rule.
+2. **Sandbox request enforcement**: `execute` checks restrictions and allow rules inside the generated sandbox request helper, where the HTTP method and normalised path are both known. Matching deny rules block first. If any allow rules are configured, requests must also match at least one.
 
-3. **Bundled spec disablement**: When the connection disables bundled OpenAPI parts such as `dtm`, `query` still shows all bundled specs, while the server expands that selection into additional restrictions so `execute` stays path-and-method based.
+3. **Auto-restriction for absent services**: When live discovery confirms a bundled service is not installed on the tenant, `*:/service/<contextPath>/**` deny rules are added to the effective restriction set. `execute` calls to those routes are blocked with a clear policy message rather than failing with a 404. `specsEnabled.<contextPath>` is `false` in this state.
 
 4. **Network boundary**: The secure-exec permission layer independently restricts network access to the configured tenant host. Other network operations are denied.
 
@@ -445,7 +433,7 @@ The repository bundles multiple OpenAPI specs for CLI use and builds one microse
 - CLI bundle in `dist/`
 - Versioned server bundles in `.output/release/`, `.output/2026/`, `.output/2025/`, and `.output/2024/`
 
-The build matrix is driven by [`openapi-builds.json`](openapi-builds.json). Core snapshots live under `openapi/core/`, DTM snapshots live under `openapi/dtm/`, and each server bundle contains the configured combination for that build.
+The build matrix is driven by [`openapi-builds.json`](openapi-builds.json). Versioned core snapshots live under `openapi/core/`; bundled service specs (one per file) live under `openapi/services/`. Each server bundle contains the configured core version plus every bundled service.
 
 ### Release Packaging
 

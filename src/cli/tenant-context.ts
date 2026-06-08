@@ -28,6 +28,10 @@ export interface CliTenantContext {
    * Fully resolved specs (bundled + discovered, paths pre-prefixed).
    */
   specs: Specs
+  /**
+   * Per known bundled service: installed on this tenant?
+   */
+  specsEnabled: Record<string, boolean>
 }
 
 let _context: CliTenantContext | null = null
@@ -68,11 +72,13 @@ export async function setCliTenantContext(tenantUrl: string): Promise<CliTenantC
   // discovery cache updates automatically. Call set-active-tenant again to
   // pull a refreshed snapshot into the context (or rely on server restart).
   const { specs: discovered, installedContextPaths } = await startDiscovery(tenantUrl, authHeaders)
+  const resolved = resolveSpecs(discovered, installedContextPaths, _specRemoval)
 
   _context = {
     tenantUrl,
     authorizationHeader: authHeaders.Authorization!,
-    specs: resolveSpecs(discovered, installedContextPaths, _specRemoval),
+    specs: resolved.specs,
+    specsEnabled: resolved.specsEnabled,
   }
 
   return _context

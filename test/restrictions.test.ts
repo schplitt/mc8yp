@@ -124,8 +124,9 @@ describe('allow parsing', () => {
 })
 
 describe('bundled openapi entries', () => {
-  it('core is the only bundled spec entry', () => {
-    expect(BUNDLED_OPENAPI_ENTRIES.map((e) => e.api)).toEqual(['core'])
+  it('bundled openapi entries surface core plus every bundled service', () => {
+    // core is always first; bundled service entries follow (currently: dtm)
+    expect(BUNDLED_OPENAPI_ENTRIES.map((e) => e.api)).toEqual(['core', 'dtm'])
   })
 })
 

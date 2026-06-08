@@ -32,6 +32,17 @@ const dockerReleaseTag = sanitizeDockerNamePart(releaseTag, `v${packageJson.vers
 
 const openApiBuildConfig = JSON.parse(fs.readFileSync(path.join(rootDir, 'openapi-builds.json'), 'utf8'))
 const openApiBuilds = openApiBuildConfig.builds
+const bundledServices = openApiBuildConfig.services ?? []
+
+/**
+ * Artifact name for a given build: `core-<coreVersion>` plus each bundled
+ * service key appended (sorted for determinism). E.g. `core-release-dtm`.
+ * @param {{ core: string }} build
+ */
+function artifactName(build) {
+  const serviceSuffix = bundledServices.map((s) => s.key).sort().join('-')
+  return serviceSuffix ? `core-${build.core}-${serviceSuffix}` : `core-${build.core}`
+}
 
 function run(command, args, cwd = rootDir) {
   execFileSync(command, args, {
@@ -93,9 +104,10 @@ try {
     }
 
     prepareStagingDir(build.version)
-    const zipFileName = `${assetBaseName}-${build.artifact}-${releaseTag}.zip`
+    const artifact = artifactName(build)
+    const zipFileName = `${assetBaseName}-${artifact}-${releaseTag}.zip`
     const zipFilePath = path.join(rootDir, zipFileName)
-    const imageRef = `${dockerRepositoryName}:${sanitizeDockerNamePart(build.artifact, build.version)}-${dockerReleaseTag}`
+    const imageRef = `${dockerRepositoryName}:${sanitizeDockerNamePart(artifact, build.version)}-${dockerReleaseTag}`
 
     try {
       run('docker', ['build', '--platform', targetPlatform, '-f', stagedDockerfilePath, '-t', imageRef, '.'], rootDir)

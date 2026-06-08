@@ -17,11 +17,18 @@ export interface C8yMcpCustomContext extends Record<string, unknown> {
   restrictions: RestrictionRule[]
   allowRules: AllowRule[]
   /**
-   * Flat resolved spec map for the query sandbox (bundled + discovered, paths
-   * already prefixed). Always present — empty object until a tenant is activated
-   * in CLI mode; set per-request in server mode.
+   * Flat resolved spec map for the query sandbox (paths already prefixed).
+   * `core` always present; bundled service specs keyed by contextPath; live
+   * discovered services pass through. Set per-request in server mode and by
+   * set-active-tenant in CLI mode.
    */
   specs: Specs
+  /**
+   * Per bundled spec (core + every known bundled service): is it actually
+   * installed on the current tenant? Stays accurate even when --no-spec-removal
+   * keeps an absent service's bundled spec visible for reference.
+   */
+  specsEnabled: Record<string, boolean>
   /**
    * Tenant auth for the current connection.
    * Always set in server mode (per-request from the Authorization header).

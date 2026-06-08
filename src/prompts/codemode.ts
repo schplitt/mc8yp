@@ -2,7 +2,7 @@ import { definePrompt } from 'tmcp/prompt'
 import { prompt } from 'tmcp/utils'
 import { getCoreOpenApiLabel } from '#core-openapi'
 import { c8yMcpServer } from '../server-instance'
-import { BUNDLED_OPENAPI_ENTRIES, BUNDLED_SPEC_REGISTRY } from '../utils/openapi'
+import { BUNDLED_OPENAPI_ENTRIES, CORE_SPEC } from '../utils/openapi'
 
 function getRuntimeSection(): string {
   return c8yMcpServer.ctx.custom?.env === 'cli'
@@ -22,8 +22,8 @@ export function createCodeModeGuidePrompt() {
     const restrictions = c8yMcpServer.ctx.custom?.restrictions ?? []
     const allowRules = c8yMcpServer.ctx.custom?.allowRules ?? []
     const specs = c8yMcpServer.ctx.custom?.specs ?? {}
-    const bundledKeys = new Set(BUNDLED_SPEC_REGISTRY.map((e) => e.key))
-    const serviceKeys = Object.keys(specs).filter((k) => !bundledKeys.has(k) && specs[k] !== null)
+    // core is the only named binding; everything else (bundled + discovered) goes into serviceSpecs.
+    const serviceKeys = Object.keys(specs).filter((k) => k !== CORE_SPEC.key && specs[k] !== null)
     const serviceSpecsType = serviceKeys.length === 0
       ? 'Record<string, ServiceSpecEntry>'
       : `{\n${serviceKeys.map((k) => `  ${k}: ServiceSpecEntry`).join('\n')}\n}`

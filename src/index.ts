@@ -66,9 +66,10 @@ const app = new H3().all('/mcp', async (event) => {
     .map((s) => s.contextPath)
   const autoRestrictions = createServiceUnavailableRestrictionRules(unavailableContextPaths)
 
-  // Flat spec map: bundled (resolved against discovery) + non-bundled discovered services.
-  // specRemoval=true: service-backed bundled specs absent from this tenant are injected as null.
-  const specs = resolveSpecs(discoveredSpecs, installedContextPaths, true)
+  // Flat spec map + specsEnabled (per-service installation flags).
+  // Server mode always runs with specRemoval=true: bundled services absent from
+  // this tenant are injected as null in the sandbox.
+  const { specs, specsEnabled } = resolveSpecs(discoveredSpecs, installedContextPaths, true)
 
   const query = getQuery(event)
   const restrictionSources = collectServerRestrictionSources(query, event.req.headers)
@@ -107,6 +108,7 @@ const app = new H3().all('/mcp', async (event) => {
     restrictions: effectiveRestrictions,
     allowRules: parsedAllowRules,
     specs,
+    specsEnabled,
   })
 })
 

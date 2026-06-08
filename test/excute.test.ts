@@ -414,21 +414,44 @@ describe('query', () => {
     expect(JSON.parse(result)).toEqual({ hasCore: true, hasSpecsEnabled: true, hasServiceSpecs: true })
   })
 
-  it('injects each bundled registry key as a named ${key}Spec binding', async () => {
-    const result = await query('() => ({ hasCore: !!coreSpec })', { core: { paths: {} } } satisfies Specs)
-    expect(JSON.parse(result)).toEqual({ hasCore: true })
+  it('injects coreSpec as the only named binding', async () => {
+    const result = await query(
+      '() => ({ hasCore: !!coreSpec, hasDtmSpec: typeof dtmSpec !== "undefined" })',
+      { core: { paths: {} } } satisfies Specs,
+      { core: true },
+    )
+    // coreSpec exists; dtmSpec does NOT — dtm goes into serviceSpecs, not a named binding
+    expect(JSON.parse(result)).toEqual({ hasCore: true, hasDtmSpec: false })
   })
 
-  it('injects null for bundled entries marked unavailable; specsEnabled reflects that', async () => {
-    const result = await query('() => ({ coreSpec, specsEnabled })', { core: null } satisfies Specs)
-    expect(JSON.parse(result)).toEqual({ coreSpec: null, specsEnabled: { core: false } })
+  it('specsEnabled is passed as a separate input, not derived from null spec values', async () => {
+    // dtm spec is visible (bundled fallback for reference) but service is NOT installed.
+    // specsEnabled must report dtm: false even though the spec itself is non-null.
+    const result = await query(
+      '() => ({ dtmInServiceSpecs: !!serviceSpecs.dtm, specsEnabled })',
+      { core: { paths: {} }, dtm: { paths: {} } } satisfies Specs,
+      { core: true, dtm: false },
+    )
+    expect(JSON.parse(result)).toEqual({
+      dtmInServiceSpecs: true,
+      specsEnabled: { core: true, dtm: false },
+    })
   })
 
-  it('reads specs from c8yMcpServer.ctx.custom when no specsOverride is passed', async () => {
+  it('null spec entries are omitted from serviceSpecs', async () => {
+    const result = await query(
+      '() => Object.keys(serviceSpecs)',
+      { core: { paths: {} }, dtm: null } satisfies Specs,
+      { core: true, dtm: false },
+    )
+    expect(JSON.parse(result)).toEqual([])
+  })
+
+  it('reads specs from c8yMcpServer.ctx.custom when no override is passed', async () => {
     // ctx is an AsyncLocalStorage-backed getter — mock it instead of mutating.
-    const mockSpecs = resolveSpecs([], new Set(), true)
+    const resolved = resolveSpecs([], new Set(), true)
     const ctxSpy = vi.spyOn(c8yMcpServer, 'ctx', 'get').mockReturnValue({
-      custom: { env: 'cli' as const, restrictions: [], allowRules: [], specs: mockSpecs },
+      custom: { env: 'cli' as const, restrictions: [], allowRules: [], specs: resolved.specs, specsEnabled: resolved.specsEnabled },
     } as unknown as ReturnType<typeof c8yMcpServer['ctx']['valueOf']>)
     try {
       const result = await query('() => typeof coreSpec !== "undefined"')
@@ -438,9 +461,13 @@ describe('query', () => {
     }
   })
 
-  it('puts non-bundled-registry entries into serviceSpecs', async () => {
-    const result = await query('() => Object.keys(serviceSpecs)', { core: { paths: {} }, svc: { paths: {} } } satisfies Specs)
-    expect(JSON.parse(result)).toEqual(['svc'])
+  it('puts non-core entries into serviceSpecs (bundled + discovered alike)', async () => {
+    const result = await query(
+      '() => Object.keys(serviceSpecs).sort()',
+      { core: { paths: {} }, dtm: { paths: {} }, svc: { paths: {} } } satisfies Specs,
+      { core: true, dtm: true },
+    )
+    expect(JSON.parse(result)).toEqual(['dtm', 'svc'])
   })
 })
 
