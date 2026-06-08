@@ -3,8 +3,6 @@ import {
   DISCOVERY_REFRESH_INTERVAL_MS,
   bustApiSpecCache,
   discoverApiSpecs,
-  getAllReadySpecs,
-  getReadySpecs,
   refreshApiSpecs,
   setCachedApiSpecs,
   startDiscovery,
@@ -78,59 +76,50 @@ describe('spec cache', () => {
   beforeEach(() => bustApiSpecCache())
   afterEach(() => bustApiSpecCache())
 
-  it('stores and retrieves specs by tenant URL', () => {
-    const specs = [{ contextPath: 'dtm', appLabel: 'DTM', specLabel: 'DTM', servicePrefix: '/service/dtm', spec: {} }]
+  it('stores and retrieves a DiscoveryResult by awaiting the cached promise', async () => {
+    const specs = [{ contextPath: 'svc', appLabel: 'Svc', specLabel: 'Svc', servicePrefix: '/service/svc', spec: {} }]
     setCachedApiSpecs(TENANT, specs)
-    expect(getReadySpecs(TENANT)).toEqual(specs)
+    const result = await startDiscovery(TENANT, AUTH)
+    expect(result.specs).toEqual(specs)
   })
 
-  it('normalizes trailing slash in tenant URL on set and get', () => {
-    const specs = [{ contextPath: 'dtm', appLabel: 'DTM', specLabel: 'DTM', servicePrefix: '/service/dtm', spec: {} }]
+  it('normalizes trailing slash in tenant URL', async () => {
+    const specs = [{ contextPath: 'svc', appLabel: 'Svc', specLabel: 'Svc', servicePrefix: '/service/svc', spec: {} }]
     setCachedApiSpecs(`${TENANT}/`, specs)
-    expect(getReadySpecs(TENANT)).toEqual(specs)
-    expect(getReadySpecs(`${TENANT}/`)).toEqual(specs)
+    const result = await startDiscovery(TENANT, AUTH)
+    expect(result.specs).toEqual(specs)
   })
 
-  it('returns null for an uncached tenant', () => {
-    expect(getReadySpecs(TENANT)).toBeNull()
-  })
-
-  it('busts a specific tenant cache', () => {
+  it('busts a specific tenant cache — startDiscovery triggers fresh network call after bust', async () => {
     setCachedApiSpecs(TENANT, [])
     bustApiSpecCache(TENANT)
-    expect(getReadySpecs(TENANT)).toBeNull()
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      json: () => Promise.resolve({}),
+    } as unknown as Response)
+    await startDiscovery(TENANT, AUTH)
+    expect(fetchSpy).toHaveBeenCalled()
+    vi.restoreAllMocks()
   })
 
-  it('busts all caches when called without arguments', () => {
+  it('busts all caches when called without arguments', async () => {
     setCachedApiSpecs(TENANT, [])
     setCachedApiSpecs('https://other.cumulocity.com', [])
     bustApiSpecCache()
-    expect(getReadySpecs(TENANT)).toBeNull()
-    expect(getReadySpecs('https://other.cumulocity.com')).toBeNull()
-  })
-
-  it('getAllReadySpecs merges all tenant caches', () => {
-    const specA = { contextPath: 'svcA', appLabel: 'A', specLabel: 'A', servicePrefix: '/service/svcA', spec: {} }
-    const specB = { contextPath: 'svcB', appLabel: 'B', specLabel: 'B', servicePrefix: '/service/svcB', spec: {} }
-    setCachedApiSpecs(TENANT, [specA])
-    setCachedApiSpecs('https://other.cumulocity.com', [specB])
-    const all = getAllReadySpecs()
-    expect(all).toHaveLength(2)
-    expect(all.map((s) => s.contextPath)).toContain('svcA')
-    expect(all.map((s) => s.contextPath)).toContain('svcB')
-  })
-
-  it('getAllReadySpecs deduplicates by contextPath, last-fetched wins', async () => {
-    const specOld = { contextPath: 'dtm', appLabel: 'DTM old', specLabel: 'DTM old', servicePrefix: '/service/dtm', spec: { paths: { old: true } } }
-    const specNew = { contextPath: 'dtm', appLabel: 'DTM new', specLabel: 'DTM new', servicePrefix: '/service/dtm', spec: { paths: { new: true } } }
-    setCachedApiSpecs(TENANT, [specOld])
-    await new Promise<void>((r) => {
-      setTimeout(r, 5)
-    })
-    setCachedApiSpecs('https://other.cumulocity.com', [specNew])
-    const all = getAllReadySpecs()
-    expect(all).toHaveLength(1)
-    expect(all[0]!.appLabel).toBe('DTM new')
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      json: () => Promise.resolve({}),
+    } as unknown as Response)
+    await Promise.all([
+      startDiscovery(TENANT, AUTH),
+      startDiscovery('https://other.cumulocity.com', AUTH),
+    ])
+    expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
+    vi.restoreAllMocks()
   })
 })
 
@@ -144,7 +133,7 @@ describe('discoverApiSpecs', () => {
     bustApiSpecCache()
   })
 
-  it('returns empty array when no apps have openApiSpec in manifest', async () => {
+  it('returns empty specs when no apps have openApiSpec in manifest, but the app is in installedContextPaths', async () => {
     stubFetch({
       [`${TENANT}/user/currentUser`]: ok(makeUserResponse()),
       [`${TENANT}/application/applicationsByUser/user1?pageSize=2000`]: ok(makeAppsResponse([
@@ -152,7 +141,8 @@ describe('discoverApiSpecs', () => {
       ])),
     })
     const result = await discoverApiSpecs(TENANT, AUTH)
-    expect(result).toEqual([])
+    expect(result.specs).toEqual([])
+    expect(result.installedContextPaths.has('myservice')).toBe(true)
   })
 
   it('downloads and path-prefixes a spec for a string openApiSpec entry', async () => {
@@ -166,12 +156,11 @@ describe('discoverApiSpecs', () => {
     })
 
     const result = await discoverApiSpecs(TENANT, AUTH)
-    expect(result).toHaveLength(1)
-    const spec = result[0]!
+    expect(result.specs).toHaveLength(1)
+    const spec = result.specs[0]!
     expect(spec.contextPath).toBe('myservice')
     expect(spec.servicePrefix).toBe('/service/myservice')
     expect(spec.specLabel).toBe('My Service')
-    // Paths must be rewritten to include the service prefix
     const paths = (spec.spec as { paths: Record<string, unknown> }).paths
     expect(paths['/service/myservice/things']).toBeDefined()
     expect(paths['/things']).toBeUndefined()
@@ -196,9 +185,9 @@ describe('discoverApiSpecs', () => {
     })
 
     const result = await discoverApiSpecs(TENANT, AUTH)
-    expect(result).toHaveLength(2)
-    expect(result.map((s) => s.specLabel)).toEqual(['Alpha API', 'Beta API'])
-    expect(result.every((s) => s.contextPath === 'multi')).toBe(true)
+    expect(result.specs).toHaveLength(2)
+    expect(result.specs.map((s) => s.specLabel)).toEqual(['Alpha API', 'Beta API'])
+    expect(result.specs.every((s) => s.contextPath === 'multi')).toBe(true)
   })
 
   it('strips leading slash from manifest spec path before building URL', async () => {
@@ -212,11 +201,11 @@ describe('discoverApiSpecs', () => {
     })
 
     const result = await discoverApiSpecs(TENANT, AUTH)
-    expect(result).toHaveLength(1)
-    expect((result[0]!.spec as { paths: Record<string, unknown> }).paths['/service/svc/items']).toBeDefined()
+    expect(result.specs).toHaveLength(1)
+    expect((result.specs[0]!.spec as { paths: Record<string, unknown> }).paths['/service/svc/items']).toBeDefined()
   })
 
-  it('skips apps without a contextPath', async () => {
+  it('skips apps without a contextPath — they do not appear in installedContextPaths', async () => {
     stubFetch({
       [`${TENANT}/user/currentUser`]: ok(makeUserResponse()),
       [`${TENANT}/application/applicationsByUser/user1?pageSize=2000`]: ok(makeAppsResponse([
@@ -224,7 +213,8 @@ describe('discoverApiSpecs', () => {
       ])),
     })
     const result = await discoverApiSpecs(TENANT, AUTH)
-    expect(result).toEqual([])
+    expect(result.specs).toEqual([])
+    expect(result.installedContextPaths.size).toBe(0)
   })
 
   it('skips a spec when the download request fails with a non-ok status', async () => {
@@ -236,7 +226,8 @@ describe('discoverApiSpecs', () => {
       [`${TENANT}/service/broken/spec.json`]: { ok: false, status: 503, statusText: 'Service Unavailable', json: () => Promise.resolve({}) },
     })
     const result = await discoverApiSpecs(TENANT, AUTH)
-    expect(result).toHaveLength(0)
+    expect(result.specs).toHaveLength(0)
+    expect(result.installedContextPaths.has('broken')).toBe(true)
   })
 
   it('skips a spec when the download throws a network error', async () => {
@@ -251,7 +242,8 @@ describe('discoverApiSpecs', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve(makeAppsResponse([makeApp({ contextPath: 'neterr', openApiSpec: 'spec.json' })])) } as unknown as Response)
     })
     const result = await discoverApiSpecs(TENANT, AUTH)
-    expect(result).toHaveLength(0)
+    expect(result.specs).toHaveLength(0)
+    expect(result.installedContextPaths.has('neterr')).toBe(true)
   })
 
   it('throws when two different apps share the same contextPath', async () => {
@@ -277,7 +269,7 @@ describe('discoverApiSpecs', () => {
     })
     // Should not throw — same app, same contextPath
     const result = await discoverApiSpecs(TENANT, AUTH)
-    expect(result).toHaveLength(1)
+    expect(result.specs).toHaveLength(1)
   })
 
   it('throws when fetching current user fails', async () => {
@@ -308,7 +300,7 @@ describe('startDiscovery', () => {
     bustApiSpecCache()
   })
 
-  it('returns a promise that resolves with discovered specs', async () => {
+  it('returns a promise that resolves with a DiscoveryResult', async () => {
     const rawSpec = makeSpec({ '/things': { get: {} } })
     stubFetch({
       [`${TENANT}/user/currentUser`]: ok(makeUserResponse()),
@@ -320,9 +312,10 @@ describe('startDiscovery', () => {
 
     const promise = startDiscovery(TENANT, AUTH)
     expect(promise).toBeInstanceOf(Promise)
-    const specs = await promise
-    expect(specs).toHaveLength(1)
-    expect(specs[0]!.contextPath).toBe('svc')
+    const result = await promise
+    expect(result.specs).toHaveLength(1)
+    expect(result.specs[0]!.contextPath).toBe('svc')
+    expect(result.installedContextPaths.has('svc')).toBe(true)
   })
 
   it('is idempotent — returns the same in-flight promise on concurrent calls', () => {
@@ -341,11 +334,10 @@ describe('startDiscovery', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     const result = await startDiscovery(TENANT, AUTH)
     expect(fetchSpy).not.toHaveBeenCalled()
-    expect(result).toEqual([])
+    expect(result.specs).toEqual([])
   })
 
   it('stores an empty ready entry on discovery failure so retries do not spam requests', async () => {
-    // Spy BEFORE anything happens so we can count all calls
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
       ok: false,
       status: 401,
@@ -354,8 +346,7 @@ describe('startDiscovery', () => {
     } as unknown as Response)
 
     const result = await startDiscovery(TENANT, AUTH)
-    expect(result).toEqual([])
-    expect(getReadySpecs(TENANT)).toEqual([])
+    expect(result.specs).toEqual([])
 
     // Second startDiscovery must NOT trigger another fetch — cache is ready
     const callsBefore = fetchSpy.mock.calls.length
@@ -363,23 +354,16 @@ describe('startDiscovery', () => {
     expect(fetchSpy.mock.calls.length).toBe(callsBefore)
   })
 
-  it('getReadySpecs returns null while discovery is pending', () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-      ok: true,
-      json: () => new Promise(() => { /* never resolves */ }),
-    } as unknown as Response)
-
-    startDiscovery(TENANT, AUTH)
-    expect(getReadySpecs(TENANT)).toBeNull()
-  })
-
-  it('getReadySpecs returns specs after discovery resolves', async () => {
+  it('resolved DiscoveryResult contains installedContextPaths for apps without a spec URL', async () => {
     stubFetch({
       [`${TENANT}/user/currentUser`]: ok(makeUserResponse()),
-      [`${TENANT}/application/applicationsByUser/user1?pageSize=2000`]: ok(makeAppsResponse([])),
+      [`${TENANT}/application/applicationsByUser/user1?pageSize=2000`]: ok(makeAppsResponse([
+        makeApp({ contextPath: 'svc-no-spec', openApiSpec: undefined }),
+      ])),
     })
-    await startDiscovery(TENANT, AUTH)
-    expect(getReadySpecs(TENANT)).toEqual([])
+    const result = await startDiscovery(TENANT, AUTH)
+    expect(result.specs).toEqual([])
+    expect(result.installedContextPaths.has('svc-no-spec')).toBe(true)
   })
 })
 
@@ -389,16 +373,17 @@ describe('awaiting startDiscovery', () => {
     bustApiSpecCache()
   })
 
-  it('awaiting startDiscovery returns empty array when discovery finds nothing', async () => {
+  it('awaiting startDiscovery returns empty DiscoveryResult when discovery finds nothing', async () => {
     stubFetch({
       [`${TENANT}/user/currentUser`]: ok(makeUserResponse()),
       [`${TENANT}/application/applicationsByUser/user1?pageSize=2000`]: ok(makeAppsResponse([])),
     })
-    const specs = await startDiscovery(TENANT, AUTH)
-    expect(specs).toEqual([])
+    const result = await startDiscovery(TENANT, AUTH)
+    expect(result.specs).toEqual([])
+    expect(result.installedContextPaths.size).toBe(0)
   })
 
-  it('awaiting an in-flight startDiscovery promise returns resolved specs', async () => {
+  it('awaiting an in-flight startDiscovery promise returns the same DiscoveryResult', async () => {
     const rawSpec = makeSpec({ '/a': { get: {} } })
     stubFetch({
       [`${TENANT}/user/currentUser`]: ok(makeUserResponse()),
@@ -407,28 +392,21 @@ describe('awaiting startDiscovery', () => {
       ])),
       [`${TENANT}/service/svc/spec.json`]: ok(rawSpec),
     })
-    // Concurrent callers both get the same promise
     const [a, b] = await Promise.all([startDiscovery(TENANT, AUTH), startDiscovery(TENANT, AUTH)])
     expect(a).toEqual(b)
-    expect(a).toHaveLength(1)
+    expect(a.specs).toHaveLength(1)
   })
 
-  it('getAllReadySpecs returns empty before any promise resolves', () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-      ok: true,
-      json: () => new Promise(() => { /* never */ }),
-    } as unknown as Response)
-    startDiscovery(TENANT, AUTH)
-    expect(getAllReadySpecs()).toEqual([])
-  })
-
-  it('getAllReadySpecs merges snapshots from multiple tenants after resolution', async () => {
-    const specA = { contextPath: 'svcA', appLabel: 'A', specLabel: 'A', servicePrefix: '/service/svcA', spec: {} }
-    const specB = { contextPath: 'svcB', appLabel: 'B', specLabel: 'B', servicePrefix: '/service/svcB', spec: {} }
-    setCachedApiSpecs(TENANT, [specA])
-    setCachedApiSpecs('https://other.cumulocity.com', [specB])
-    const all = getAllReadySpecs()
-    expect(all.map((s) => s.contextPath).sort()).toEqual(['svcA', 'svcB'])
+  it('two concurrent startDiscovery calls return the same promise (idempotent)', async () => {
+    stubFetch({
+      [`${TENANT}/user/currentUser`]: ok(makeUserResponse()),
+      [`${TENANT}/application/applicationsByUser/user1?pageSize=2000`]: ok(makeAppsResponse([])),
+    })
+    const p1 = startDiscovery(TENANT, AUTH)
+    const p2 = startDiscovery(TENANT, AUTH)
+    expect(p1).toBe(p2)
+    const [a, b] = await Promise.all([p1, p2])
+    expect(a).toEqual(b)
   })
 })
 
@@ -451,9 +429,8 @@ describe('refreshApiSpecs', () => {
       [`${TENANT}/service/new/spec.json`]: ok(rawSpec),
     })
 
-    const specs = await refreshApiSpecs(TENANT, AUTH)
-    expect(specs.map((s) => s.contextPath)).toEqual(['new'])
-    expect(getReadySpecs(TENANT)?.map((s) => s.contextPath)).toEqual(['new'])
+    const result = await refreshApiSpecs(TENANT, AUTH)
+    expect(result.specs.map((s) => s.contextPath)).toEqual(['new'])
   })
 })
 
@@ -476,7 +453,6 @@ describe('auto-refresh timer', () => {
 
     // Initial discovery
     await startDiscovery(TENANT, AUTH)
-    expect(getReadySpecs(TENANT)).toEqual([])
 
     // Advance past the refresh interval
     await vi.advanceTimersByTimeAsync(DISCOVERY_REFRESH_INTERVAL_MS + 1)

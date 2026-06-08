@@ -2,7 +2,6 @@ import { HttpTransport } from '@tmcp/transport-http'
 import consola from 'consola'
 import { getQuery, H3, HTTPError, serve } from 'h3'
 import { c8yMcpServer, setupMcpServer } from './server'
-import { getAuthContext } from './ctx/auth'
 import process from 'node:process'
 import { extractAuthFromHeaders } from './utils/auth'
 import {
@@ -18,8 +17,8 @@ import {
 import { Buffer } from 'node:buffer'
 import { refreshApiSpecs, startDiscovery } from './utils/api-discovery'
 import { createC8yAuthHeaders } from './utils/client'
-
-globalThis.executionEnvironment = 'server'
+import { KNOWN_BUNDLED_SERVICES, createServiceUnavailableRestrictionRules } from './utils/openapi'
+import { resolveSpecs } from './utils/spec-resolution'
 
 // Eagerly start API spec discovery at server startup using Cumulocity bootstrap
 // credentials if they are available in the environment. This warms the cache
@@ -35,15 +34,15 @@ if (C8Y_BASEURL && C8Y_BOOTSTRAP_USER && C8Y_BOOTSTRAP_PASSWORD) {
     : C8Y_BOOTSTRAP_USER
   const bootstrapAuth = `Basic ${Buffer.from(`${principal}:${C8Y_BOOTSTRAP_PASSWORD}`).toString('base64')}`
   startDiscovery(C8Y_BASEURL, { Authorization: bootstrapAuth })
-    .then((specs) => {
-      consola.info(`Startup discovery complete: ${specs.length} microservice API spec(s) found`)
+    .then((result) => {
+      consola.info(`Startup discovery complete: ${result.specs.length} microservice API spec(s) found`)
     })
     .catch((err: unknown) => {
       consola.warn('Startup API spec discovery failed:', err instanceof Error ? err.message : String(err))
     })
 }
 
-setupMcpServer()
+setupMcpServer('server')
 
 const transport = new HttpTransport(c8yMcpServer, {
   path: '/mcp',
@@ -54,9 +53,23 @@ const app = new H3().all('/mcp', async (event) => {
   // Extract authentication from request headers
   const credentials = extractAuthFromHeaders(event.req)
 
-  // Start discovery for this tenant (idempotent) and await it.
-  // The promise resolves immediately on subsequent requests once the cache is warm.
-  const discoveredSpecs = await startDiscovery(credentials.tenantUrl, createC8yAuthHeaders(credentials))
+  // Per-tenant discovery cache. The first request for a tenant blocks until
+  // discovery completes; subsequent requests resolve immediately from the cached
+  // promise. The 30-minute refresh timer replaces the promise so new callers
+  // automatically await the refreshed result while old callers keep their result.
+  const discoveryResult = await startDiscovery(credentials.tenantUrl, createC8yAuthHeaders(credentials))
+  const { specs: discoveredSpecs, installedContextPaths } = discoveryResult
+
+  // Auto-restrict execute access to known bundled services not installed on this tenant.
+  const unavailableContextPaths = Object.values(KNOWN_BUNDLED_SERVICES)
+    .filter((s) => !installedContextPaths.has(s.contextPath))
+    .map((s) => s.contextPath)
+  const autoRestrictions = createServiceUnavailableRestrictionRules(unavailableContextPaths)
+
+  // Flat spec map: bundled (resolved against discovery) + non-bundled discovered services.
+  // specRemoval=true: service-backed bundled specs absent from this tenant are injected as null.
+  const specs = resolveSpecs(discoveredSpecs, installedContextPaths, true)
+
   const query = getQuery(event)
   const restrictionSources = collectServerRestrictionSources(query, event.req.headers)
   const { parsedRules: restrictions, failedRules: failedRestrictions } = parseRestrictionRule(restrictionSources)
@@ -86,9 +99,15 @@ const app = new H3().all('/mcp', async (event) => {
     })
   }
 
-  // Set auth context for the request
-  const authContext = getAuthContext()
-  return authContext.call(credentials, () => transport.respond(event.req, { restrictions, allowRules: parsedAllowRules, discoveredSpecs }))
+  const effectiveRestrictions = autoRestrictions.length > 0 ? [...restrictions, ...autoRestrictions] : restrictions
+
+  return transport.respond(event.req, {
+    env: 'server' as const,
+    auth: { tenantUrl: credentials.tenantUrl, authorizationHeader: credentials.authorizationHeader },
+    restrictions: effectiveRestrictions,
+    allowRules: parsedAllowRules,
+    specs,
+  })
 })
 
 // Bust the cache for the requesting tenant and restart discovery immediately.
@@ -97,11 +116,12 @@ app.post('/refresh-apis', async (event) => {
   try {
     const credentials = extractAuthFromHeaders(event.req)
     const authHeaders = createC8yAuthHeaders(credentials)
-    const specs = await refreshApiSpecs(credentials.tenantUrl, authHeaders)
+    const result = await refreshApiSpecs(credentials.tenantUrl, authHeaders)
     return {
       message: 'API spec discovery completed',
       tenantUrl: credentials.tenantUrl,
-      discovered: specs.map((s) => ({
+      installedContextPaths: [...result.installedContextPaths],
+      discovered: result.specs.map((s) => ({
         contextPath: s.contextPath,
         specLabel: s.specLabel,
         pathCount: Object.keys(

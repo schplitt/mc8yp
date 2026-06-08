@@ -62,15 +62,20 @@ interface C8yApplication {
 // ---------------------------------------------------------------------------
 
 /**
- * The canonical cache. Awaiting any entry gives the discovered specs.
+ * Full result of one discovery run for a tenant.
  */
-const specPromises = new Map<string, Promise<DiscoveredApiSpec[]>>()
+export interface DiscoveryResult {
+  /**
+   * Apps that expose an OpenAPI spec URL and whose spec fetched successfully.
+   */
+  specs: DiscoveredApiSpec[]
+  /**
+   * All subscribed app context paths regardless of whether they have a spec URL.
+   */
+  installedContextPaths: ReadonlySet<string>
+}
 
-/**
- * Resolved snapshot updated whenever a promise settles.
- * Used by sync callers (description lambdas in CLI mode) that cannot await.
- */
-const specSnapshots = new Map<string, DiscoveredApiSpec[]>()
+const specPromises = new Map<string, Promise<DiscoveryResult>>()
 
 const refreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
@@ -96,14 +101,10 @@ function scheduleRefresh(key: string, authHeaders: Record<string, string>): void
   clearRefreshTimer(key)
   const timer = setTimeout(() => {
     refreshTimers.delete(key)
-    // Replace the cache entry — anyone already awaiting the old promise
-    // gets the old result; new awaits get fresh data.
-    const promise = discoverApiSpecs(key, authHeaders).catch((): DiscoveredApiSpec[] => [])
+    const empty: DiscoveryResult = { specs: [], installedContextPaths: new Set() }
+    const promise = discoverApiSpecs(key, authHeaders).catch((): DiscoveryResult => empty)
     specPromises.set(key, promise)
-    promise.then((specs) => {
-      specSnapshots.set(key, specs)
-      scheduleRefresh(key, authHeaders)
-    }).catch(() => {})
+    promise.then(() => scheduleRefresh(key, authHeaders)).catch(() => {})
   }, DISCOVERY_REFRESH_INTERVAL_MS)
   timer.unref?.()
   refreshTimers.set(key, timer)
@@ -122,20 +123,18 @@ function scheduleRefresh(key: string, authHeaders: Record<string, string>): void
 export function startDiscovery(
   tenantUrl: string,
   authHeaders: Record<string, string>,
-): Promise<DiscoveredApiSpec[]> {
+): Promise<DiscoveryResult> {
   const key = normalizeTenantUrl(tenantUrl)
   if (specPromises.has(key))
     return specPromises.get(key)!
 
-  const promise = discoverApiSpecs(key, authHeaders).catch((err: unknown): DiscoveredApiSpec[] => {
+  const empty: DiscoveryResult = { specs: [], installedContextPaths: new Set() }
+  const promise = discoverApiSpecs(key, authHeaders).catch((err: unknown): DiscoveryResult => {
     consola.warn(`API spec discovery failed for ${key}:`, err instanceof Error ? err.message : String(err))
-    return []
+    return empty
   })
 
-  promise.then((specs) => {
-    specSnapshots.set(key, specs)
-    scheduleRefresh(key, authHeaders)
-  }).catch(() => {})
+  promise.then(() => scheduleRefresh(key, authHeaders)).catch(() => {})
 
   specPromises.set(key, promise)
   return promise
@@ -149,11 +148,10 @@ export function startDiscovery(
 export function refreshApiSpecs(
   tenantUrl: string,
   authHeaders: Record<string, string>,
-): Promise<DiscoveredApiSpec[]> {
+): Promise<DiscoveryResult> {
   const key = normalizeTenantUrl(tenantUrl)
   clearRefreshTimer(key)
   specPromises.delete(key)
-  specSnapshots.delete(key)
   return startDiscovery(key, authHeaders)
 }
 
@@ -166,11 +164,9 @@ export function bustApiSpecCache(tenantUrl?: string): void {
     const key = normalizeTenantUrl(tenantUrl)
     clearRefreshTimer(key)
     specPromises.delete(key)
-    specSnapshots.delete(key)
   } else {
     for (const key of specPromises.keys()) clearRefreshTimer(key)
     specPromises.clear()
-    specSnapshots.clear()
   }
 }
 
@@ -179,32 +175,25 @@ export function bustApiSpecCache(tenantUrl?: string): void {
  * @param tenantUrl - Base URL of the Cumulocity tenant
  * @param specs - Specs to treat as the ready result
  */
-export function setCachedApiSpecs(tenantUrl: string, specs: DiscoveredApiSpec[]): void {
+/**
+ * Seed the cache with a pre-resolved result. Intended for tests.
+ * installedContextPaths defaults to the context paths present in specs.
+ * @param tenantUrl - Base URL of the Cumulocity tenant
+ * @param specs - Discovered specs to cache
+ * @param installedContextPaths - Installed context paths (defaults to spec context paths)
+ */
+export function setCachedApiSpecs(
+  tenantUrl: string,
+  specs: DiscoveredApiSpec[],
+  installedContextPaths?: ReadonlySet<string>,
+): void {
   const key = normalizeTenantUrl(tenantUrl)
   clearRefreshTimer(key)
-  specPromises.set(key, Promise.resolve(specs))
-  specSnapshots.set(key, specs)
-}
-
-/**
- * Synchronously return the last resolved specs for a tenant, or null if
- * discovery has not yet completed. Use startDiscovery + await when you can wait.
- * @param tenantUrl - Base URL of the Cumulocity tenant
- */
-export function getReadySpecs(tenantUrl: string): DiscoveredApiSpec[] | null {
-  return specSnapshots.get(normalizeTenantUrl(tenantUrl)) ?? null
-}
-
-/**
- * Synchronously return the merged union of all resolved tenant snapshots,
- * deduplicated by contextPath (last inserted wins). Safe to call at any time.
- */
-export function getAllReadySpecs(): DiscoveredApiSpec[] {
-  const merged = new Map<string, DiscoveredApiSpec>()
-  for (const specs of specSnapshots.values()) {
-    for (const spec of specs) merged.set(spec.contextPath, spec)
+  const result: DiscoveryResult = {
+    specs,
+    installedContextPaths: installedContextPaths ?? new Set(specs.map((s) => s.contextPath)),
   }
-  return [...merged.values()]
+  specPromises.set(key, Promise.resolve(result))
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +223,7 @@ function rewriteDiscoveredSpecPaths(spec: Record<string, unknown>, servicePrefix
 export async function discoverApiSpecs(
   tenantUrl: string,
   authHeaders: Record<string, string>,
-): Promise<DiscoveredApiSpec[]> {
+): Promise<DiscoveryResult> {
   const baseUrl = normalizeTenantUrl(tenantUrl)
   const headers: Record<string, string> = { ...authHeaders, Accept: 'application/json' }
 
@@ -272,8 +261,16 @@ export async function discoverApiSpecs(
     seenContextPaths.set(app.contextPath, app.name)
   }
 
+  // Track all installed context paths (not just those with a spec URL)
+  const installedContextPaths = new Set<string>(
+    apps
+      .filter((app): app is C8yApplication & { contextPath: string } =>
+        typeof app.contextPath === 'string' && app.contextPath.length > 0)
+      .map((app) => app.contextPath),
+  )
+
   const seenForDownload = new Set<string>()
-  const discovered: DiscoveredApiSpec[] = []
+  const specs: DiscoveredApiSpec[] = []
 
   for (const app of appsWithSpec) {
     if (seenForDownload.has(app.contextPath))
@@ -291,7 +288,7 @@ export async function discoverApiSpecs(
         const specRes = await fetch(`${baseUrl}${servicePrefix}/${entry.path.replace(/^\//, '')}`, { headers })
         if (!specRes.ok)
           continue
-        discovered.push({
+        specs.push({
           contextPath: app.contextPath,
           appLabel: app.name,
           specLabel: entry.label,
@@ -302,5 +299,5 @@ export async function discoverApiSpecs(
     }
   }
 
-  return discovered
+  return { specs, installedContextPaths }
 }

@@ -3,7 +3,10 @@
 import { encode } from '@toon-format/toon'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildExecutePrelude, buildExecuteScript, execute, query } from '../src/codemode/execute'
+import type { Specs } from '../src/utils/spec-resolution'
+import { resolveSpecs } from '../src/utils/spec-resolution'
 import { bustApiSpecCache, setCachedApiSpecs } from '../src/utils/api-discovery'
+import { c8yMcpServer } from '../src/server-instance'
 import { parseAllowRule, parseRestrictionRule } from '../src/utils/restrictions'
 import type { AllowRule, RestrictionRule } from '../src/utils/restrictions'
 import * as client from '../src/utils/client'
@@ -402,10 +405,42 @@ describe('buildExecuteScript', () => {
 })
 
 describe('query', () => {
-  it('exposes coreSpec and serviceSpecs through the query sandbox', async () => {
-    const result = await query('() => ({ hasCore: !!coreSpec, hasServiceSpecs: typeof serviceSpecs === "object" })')
+  it('exposes coreSpec, specsEnabled, and serviceSpecs through the query sandbox', async () => {
+    const specs: Specs = { core: { paths: {} } }
+    const result = await query(
+      '() => ({ hasCore: !!coreSpec, hasSpecsEnabled: typeof specsEnabled === "object", hasServiceSpecs: typeof serviceSpecs === "object" })',
+      specs,
+    )
+    expect(JSON.parse(result)).toEqual({ hasCore: true, hasSpecsEnabled: true, hasServiceSpecs: true })
+  })
 
-    expect(JSON.parse(result)).toEqual({ hasCore: true, hasServiceSpecs: true })
+  it('injects each bundled registry key as a named ${key}Spec binding', async () => {
+    const result = await query('() => ({ hasCore: !!coreSpec })', { core: { paths: {} } } satisfies Specs)
+    expect(JSON.parse(result)).toEqual({ hasCore: true })
+  })
+
+  it('injects null for bundled entries marked unavailable; specsEnabled reflects that', async () => {
+    const result = await query('() => ({ coreSpec, specsEnabled })', { core: null } satisfies Specs)
+    expect(JSON.parse(result)).toEqual({ coreSpec: null, specsEnabled: { core: false } })
+  })
+
+  it('reads specs from c8yMcpServer.ctx.custom when no specsOverride is passed', async () => {
+    // ctx is an AsyncLocalStorage-backed getter — mock it instead of mutating.
+    const mockSpecs = resolveSpecs([], new Set(), true)
+    const ctxSpy = vi.spyOn(c8yMcpServer, 'ctx', 'get').mockReturnValue({
+      custom: { env: 'cli' as const, restrictions: [], allowRules: [], specs: mockSpecs },
+    } as unknown as ReturnType<typeof c8yMcpServer['ctx']['valueOf']>)
+    try {
+      const result = await query('() => typeof coreSpec !== "undefined"')
+      expect(JSON.parse(result)).toBe(true)
+    } finally {
+      ctxSpy.mockRestore()
+    }
+  })
+
+  it('puts non-bundled-registry entries into serviceSpecs', async () => {
+    const result = await query('() => Object.keys(serviceSpecs)', { core: { paths: {} }, svc: { paths: {} } } satisfies Specs)
+    expect(JSON.parse(result)).toEqual(['svc'])
   })
 })
 
