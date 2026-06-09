@@ -1,10 +1,8 @@
 export const HTTP_METHODS = ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE'] as const
 export const RESTRICTION_QUERY_KEYS = ['restriction', 'restrict', 'r'] as const
 export const ALLOW_QUERY_KEYS = ['allowed', 'allow', 'a'] as const
-export const OPENAPI_DISABLED_QUERY_KEY = 'openapi-disabled' as const
 export const RESTRICTION_HEADER = 'mc8yp-restriction'
 export const ALLOW_HEADER = 'mc8yp-allow'
-export const OPENAPI_DISABLED_HEADER = 'mc8yp-openapi-disabled'
 
 export type HttpMethod = (typeof HTTP_METHODS)[number]
 export type RestrictionMethod = HttpMethod | '*'

@@ -93,7 +93,7 @@ src/openapi-modules.d.ts      Ambient type declarations for the `#core-openapi` 
 
 1. `src/index.ts` starts the HTTP server and exposes `/mcp` and `/health`.
 2. It sets `globalThis.executionEnvironment = 'server'`.
-3. It extracts auth from request headers, restrictions from `restriction`, `restrict`, and `r` query parameters plus the `mc8yp-restriction` header, allow rules from `allowed`, `allow`, and `a` query parameters plus the `mc8yp-allow` header, and bundled OpenAPI disablement from the `openapi-disabled` query parameter plus the `mc8yp-openapi-disabled` header.
+3. It extracts auth from request headers, restrictions from `restriction`, `restrict`, and `r` query parameters plus the `mc8yp-restriction` header, and allow rules from `allowed`, `allow`, and `a` query parameters plus the `mc8yp-allow` header.
 4. It stores auth in request-local context and forwards the request to the shared MCP server.
 5. It configures the HTTP transport in POST-only mode (`disableSse: true`) because the optional long-lived GET/SSE channel proved unstable behind Cumulocity microservice ingress.
 
