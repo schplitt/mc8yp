@@ -1,5 +1,14 @@
 {
   "sources": {
+    "dtm": [
+      {
+        "version": "release",
+        "label": "DTM release (latest)",
+        "url": "https://cumulocity.com/api/dtm/dist/c8y-dtm-oas.json",
+        "servicePrefix": "/service/dtm",
+        "default": true
+      }
+    ],
     "core": [
       {
         "version": "release",
@@ -31,7 +40,8 @@
       "artifact": "core-release",
       "default": true,
       "apis": {
-        "core": "release"
+        "core": "release",
+        "dtm": "release"
       }
     },
     {
@@ -39,7 +49,8 @@
       "label": "2026",
       "artifact": "core-2026",
       "apis": {
-        "core": "2026"
+        "core": "2026",
+        "dtm": "release"
       }
     },
     {
@@ -47,7 +58,8 @@
       "label": "2025",
       "artifact": "core-2025",
       "apis": {
-        "core": "2025"
+        "core": "2025",
+        "dtm": "release"
       }
     },
     {
@@ -55,7 +67,8 @@
       "label": "2024",
       "artifact": "core-2024",
       "apis": {
-        "core": "2024"
+        "core": "2024",
+        "dtm": "release"
       }
     }
   ]

@@ -158,6 +158,66 @@ export function coreOpenApiPlugin(options: { mode: 'cli' } | { mode: 'server', b
   return createOpenApiPlugin('core', options)
 }
 
+/**
+ * Virtual module `#bundled-services` — exports BUNDLED_SERVICE_SPECS.
+ *
+ * Loops all entries in openapi-builds.json sources that carry a servicePrefix
+ * and emits one DiscoveredApiSpec-shaped object per entry. For CLI builds the
+ * default version is used; for server builds the version is taken from
+ * build.apis[key]. Adding a future bundled service requires only dropping the
+ * JSON file under openapi/<key>/<version>.json and a source entry with
+ * servicePrefix in openapi-builds.json — no code changes here.
+ * @param options
+ */
+export function bundledServicesPlugin(options: { mode: 'cli' } | { mode: 'server', build: OpenApiBuildEntry }) {
+  const VIRTUAL_ID = '#bundled-services'
+  const RESOLVED_ID = '\0virtual:bundled-services'
+
+  return {
+    name: 'mc8yp:bundled-services',
+    resolveId(id: string) {
+      if (id === VIRTUAL_ID)
+        return RESOLVED_ID
+      return null
+    },
+    load(id: string) {
+      if (id !== RESOLVED_ID)
+        return null
+
+      const entryLines: string[] = []
+
+      for (const [key, sourceEntries] of Object.entries(OPENAPI_CONFIG.sources)) {
+        // Only process service-backed sources (those with a servicePrefix)
+        const serviceEntry = (sourceEntries as OpenApiSourceEntry[]).find((e) => e.servicePrefix != null)
+        if (!serviceEntry)
+          continue
+
+        // Resolve the version to inline
+        const version: string | undefined = options.mode === 'server'
+          ? (options.build.apis[key] ?? (sourceEntries as OpenApiSourceEntry[]).find((e) => e.default)?.version ?? (sourceEntries as OpenApiSourceEntry[])[0]?.version)
+          : ((sourceEntries as OpenApiSourceEntry[]).find((e) => e.default)?.version ?? (sourceEntries as OpenApiSourceEntry[])[0]?.version)
+
+        if (version == null)
+          continue
+
+        const entry = (sourceEntries as OpenApiSourceEntry[]).find((e) => e.version === version)
+        if (!entry?.servicePrefix)
+          continue
+
+        const rawJson = readFileSync(path.join(rootDir, 'openapi', key, `${version}.json`), 'utf8').trim()
+        const rewrittenJson = rewriteSpecPaths(rawJson, entry.servicePrefix)
+        const contextPath = entry.servicePrefix.replace(/^\/service\//, '')
+
+        entryLines.push(
+          `  { contextPath: ${JSON.stringify(contextPath)}, appLabel: ${JSON.stringify(entry.label)}, specLabel: ${JSON.stringify(entry.label)}, servicePrefix: ${JSON.stringify(entry.servicePrefix)}, spec: ${rewrittenJson} }`,
+        )
+      }
+
+      return `export const BUNDLED_SERVICE_SPECS = Object.freeze([\n${entryLines.join(',\n')}\n]);\n`
+    },
+  }
+}
+
 const serverBuilds = OPENAPI_CONFIG.builds.map((build) => ({
   name: `mc8yp-server-build-${build.version}`,
   entry: { server: './src/index.ts' },
@@ -165,7 +225,7 @@ const serverBuilds = OPENAPI_CONFIG.builds.map((build) => ({
   clean: build.version === OPENAPI_CONFIG.builds[0]?.version,
   dts: false,
   format: 'module' as const,
-  plugins: [coreOpenApiPlugin({ mode: 'server', build })],
+  plugins: [coreOpenApiPlugin({ mode: 'server', build }), bundledServicesPlugin({ mode: 'server', build })],
   outDir: `.output/${build.version}`,
 }))
 
@@ -178,7 +238,7 @@ export default defineConfig([
     clean: true,
     dts: false,
     format: 'module',
-    plugins: [coreOpenApiPlugin({ mode: 'cli' })],
+    plugins: [coreOpenApiPlugin({ mode: 'cli' }), bundledServicesPlugin({ mode: 'cli' })],
     // no external -> everything starting with @c8y/ should be bundled for cli usage
     noExternal: [/^@c8y\/.*$/],
     outDir: 'dist',

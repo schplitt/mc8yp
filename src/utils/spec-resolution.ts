@@ -1,76 +1,87 @@
+import { BUNDLED_SERVICE_SPECS } from '#bundled-services'
+import { getCoreOpenApiSpec } from '#core-openapi'
 import type { DiscoveredApiSpec } from './api-discovery'
-import { BUNDLED_SPEC_REGISTRY } from './openapi'
+
+interface OperationInfo {
+  summary?: string
+  description?: string
+  tags?: string[]
+  parameters?: Array<{ name: string, in: string, required?: boolean, schema?: unknown, description?: string }>
+  requestBody?: { required?: boolean, content?: Record<string, { schema?: unknown }> }
+  responses?: Record<string, { description?: string, content?: Record<string, { schema?: unknown }> }>
+}
+
+export interface PathItem {
+  get?: OperationInfo
+  post?: OperationInfo
+  put?: OperationInfo
+  patch?: OperationInfo
+  delete?: OperationInfo
+}
+export interface Spec {
+  paths: Record<string, PathItem>
+  tags?: Array<{ name: string, description?: string }>
+}
 
 /**
- * Flat map of all specs available for the query sandbox — bundled and
- * discovered services in one object, keyed by the name used as the sandbox
- * binding (e.g. "core" → coreSpec, "myservice" → serviceSpecs entry).
- *
- * A null value means the service is not installed on this tenant and
- * specRemoval is enabled. The binding is still injected so the agent can
- * check specsEnabled before attempting to use it.
- *
- * Path rewriting guarantee: all spec values have their paths already
- * prefixed with the service route before being placed in this map.
- * Bundled service specs are rewritten at build time (tsdown.config.ts).
- * Discovered specs are rewritten in discoverApiSpecs before caching.
+ * Service-spec map keyed by Cumulocity contextPath.
+ * A key is only present when the spec is actually usable (live discovery,
+ * bundled fallback for installed services, or bundled when specRemoval is
+ * disabled). An absent key means the spec is unavailable for this tenant.
  */
-export type Specs = Record<string, unknown | null>
+export type ServiceSpecs = Record<string, Spec>
 
 /**
- * Resolve all specs for the current tenant into a single flat map.
+ * Everything the query sandbox needs in one object.
+ * `core` is always populated from the bundled core OpenAPI snapshot.
+ * `specs` carries bundled service specs (e.g. dtm) plus any non-bundled
+ * services discovered live on the tenant.
+ */
+export interface ResolvedSpecs {
+  core: Spec
+  specs: ServiceSpecs
+}
+
+/**
+ * Resolve every spec for the current tenant.
  *
- * Bundled registry entries (see BUNDLED_SPEC_REGISTRY in openapi.ts):
- *   - No contextPath (core): always included.
- *   - With contextPath (service-backed, e.g. dtm once added):
- *     A. Service installed + live OpenAPI spec URL → use discovered spec
- *     B. Service installed + no spec URL in manifest → bundled spec fallback
- *     C. Service not installed → null (specRemoval true) or bundled (false)
+ * For each bundled service spec (#bundled-services):
+ *   - live discovery available           → use the live spec
+ *   - service installed, no live spec    → use the bundled fallback
+ *   - service not installed              → null (specRemoval) or bundled
  *
- * Non-bundled discovered services are added as-is, keyed by their contextPath.
- * @param discoveredSpecs
- * @param installedContextPaths
- * @param specRemoval
+ * Non-bundled discovered services pass through as-is, keyed by contextPath.
+ *
+ * @param discoveredSpecs Result of live API discovery for the tenant.
+ * @param installedContextPaths Subscribed app context paths on the tenant.
+ * @param specRemoval When true, absent bundled services collapse to null.
  */
 export function resolveSpecs(
   discoveredSpecs: readonly DiscoveredApiSpec[],
   installedContextPaths: ReadonlySet<string>,
   specRemoval: boolean,
-): Specs {
-  const result: Specs = {}
+): ResolvedSpecs {
+  const specs: ServiceSpecs = {}
+  const bundledContextPaths = new Set<string>()
 
-  // Bundled registry entries
-  for (const entry of BUNDLED_SPEC_REGISTRY) {
-    const contextPath = 'contextPath' in entry ? entry.contextPath : undefined
-
-    if (contextPath == null) {
-      result[entry.key] = entry.spec
-      continue
+  for (const bundled of BUNDLED_SERVICE_SPECS) {
+    bundledContextPaths.add(bundled.contextPath)
+    const live = discoveredSpecs.find((s) => s.contextPath === bundled.contextPath)
+    if (live) {
+      specs[bundled.contextPath] = live.spec
+    } else if (installedContextPaths.has(bundled.contextPath)) {
+      specs[bundled.contextPath] = bundled.spec
+    } else if (!specRemoval) {
+      specs[bundled.contextPath] = bundled.spec
     }
+    // else: omit the key entirely — absence = unavailable.
+  }
 
-    const discovered = discoveredSpecs.find((s) => s.contextPath === contextPath)
-    const installed = installedContextPaths.has(contextPath)
-
-    if (discovered) {
-      result[entry.key] = discovered.spec // A: live spec
-    } else if (installed) {
-      result[entry.key] = entry.spec // B: installed, use bundled fallback
-    } else {
-      result[entry.key] = specRemoval ? null : entry.spec // C
+  for (const live of discoveredSpecs) {
+    if (!bundledContextPaths.has(live.contextPath)) {
+      specs[live.contextPath] = live.spec
     }
   }
 
-  // Non-bundled discovered services
-  const knownContextPaths = new Set(
-    BUNDLED_SPEC_REGISTRY
-      .filter((e): e is (typeof e & { contextPath: string }) => 'contextPath' in e && e.contextPath != null)
-      .map((e) => e.contextPath),
-  )
-  for (const ds of discoveredSpecs) {
-    if (!knownContextPaths.has(ds.contextPath)) {
-      result[ds.contextPath] = ds.spec
-    }
-  }
-
-  return result
+  return { core: getCoreOpenApiSpec(), specs }
 }

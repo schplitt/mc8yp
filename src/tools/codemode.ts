@@ -1,16 +1,14 @@
 import { defineTool } from 'tmcp/tool'
 import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
-import { getCoreOpenApiLabel } from '#core-openapi'
 import { execute, query } from '../codemode/execute'
-import { BUNDLED_OPENAPI_ENTRIES } from '../utils/openapi'
 
 function createCodeSchema(description: string) {
   return v.pipe(v.string(), v.minLength(1), v.description(description))
 }
 
 function getOpenApiNote(): string {
-  return `This MCP exposes the ${getCoreOpenApiLabel()} bundled core OpenAPI snapshot (${BUNDLED_OPENAPI_ENTRIES.map((e) => `${e.api} ${e.version}`).join(', ')}). Use \`coreSpec\` for inventory, alarms, events, measurements, users, tenants, and the broader Cumulocity REST surface. Microservice APIs discovered on the current tenant are available via \`serviceSpecs\`.`
+  return 'This MCP exposes a bundled Cumulocity core OpenAPI snapshot. Use `coreSpec` for inventory, alarms, events, measurements, users, tenants, and the broader Cumulocity REST surface. Bundled and discovered microservice APIs available on the current tenant are exposed via `serviceSpecs` (keyed by contextPath).'
 }
 
 export function createQueryTool() {

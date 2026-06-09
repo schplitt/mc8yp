@@ -17,7 +17,6 @@ import {
 import { Buffer } from 'node:buffer'
 import { refreshApiSpecs, startDiscovery } from './utils/api-discovery'
 import { createC8yAuthHeaders } from './utils/client'
-import { KNOWN_BUNDLED_SERVICES, createServiceUnavailableRestrictionRules } from './utils/openapi'
 import { resolveSpecs } from './utils/spec-resolution'
 
 // Eagerly start API spec discovery at server startup using Cumulocity bootstrap
@@ -60,14 +59,7 @@ const app = new H3().all('/mcp', async (event) => {
   const discoveryResult = await startDiscovery(credentials.tenantUrl, createC8yAuthHeaders(credentials))
   const { specs: discoveredSpecs, installedContextPaths } = discoveryResult
 
-  // Auto-restrict execute access to known bundled services not installed on this tenant.
-  const unavailableContextPaths = Object.values(KNOWN_BUNDLED_SERVICES)
-    .filter((s) => !installedContextPaths.has(s.contextPath))
-    .map((s) => s.contextPath)
-  const autoRestrictions = createServiceUnavailableRestrictionRules(unavailableContextPaths)
-
-  // Flat spec map: bundled (resolved against discovery) + non-bundled discovered services.
-  // specRemoval=true: service-backed bundled specs absent from this tenant are injected as null.
+  // specRemoval=true: bundled service specs absent from this tenant collapse to null.
   const specs = resolveSpecs(discoveredSpecs, installedContextPaths, true)
 
   const query = getQuery(event)
@@ -99,12 +91,10 @@ const app = new H3().all('/mcp', async (event) => {
     })
   }
 
-  const effectiveRestrictions = autoRestrictions.length > 0 ? [...restrictions, ...autoRestrictions] : restrictions
-
   return transport.respond(event.req, {
     env: 'server' as const,
     auth: { tenantUrl: credentials.tenantUrl, authorizationHeader: credentials.authorizationHeader },
-    restrictions: effectiveRestrictions,
+    restrictions,
     allowRules: parsedAllowRules,
     specs,
   })

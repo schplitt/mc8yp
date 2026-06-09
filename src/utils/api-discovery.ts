@@ -11,6 +11,7 @@
  */
 
 import consola from 'consola'
+import type { PathItem, Spec } from './spec-resolution'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,7 +37,7 @@ export interface DiscoveredApiSpec {
   /**
    * Full OpenAPI document with paths already rewritten to include servicePrefix
    */
-  spec: unknown
+  spec: Spec
 }
 
 // ---------------------------------------------------------------------------
@@ -200,10 +201,10 @@ export function setCachedApiSpecs(
 // Path rewriting — mirrors the build-time rewrite in tsdown.config.ts
 // ---------------------------------------------------------------------------
 
-function rewriteDiscoveredSpecPaths(spec: Record<string, unknown>, servicePrefix: string): Record<string, unknown> {
-  const paths = spec.paths as Record<string, unknown> | undefined
+function rewriteDiscoveredSpecPaths(spec: Spec, servicePrefix: string): Spec {
+  const paths = spec.paths
   if (paths && typeof paths === 'object') {
-    const rewritten: Record<string, unknown> = {}
+    const rewritten: Record<string, PathItem> = {}
     for (const [p, item] of Object.entries(paths)) rewritten[`${servicePrefix}${p}`] = item
     spec = { ...spec, paths: rewritten }
   }
@@ -293,7 +294,7 @@ export async function discoverApiSpecs(
           appLabel: app.name,
           specLabel: entry.label,
           servicePrefix,
-          spec: rewriteDiscoveredSpecPaths(await specRes.json() as Record<string, unknown>, servicePrefix),
+          spec: rewriteDiscoveredSpecPaths(await specRes.json() as Spec, servicePrefix),
         })
       } catch { /* skip individual spec failures */ }
     }
