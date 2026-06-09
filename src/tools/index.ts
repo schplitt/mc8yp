@@ -1,8 +1,8 @@
 import { createExecuteTool, createQueryTool } from './codemode'
 
-export function createTools() {
+export function createTools(env: 'cli' | 'server') {
   return [
-    createQueryTool(),
-    createExecuteTool(),
+    createQueryTool(env),
+    createExecuteTool(env),
   ]
 }

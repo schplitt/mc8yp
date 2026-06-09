@@ -97,13 +97,16 @@ function expectedAllowedRequestMessage(method: string, path: string, allowRules:
 function stubExecuteCtx(opts: {
   restrictions?: readonly RestrictionRule[]
   allowRules?: readonly AllowRule[]
+  env?: 'cli' | 'server'
+  auth?: { tenantUrl: string, authorizationHeader: string } | undefined
 } = {}): () => void {
   const ctxSpy = vi.spyOn(c8yMcpServer, 'ctx', 'get').mockReturnValue({
     custom: {
-      env: 'cli' as const,
+      env: opts.env ?? 'cli',
       restrictions: opts.restrictions ?? [],
       allowRules: opts.allowRules ?? [],
       specs: { core: { paths: {} }, specs: {} },
+      auth: opts.auth,
     },
   } as unknown as ReturnType<typeof c8yMcpServer['ctx']['valueOf']>)
   return () => ctxSpy.mockRestore()
@@ -127,6 +130,21 @@ afterAll(async () => {
   await disposeSandbox()
 })
 
+// CLI-mode execute prepends `Executed against tenant: <url>\n\n`. query
+// appends `\n\n---\n<tenant-aware footer>`. The behavioural tests below
+// strip those off so they keep asserting on the actual function body;
+// dedicated tests further down cover the marker / footer presence
+// explicitly so they cannot regress silently.
+function stripCliTenantMarker(text: string): string {
+  const match = /^Executed against tenant: [^\n]+\n\n/.exec(text)
+  return match ? text.slice(match[0].length) : text
+}
+
+function stripQueryFooter(text: string): string {
+  const idx = text.lastIndexOf('\n\n---\n')
+  return idx === -1 ? text : text.slice(0, idx)
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Sandbox-side wrapper validation — these errors happen *before* any bridge
 // call, so they never touch the network.
@@ -138,7 +156,7 @@ describe('cumulocity.request — sandbox-side input validation', () => {
     try {
       mockAuth(TEST_TENANT)
       const result = await execute(`async () => await cumulocity.request({ path: '/event/events' })`)
-      expect(result).toBe('request method must be a non-empty string')
+      expect(stripCliTenantMarker(result)).toBe('request method must be a non-empty string')
     } finally {
       restore()
     }
@@ -149,7 +167,7 @@ describe('cumulocity.request — sandbox-side input validation', () => {
     try {
       mockAuth(TEST_TENANT)
       const result = await execute(`async () => await cumulocity.request({ method: 'MERGE', path: '/event/events' })`)
-      expect(result).toBe('request method must be one of: DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT, TRACE')
+      expect(stripCliTenantMarker(result)).toBe('request method must be one of: DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT, TRACE')
     } finally {
       restore()
     }
@@ -160,7 +178,7 @@ describe('cumulocity.request — sandbox-side input validation', () => {
     try {
       mockAuth(TEST_TENANT)
       const result = await execute(`async () => await cumulocity.request('hello')`)
-      expect(result).toBe('request options must be an object')
+      expect(stripCliTenantMarker(result)).toBe('request options must be an object')
     } finally {
       restore()
     }
@@ -171,7 +189,7 @@ describe('cumulocity.request — sandbox-side input validation', () => {
     try {
       mockAuth(TEST_TENANT)
       const result = await execute(`async () => await cumulocity.request({ method: 'GET', path: '' })`)
-      expect(result).toBe('request path must be a non-empty string')
+      expect(stripCliTenantMarker(result)).toBe('request path must be a non-empty string')
     } finally {
       restore()
     }
@@ -192,7 +210,7 @@ describe('cumulocity.request — policy enforcement (middleware)', () => {
       const result = await execute(
         `async () => await cumulocity.request({ method: 'GET', path: '/inventory/managedObjects?pageSize=5' })`,
       )
-      expect(result).toBe(
+      expect(stripCliTenantMarker(result)).toBe(
         expectedRestrictedRequestMessage('GET', '/inventory/managedObjects', ['GET:/inventory/**']),
       )
     } finally {
@@ -207,7 +225,7 @@ describe('cumulocity.request — policy enforcement (middleware)', () => {
       const result = await execute(
         `async () => await cumulocity.request({ method: 'GET', path: '/alarm/alarms?pageSize=5' })`,
       )
-      expect(result).toBe(
+      expect(stripCliTenantMarker(result)).toBe(
         expectedAllowedRequestMessage('GET', '/alarm/alarms', ['GET:/inventory/**']),
       )
     } finally {
@@ -225,7 +243,7 @@ describe('cumulocity.request — policy enforcement (middleware)', () => {
       const result = await execute(
         `async () => await cumulocity.request({ method: 'GET', path: '/inventory/managedObjects?pageSize=5' })`,
       )
-      expect(result).toBe(
+      expect(stripCliTenantMarker(result)).toBe(
         expectedRestrictedRequestMessage('GET', '/inventory/managedObjects', ['GET:/inventory/managedObjects']),
       )
     } finally {
@@ -326,7 +344,7 @@ describe('cumulocity.request — success path', () => {
         `async () => await cumulocity.request({ method: 'POST', path: '/event/events' })`,
       )
 
-      expect(result).toBe(encode({ ok: true }))
+      expect(stripCliTenantMarker(result)).toBe(encode({ ok: true }))
       expect(testServer.requests).toHaveLength(1)
       expect(testServer.requests[0]!.method).toBe('POST')
       expect(testServer.requests[0]!.url).toBe('/event/events')
@@ -344,7 +362,7 @@ describe('cumulocity.request — success path', () => {
         `async () => await cumulocity.request({ method: 'GET', path: '/inventory/managedObjects?pageSize=5' })`,
       )
 
-      expect(result).toBe(encode({ ok: true }))
+      expect(stripCliTenantMarker(result)).toBe(encode({ ok: true }))
       expect(testServer.requests[0]!.method).toBe('GET')
       expect(testServer.requests[0]!.url).toBe('/inventory/managedObjects?pageSize=5')
     } finally {
@@ -424,9 +442,15 @@ describe('restriction & allow rule parsing rejects malicious payloads', () => {
 // ─────────────────────────────────────────────────────────────────────────
 
 describe('query', () => {
-  function withSpecs(specs: ResolvedSpecs): () => void {
+  function withSpecs(specs: ResolvedSpecs, auth?: { tenantUrl: string, authorizationHeader: string }): () => void {
     const ctxSpy = vi.spyOn(c8yMcpServer, 'ctx', 'get').mockReturnValue({
-      custom: { env: 'cli' as const, restrictions: [], allowRules: [], specs },
+      custom: {
+        env: 'cli' as const,
+        restrictions: [],
+        allowRules: [],
+        specs,
+        auth,
+      },
     } as unknown as ReturnType<typeof c8yMcpServer['ctx']['valueOf']>)
     return () => ctxSpy.mockRestore()
   }
@@ -437,7 +461,7 @@ describe('query', () => {
       const result = await query(
         '() => ({ hasCore: !!coreSpec, hasSpecsEnabled: typeof specsEnabled === "object", hasServiceSpecs: typeof serviceSpecs === "object" })',
       )
-      expect(JSON.parse(result)).toEqual({ hasCore: true, hasSpecsEnabled: true, hasServiceSpecs: true })
+      expect(JSON.parse(stripQueryFooter(result))).toEqual({ hasCore: true, hasSpecsEnabled: true, hasServiceSpecs: true })
     } finally {
       restore()
     }
@@ -447,7 +471,7 @@ describe('query', () => {
     const restore = withSpecs({ core: { paths: { '/inventory/managedObjects': {} } }, specs: {} })
     try {
       const result = await query('() => Object.keys(coreSpec.paths)')
-      expect(JSON.parse(result)).toEqual(['/inventory/managedObjects'])
+      expect(JSON.parse(stripQueryFooter(result))).toEqual(['/inventory/managedObjects'])
     } finally {
       restore()
     }
@@ -457,7 +481,7 @@ describe('query', () => {
     const restore = withSpecs(resolveSpecs([], new Set()))
     try {
       const result = await query('() => typeof coreSpec !== "undefined"')
-      expect(JSON.parse(result)).toBe(true)
+      expect(JSON.parse(stripQueryFooter(result))).toBe(true)
     } finally {
       restore()
     }
@@ -467,7 +491,7 @@ describe('query', () => {
     const restore = withSpecs({ core: { paths: {} }, specs: { svc: { paths: {} } } })
     try {
       const result = await query('() => Object.keys(serviceSpecs)')
-      expect(JSON.parse(result)).toEqual(['svc'])
+      expect(JSON.parse(stripQueryFooter(result))).toEqual(['svc'])
     } finally {
       restore()
     }
@@ -477,7 +501,7 @@ describe('query', () => {
     const restore = withSpecs({ core: { paths: {} }, specs: { dtm: { paths: {} }, svc: { paths: {} } } })
     try {
       const result = await query('() => specsEnabled')
-      expect(JSON.parse(result)).toEqual({ core: true, dtm: true, svc: true })
+      expect(JSON.parse(stripQueryFooter(result))).toEqual({ core: true, dtm: true, svc: true })
     } finally {
       restore()
     }
@@ -487,7 +511,7 @@ describe('query', () => {
     const restore = withSpecs({ core: { paths: {} }, specs: {} })
     try {
       const result = await query('() => ({ keys: Object.keys(serviceSpecs), enabled: specsEnabled })')
-      expect(JSON.parse(result)).toEqual({ keys: [], enabled: { core: true } })
+      expect(JSON.parse(stripQueryFooter(result))).toEqual({ keys: [], enabled: { core: true } })
     } finally {
       restore()
     }
@@ -516,7 +540,7 @@ describe('execute', () => {
     try {
       mockAuth(TEST_TENANT)
       const result = await execute('async () => ({ ok: true, answer: 42 })')
-      expect(result).toBe(encode({ ok: true, answer: 42 }))
+      expect(stripCliTenantMarker(result)).toBe(encode({ ok: true, answer: 42 }))
     } finally {
       restore()
     }
@@ -529,7 +553,7 @@ describe('execute', () => {
       const result = await execute(
         `async () => { throw new Error(${JSON.stringify(`${BLOCKED_REQUEST_PREFIX}\n\nblocked`)}) }`,
       )
-      expect(result).toBe(`${BLOCKED_REQUEST_PREFIX}\n\nblocked`)
+      expect(stripCliTenantMarker(result)).toBe(`${BLOCKED_REQUEST_PREFIX}\n\nblocked`)
     } finally {
       restore()
     }
@@ -540,7 +564,85 @@ describe('execute', () => {
     try {
       mockAuth(TEST_TENANT)
       const result = await execute('async () => { throw new Error("boom") }')
-      expect(result).toBe('boom')
+      expect(stripCliTenantMarker(result)).toBe('boom')
+    } finally {
+      restore()
+    }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// Agent-facing hints — explicit coverage so the marker and footer cannot
+// regress silently when other behavioural assertions strip them off.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('execute — CLI tenant marker', () => {
+  it('prepends "Executed against tenant: <url>" on success in CLI mode', async () => {
+    const restore = stubExecuteCtx({ env: 'cli' })
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute('async () => ({ ok: true })')
+      expect(result.startsWith(`Executed against tenant: ${TEST_TENANT}\n\n`)).toBe(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('prepends the same marker on blocked and failed outputs in CLI mode', async () => {
+    const restore = stubExecuteCtx({ env: 'cli' })
+    try {
+      mockAuth(TEST_TENANT)
+      const blocked = await execute(
+        `async () => { throw new Error(${JSON.stringify(`${BLOCKED_REQUEST_PREFIX}\n\nblocked`)}) }`,
+      )
+      expect(blocked.startsWith(`Executed against tenant: ${TEST_TENANT}\n\n`)).toBe(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('does NOT prepend the marker in server mode', async () => {
+    const restore = stubExecuteCtx({ env: 'server' })
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute('async () => ({ ok: true })')
+      expect(result.startsWith('Executed against tenant:')).toBe(false)
+    } finally {
+      restore()
+    }
+  })
+})
+
+describe('query — tenant footer', () => {
+  function withAuth(tenantUrl: string | undefined): () => void {
+    const ctxSpy = vi.spyOn(c8yMcpServer, 'ctx', 'get').mockReturnValue({
+      custom: {
+        env: 'cli' as const,
+        restrictions: [],
+        allowRules: [],
+        specs: { core: { paths: {} }, specs: {} },
+        auth: tenantUrl ? { tenantUrl, authorizationHeader: 'Bearer test' } : undefined,
+      },
+    } as unknown as ReturnType<typeof c8yMcpServer['ctx']['valueOf']>)
+    return () => ctxSpy.mockRestore()
+  }
+
+  it('appends "Query ran against tenant: <url>" when an auth context exists', async () => {
+    const restore = withAuth('https://acme.cumulocity.com')
+    try {
+      const result = await query('() => ({ ok: true })')
+      expect(result).toContain('\n\n---\nQuery ran against tenant: https://acme.cumulocity.com.')
+    } finally {
+      restore()
+    }
+  })
+
+  it('appends a "no active tenant" notice when auth is undefined', async () => {
+    const restore = withAuth(undefined)
+    try {
+      const result = await query('() => ({ ok: true })')
+      expect(result).toContain('\n\n---\nQuery ran against bundled OpenAPI snapshots only')
+      expect(result).toContain('no active tenant')
     } finally {
       restore()
     }

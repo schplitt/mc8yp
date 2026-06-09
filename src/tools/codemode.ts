@@ -2,6 +2,7 @@ import { defineTool } from 'tmcp/tool'
 import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
 import { execute, query } from '../codemode/execute'
+import type { Env } from '../types'
 
 function createCodeSchema(description: string) {
   return v.pipe(v.string(), v.minLength(1), v.description(description))
@@ -11,11 +12,35 @@ function getOpenApiNote(): string {
   return 'This MCP exposes a bundled Cumulocity core OpenAPI snapshot. Use `coreSpec` for inventory, alarms, events, measurements, users, tenants, and the broader Cumulocity REST surface. Bundled and discovered microservice APIs available on the current tenant are exposed via `serviceSpecs` (keyed by contextPath).'
 }
 
-export function createQueryTool() {
+function getQuerySafetyPreface(env: Env): string {
+  const sharedFooter = 'Every result ends with a footer line naming the active tenant (or noting there is none) so you can verify which tenant the result reflects before acting on it.'
+  if (env !== 'cli')
+    return sharedFooter
+  return [
+    '**CLI mode — read first.** The active tenant is global to this CLI session and can be flipped between calls by `set-active-tenant`. Always check the footer line at the bottom of every result. If it says "no active tenant" you are looking at bundled reference snapshots — call `cli-status` to see stored credentials and `set-active-tenant` to connect before relying on the result.',
+    '',
+    sharedFooter,
+  ].join('\n')
+}
+
+function getExecuteSafetyPreface(env: Env): string {
+  const sharedFooter = 'An endpoint visible in `query` may still return 404 from `execute` when the service is not actually installed on the current tenant.'
+  if (env !== 'cli')
+    return sharedFooter
+  return [
+    '**CLI mode — read first.** Every result starts with an `Executed against tenant: <url>` marker line followed by a blank line. Verify it matches the tenant you intend to mutate before reporting the result. The active tenant is global to this CLI session and can be flipped between calls by `set-active-tenant`. If no tenant is active `execute` fails with a missing-auth error — call `cli-status` and `set-active-tenant` to connect first.',
+    '',
+    sharedFooter,
+  ].join('\n')
+}
+
+export function createQueryTool(env: Env) {
   return defineTool({
     name: 'query',
     title: 'Query OpenAPI Specs',
-    description: `Search the bundled and discovered OpenAPI specs by evaluating a JavaScript function.
+    description: `${getQuerySafetyPreface(env)}
+
+Search the bundled and discovered OpenAPI specs by evaluating a JavaScript function.
 
 ${getOpenApiNote()}
 
@@ -61,7 +86,7 @@ declare const serviceSpecs: Record<string, ServiceSpecEntry>
 - \`specsEnabled\` — which bundled specs are available on this tenant (e.g. \`specsEnabled.dtm\`). Check before using optional specs.
 - \`serviceSpecs\` — additional microservice APIs discovered on the tenant, keyed by contextPath. Paths are already prefixed (e.g. \`/service/myservice/items\`).
 
-If your function returns a string it is returned as-is. Any other value is returned as JSON.
+If your function returns a string it is returned as-is. Any other value is returned as JSON. A footer line naming the active tenant (or noting there is none) is appended after a \`---\` separator on every successful result.
 The current MCP connection may still block \`execute\` calls even when an operation is visible in a spec.
 
 Examples:
@@ -90,11 +115,13 @@ Examples:
   })
 }
 
-export function createExecuteTool() {
+export function createExecuteTool(env: Env) {
   return defineTool({
     name: 'execute',
     title: 'Execute Cumulocity API Call',
-    description: `Execute JavaScript code against the Cumulocity API. Use the query tool first to find the right endpoint, then write an async function that calls cumulocity.request().
+    description: `${getExecuteSafetyPreface(env)}
+
+Execute JavaScript code against the Cumulocity API. Use the query tool first to find the right endpoint, then write an async function that calls cumulocity.request().
 
 ${getOpenApiNote()}
 

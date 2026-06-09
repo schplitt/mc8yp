@@ -290,7 +290,18 @@ export async function query(functionCode: string): Promise<string> {
   }
 
   const value = extractDefaultExport(result.exports)
-  return typeof value === 'string' ? value : JSON.stringify(value)
+  const body = typeof value === 'string' ? value : JSON.stringify(value)
+  const tenantUrl = c8yMcpServer.ctx.custom?.auth?.tenantUrl
+  const footer = tenantUrl
+    ? `Query ran against tenant: ${tenantUrl}. Visible specs are everything currently available for that tenant.`
+    : 'Query ran against bundled OpenAPI snapshots only — no active tenant. Visibility here does NOT guarantee any service is installed on a tenant.'
+  return `${body}\n\n---\n${footer}`
+}
+
+function withCliTenantMarker(text: string, tenantUrl: string): string {
+  return c8yMcpServer.ctx.custom?.env === 'cli'
+    ? `Executed against tenant: ${tenantUrl}\n\n${text}`
+    : text
 }
 
 export async function execute(functionCode: string): Promise<string> {
@@ -322,8 +333,8 @@ export async function execute(functionCode: string): Promise<string> {
   if (!result.ok) {
     // User error or blocked-policy throw — surface the raw message so the
     // BLOCKED_REQUEST_PREFIX prefix stays intact for callers that branch on it.
-    return result.error.message
+    return withCliTenantMarker(result.error.message, auth.tenantUrl)
   }
 
-  return encode(extractDefaultExport(result.exports))
+  return withCliTenantMarker(encode(extractDefaultExport(result.exports)), auth.tenantUrl)
 }
