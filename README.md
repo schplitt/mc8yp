@@ -223,11 +223,11 @@ This only changes the bundled OpenAPI data that `query` sees. The `execute` tool
 
 ### Tools
 
-| Tool               | Description                                                                                                                                                                                                                                        |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `query`            | Search and inspect the bundled OpenAPI specs by running a JavaScript function expression. The sandbox exposes `coreSpec`, `dtmSpec`, and `specsEnabled`, and it never hides bundled specs from the query surface.                                  |
-| `execute`          | Execute JavaScript against the live Cumulocity API. Provide an async JavaScript function expression. A top-level `cumulocity` binding provides `cumulocity.request({ method, path, body?, headers? })`. Return the final value from that function. |
-| `list-credentials` | _(CLI mode only)_ List stored credentials from your system keyring.                                                                                                                                                                                |
+| Tool         | Description                                                                                                                                                                                                                                        |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `query`      | Search and inspect the bundled OpenAPI specs by running a JavaScript function expression. The sandbox exposes `coreSpec`, `dtmSpec`, and `specsEnabled`, and it never hides bundled specs from the query surface.                                  |
+| `execute`    | Execute JavaScript against the live Cumulocity API. Provide an async JavaScript function expression. A top-level `cumulocity` binding provides `cumulocity.request({ method, path, body?, headers? })`. Return the final value from that function. |
+| `cli-status` | _(CLI mode only)_ Read the active tenant (or note that none is set) and the list of stored credentials from your system keyring. Call this before `query` / `execute` so you know which tenant they will hit.                                      |
 
 Both code-mode tools run in a sandboxed V8 runtime ([@iso4/sandbox](https://github.com/schplitt/iso4)) hosted in a separate Rust subprocess.
 

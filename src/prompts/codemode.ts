@@ -4,7 +4,7 @@ import { c8yMcpServer } from '../server-instance'
 
 function getRuntimeSection(): string {
   return c8yMcpServer.ctx.custom?.env === 'cli'
-    ? '## CLI Runtime\nUse `list-credentials` to see stored tenant URLs. Use `set-active-tenant` to connect to a tenant. Once set, query and execute use that tenant automatically.'
+    ? '## CLI Runtime\nUse `cli-status` to see the active tenant and stored tenant URLs. Use `set-active-tenant` to connect to a tenant. Once set, query and execute use that tenant automatically. When no tenant is active, query falls back to all bundled OpenAPI snapshots for reference and execute is unavailable.'
     : '## Server Runtime\nThis deployed MCP server uses the current tenant and the service user attached to this MCP connection. Do not pass tenant-specific credentials or tenant URLs yourself.'
 }
 

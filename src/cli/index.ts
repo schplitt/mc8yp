@@ -7,7 +7,7 @@ import { getCoreOpenApiLabel, getCoreOpenApiVersion, setCoreOpenApiVersion, spec
 import { c8yMcpServer, setupMcpServer } from '../server'
 import { getCredentialsByTenantUrl, getStoredC8yAuth } from '../utils/credentials'
 import { parseAllowRule, parseRestrictionRule } from '../utils/restrictions'
-import { readActiveTenantUrl } from './active-tenant'
+import { clearActiveTenant, readActiveTenantUrl } from './active-tenant'
 import { getCliTenantContext, setCliTenantContext } from './tenant-context'
 import { getBundledOnlySpecs } from '../utils/spec-resolution'
 
@@ -87,7 +87,17 @@ const main = defineCommand({
         const specKeys = ['core', ...Object.keys(tenantCtx.specs.specs)]
         consola.info(`Active tenant: ${activeTenant}. Available specs: ${specKeys.join(', ')}`)
       } catch (err) {
-        consola.warn(`Could not activate tenant ${activeTenant}:`, err instanceof Error ? err.message : String(err))
+        const message = err instanceof Error ? err.message : String(err)
+        // Drift recovery: if the persistence file points at a tenant whose
+        // credentials no longer exist, wipe the persistence file so the next
+        // restart is clean. Other failure modes (network, discovery) keep
+        // the persistence file alone — they may be transient.
+        if (message.includes('No stored credentials found for tenant URL')) {
+          clearActiveTenant()
+          consola.warn(`Active tenant ${activeTenant} was cleared because no credentials are stored for it. Call set-active-tenant with a known tenant URL or run 'creds add' first.`)
+        } else {
+          consola.warn(`Could not activate tenant ${activeTenant}:`, message)
+        }
       }
     } else {
       consola.info('No active tenant set. Call set-active-tenant to connect before using query or execute.')

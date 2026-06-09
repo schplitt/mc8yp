@@ -8,7 +8,7 @@ The project exposes a small code-mode surface to AI agents instead of a large fi
 
 - `query` inspects the bundled Cumulocity OpenAPI specs
 - `execute` calls the live Cumulocity API through a sandboxed request helper
-- `list-credentials` is available only in CLI mode to inspect locally stored tenants
+- `cli-status` is available only in CLI mode to inspect the active tenant and locally stored tenants
 
 The repository supports two runtime modes:
 
@@ -42,7 +42,7 @@ src/
     index.ts                  Prompt registration
   tools/
     codemode.ts               `query` and `execute` tool definitions
-    credentials.ts            `list-credentials` tool
+    cli-status.ts             `cli-status` tool (active tenant + stored credentials)
     index.ts                  Tool registration
   types/
     mcp-context.ts            MCP custom context shape
@@ -99,7 +99,7 @@ src/openapi-modules.d.ts      Ambient type declarations for the `#core-openapi` 
 
 #### Shared MCP surface
 
-- `src/server.ts` creates the MCP server, registers tools and prompts, and conditionally enables `list-credentials` only in CLI mode.
+- `src/server.ts` creates the MCP server, registers tools and prompts, and conditionally enables `cli-status` only in CLI mode.
 - `openapi/core/` and `openapi/dtm/` contain the bundled OpenAPI snapshots consumed by the build.
 - `src/tools/codemode.ts` defines the `query` and `execute` tools.
 - `src/prompts/codemode.ts` defines the `code-mode-guide` prompt.

@@ -25,6 +25,16 @@ export function getCliTenantContext(): CliTenantContext | null {
 }
 
 /**
+ * Drop the in-memory tenant context. Used by drift-recovery (credentials
+ * disappeared for the active tenant) and by the explicit reset path on
+ * set-active-tenant. Does not touch persistence — the caller is responsible
+ * for that, so the two layers can be exercised independently in tests.
+ */
+export function clearCliTenantContext(): void {
+  _context = null
+}
+
+/**
  * Set (or update) the active tenant context.
  * Looks up credentials from the keyring, awaits discovery (idempotent —
  * uses the per-tenant cache), resolves specs, and stores the result in

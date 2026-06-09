@@ -2,25 +2,55 @@ import { defineTool } from 'tmcp/tool'
 import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
 import { c8yMcpServer } from '../server-instance'
-import { writeActiveTenant } from '../cli/active-tenant'
-import { setCliTenantContext } from '../cli/tenant-context'
+import { clearActiveTenant, writeActiveTenant } from '../cli/active-tenant'
+import { clearCliTenantContext, setCliTenantContext } from '../cli/tenant-context'
+import { getBundledOnlySpecs } from '../utils/spec-resolution'
+
+/**
+ * Clear the active tenant everywhere it is recorded: persistence file,
+ * in-memory CLI context, and the shared MCP custom context. The custom-
+ * context update is what makes subsequent `query` / `execute` calls observe
+ * the no-tenant state — query falls back to bundled-only specs, execute
+ * errors loudly on missing auth.
+ *
+ * Exported so the drift-recovery paths (cli-status, CLI startup) can reuse
+ * the same teardown the explicit reset uses.
+ */
+export function resetActiveTenant(): void {
+  clearActiveTenant()
+  clearCliTenantContext()
+  const custom = c8yMcpServer.ctx.custom
+  if (custom) {
+    custom.auth = undefined
+    custom.specs = getBundledOnlySpecs()
+  }
+}
 
 export function createSetActiveTenantTool() {
   return defineTool(
     {
       name: 'set-active-tenant',
       title: 'Set Active Tenant',
-      description: 'Set the Cumulocity tenant for this CLI session. The tenantUrl must match one returned by list-credentials. The selection is persisted across sessions so you only need to call this once (or when switching tenants).',
+      description: 'Set the Cumulocity tenant for this CLI session, or pass tenantUrl: null to clear the active tenant. The tenantUrl must match one returned by cli-status. The selection is persisted across sessions so you only need to call this once (or when switching tenants). Clearing falls back to bundled-only browsing — query still works but execute is unavailable until a tenant is set again.',
       schema: v.object({
-        tenantUrl: v.pipe(
-          v.string(),
-          v.url('Must be a valid URL, e.g. https://mytenant.cumulocity.com'),
-          v.description('Base URL of the Cumulocity tenant — must be present in list-credentials'),
+        tenantUrl: v.nullable(
+          v.pipe(
+            v.string(),
+            v.url('Must be a valid URL, e.g. https://mytenant.cumulocity.com'),
+            v.description('Base URL of the Cumulocity tenant — must be present in cli-status. Pass null to clear the active tenant.'),
+          ),
         ),
       }),
     },
     async (input) => {
       try {
+        if (input.tenantUrl === null) {
+          resetActiveTenant()
+          return tool.text(
+            'Active tenant cleared. Query now falls back to all bundled OpenAPI snapshots; execute is unavailable until you set a tenant. Call set-active-tenant with a tenantUrl from cli-status to reconnect.',
+          )
+        }
+
         // Validate: tenantUrl must be in stored credentials
         const storedCreds = await globalThis._getStoredC8yAuth()
         const known = storedCreds.find((c) => c.tenantUrl === input.tenantUrl)

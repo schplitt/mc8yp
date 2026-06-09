@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { readActiveTenantUrl as ReadFn, writeActiveTenant as WriteFn } from '../src/cli/active-tenant'
+import type { clearActiveTenant as ClearFn, readActiveTenantUrl as ReadFn, writeActiveTenant as WriteFn } from '../src/cli/active-tenant'
 
 const TEST_CONFIG_DIR = join(tmpdir(), `mc8yp-test-${process.pid}`)
 const TEST_MC8YP_DIR = join(TEST_CONFIG_DIR, '.config', 'mc8yp')
@@ -16,12 +16,14 @@ vi.mock('node:os', async (importOriginal) => {
 
 let writeActiveTenant: typeof WriteFn
 let readActiveTenantUrl: typeof ReadFn
+let clearActiveTenant: typeof ClearFn
 
 beforeAll(async () => {
   // Import after mock is registered so the module picks up the stubbed homedir.
   const mod = await import('../src/cli/active-tenant')
   writeActiveTenant = mod.writeActiveTenant
   readActiveTenantUrl = mod.readActiveTenantUrl
+  clearActiveTenant = mod.clearActiveTenant
 })
 
 describe('writeActiveTenant / readActiveTenantUrl', () => {
@@ -57,6 +59,40 @@ describe('writeActiveTenant / readActiveTenantUrl', () => {
   it('returns null when the file has valid JSON but wrong shape', () => {
     mkdirSync(TEST_MC8YP_DIR, { recursive: true })
     writeFileSync(TEST_CONFIG_FILE, JSON.stringify({ notTenantUrl: 'oops' }), 'utf8')
+    expect(readActiveTenantUrl()).toBeNull()
+  })
+
+  it('returns null when the file holds an explicit { tenantUrl: null } marker', () => {
+    mkdirSync(TEST_MC8YP_DIR, { recursive: true })
+    writeFileSync(TEST_CONFIG_FILE, JSON.stringify({ tenantUrl: null }), 'utf8')
+    expect(readActiveTenantUrl()).toBeNull()
+  })
+})
+
+describe('clearActiveTenant', () => {
+  beforeEach(() => {
+    mkdirSync(TEST_CONFIG_DIR, { recursive: true })
+  })
+
+  afterEach(() => {
+    rmSync(TEST_CONFIG_DIR, { recursive: true, force: true })
+  })
+
+  it('writes the explicit null marker so readActiveTenantUrl returns null', () => {
+    writeActiveTenant('https://example.cumulocity.com')
+    clearActiveTenant()
+    expect(readActiveTenantUrl()).toBeNull()
+  })
+
+  it('is idempotent when no active tenant was ever set', () => {
+    clearActiveTenant()
+    clearActiveTenant()
+    expect(readActiveTenantUrl()).toBeNull()
+  })
+
+  it('creates the config directory if it does not exist yet', () => {
+    rmSync(TEST_CONFIG_DIR, { recursive: true, force: true })
+    clearActiveTenant()
     expect(readActiveTenantUrl()).toBeNull()
   })
 })

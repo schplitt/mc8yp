@@ -2,7 +2,7 @@ import consola from 'consola'
 import { c8yMcpServer } from './server-instance'
 import { createPrompts } from './prompts'
 import { createTools } from './tools'
-import { createListCredentialsTool } from './tools/credentials'
+import { createCliStatusTool } from './tools/cli-status'
 import { createSetActiveTenantTool } from './tools/active-tenant'
 
 export { c8yMcpServer } from './server-instance'
@@ -17,7 +17,7 @@ export function setupMcpServer(env: 'cli' | 'server'): void {
   consola.info('Running in execution environment:', env)
 
   if (env === 'cli') {
-    c8yMcpServer.tool(createListCredentialsTool())
+    c8yMcpServer.tool(createCliStatusTool())
     c8yMcpServer.tool(createSetActiveTenantTool())
   }
 }
