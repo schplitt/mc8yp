@@ -8,5 +8,6 @@ export default defineConfig({
     docs: { title: '📖 Documentation' },
     test: { title: '🧪 Tests' },
     refactor: { title: '♻️ Refactors' },
+    chore: { title: '🧹 Chores' },
   },
 })
