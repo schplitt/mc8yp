@@ -1,5 +1,7 @@
 catalogMode: prefer
 
+minimumReleaseAgeExclude:
+  - '@iso4/*'
 shellEmulator: true
 
 blockExoticSubdeps: true
@@ -44,5 +46,3 @@ allowBuilds:
   better-sqlite3: true
   cbor-extract: true
   esbuild: true
-minimumReleaseAgeExclude:
-  - '@iso4/*'
