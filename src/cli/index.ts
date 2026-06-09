@@ -9,7 +9,7 @@ import { getCredentialsByTenantUrl, getStoredC8yAuth } from '../utils/credential
 import { parseAllowRule, parseRestrictionRule } from '../utils/restrictions'
 import { readActiveTenantUrl } from './active-tenant'
 import { getCliTenantContext, setCliTenantContext } from './tenant-context'
-import { resolveSpecs } from '../utils/spec-resolution'
+import { getBundledOnlySpecs } from '../utils/spec-resolution'
 
 const main = defineCommand({
   meta: {
@@ -33,11 +33,6 @@ const main = defineCommand({
       description: `Bundled core OpenAPI snapshot to expose to query. Available: ${specs.map((e) => `${e.version} (${e.label})`).join(', ')}.`,
       alias: 's',
       default: getCoreOpenApiVersion(),
-    },
-    specRemoval: {
-      type: 'boolean',
-      description: 'When enabled (default), bundled specs for services not installed on the tenant are removed from the query sandbox. Pass --no-spec-removal to keep them visible for reference. Execute restrictions always apply regardless of this flag.',
-      default: true,
     },
   },
   setup: () => {
@@ -82,17 +77,13 @@ const main = defineCommand({
       consola.info(`Applying ${parsedAllowRules.length} allow rule(s):`, parsedAllowRules.map((r) => r.source))
     }
 
-    if (!args.specRemoval) {
-      consola.info('Spec removal disabled: bundled specs remain visible in query even when the service is not installed')
-    }
-
     // If a tenant was previously selected, populate the in-memory context now
     // so the first tool call is immediately ready — discovery cost is paid here
     // at startup, not deferred to the first tool call.
     const activeTenant = readActiveTenantUrl()
     if (activeTenant) {
       try {
-        const tenantCtx = await setCliTenantContext(activeTenant, args.specRemoval)
+        const tenantCtx = await setCliTenantContext(activeTenant)
         const specKeys = ['core', ...Object.keys(tenantCtx.specs.specs)]
         consola.info(`Active tenant: ${activeTenant}. Available specs: ${specKeys.join(', ')}`)
       } catch (err) {
@@ -111,8 +102,10 @@ const main = defineCommand({
       env: 'cli' as const,
       restrictions,
       allowRules: parsedAllowRules,
-      // dont remove specs when the tenant context is NOT known in cli. this way the query tool can still work with bundled specs and the execute tool throws a clear error about missing auth instead of just missing specs.
-      specs: active?.specs ?? resolveSpecs([], new Set(), false),
+      // No active tenant: expose every bundled spec so the query tool stays
+      // useful as a reference. execute throws a clear missing-auth error so
+      // the agent cannot misuse this state for real calls.
+      specs: active?.specs ?? getBundledOnlySpecs(),
       auth: active ? { tenantUrl: active.tenantUrl, authorizationHeader: active.authorizationHeader } : undefined,
     })
   },

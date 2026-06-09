@@ -16,7 +16,6 @@ export interface CliTenantContext {
 }
 
 let _context: CliTenantContext | null = null
-let _specRemoval: boolean | null = null
 
 /**
  * Return the current CLI tenant context, or null if none has been set.
@@ -31,17 +30,15 @@ export function getCliTenantContext(): CliTenantContext | null {
  * uses the per-tenant cache), resolves specs, and stores the result in
  * memory so subsequent tool calls can read it synchronously.
  *
+ * Spec removal is unconditional for an active tenant: bundled specs for
+ * services that the tenant has not installed are dropped from the query
+ * sandbox so the agent cannot accidentally plan against a surface that
+ * isn't actually there. To browse all bundled snapshots, leave the CLI
+ * with no active tenant (the no-tenant fallback in cli/index.ts keeps
+ * everything visible).
  * @param tenantUrl - Base URL of the Cumulocity tenant to activate
- * @param specRemoval - Whether to remove specs for services that are not installed on the tenant (true by default)
  */
-export async function setCliTenantContext(tenantUrl: string, specRemoval?: boolean): Promise<CliTenantContext> {
-  if (specRemoval !== undefined) {
-    _specRemoval = specRemoval
-  }
-  if (_specRemoval === null) {
-    throw new Error('specRemoval must be set on first call to setCliTenantContext')
-  }
-
+export async function setCliTenantContext(tenantUrl: string): Promise<CliTenantContext> {
   const creds = await globalThis._getCredentialsByTenantUrl(tenantUrl)
   const authHeaders = createC8yAuthHeaders(creds)
 
@@ -56,7 +53,7 @@ export async function setCliTenantContext(tenantUrl: string, specRemoval?: boole
   _context = {
     tenantUrl,
     authorizationHeader: authHeaders.Authorization!,
-    specs: resolveSpecs(discovered, installedContextPaths, _specRemoval),
+    specs: resolveSpecs(discovered, installedContextPaths),
   }
 
   return _context

@@ -59,8 +59,10 @@ const app = new H3().all('/mcp', async (event) => {
   const discoveryResult = await startDiscovery(credentials.tenantUrl, createC8yAuthHeaders(credentials))
   const { specs: discoveredSpecs, installedContextPaths } = discoveryResult
 
-  // specRemoval=true: bundled service specs absent from this tenant collapse to null.
-  const specs = resolveSpecs(discoveredSpecs, installedContextPaths, true)
+  // Bundled service specs absent from this tenant are dropped from the
+  // sandbox surface (unconditional in resolveSpecs) so the agent only sees
+  // what is actually reachable on this tenant.
+  const specs = resolveSpecs(discoveredSpecs, installedContextPaths)
 
   const query = getQuery(event)
   const restrictionSources = collectServerRestrictionSources(query, event.req.headers)

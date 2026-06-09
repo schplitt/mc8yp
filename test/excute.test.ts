@@ -454,7 +454,7 @@ describe('query', () => {
   })
 
   it('reads specs from c8yMcpServer.ctx.custom (no override path exists)', async () => {
-    const restore = withSpecs(resolveSpecs([], new Set(), true))
+    const restore = withSpecs(resolveSpecs([], new Set()))
     try {
       const result = await query('() => typeof coreSpec !== "undefined"')
       expect(JSON.parse(result)).toBe(true)

@@ -48,18 +48,21 @@ export interface ResolvedSpecs {
  * For each bundled service spec (#bundled-services):
  *   - live discovery available           → use the live spec
  *   - service installed, no live spec    → use the bundled fallback
- *   - service not installed              → null (specRemoval) or bundled
+ *   - service not installed              → omitted (absent key = unavailable)
  *
  * Non-bundled discovered services pass through as-is, keyed by contextPath.
  *
+ * Removal of bundled specs for services the tenant has not installed is
+ * unconditional: when the agent has an active tenant context, the query
+ * sandbox must only see what is actually reachable on that tenant. To
+ * deliberately browse all bundled snapshots regardless of installation,
+ * use {@link getBundledOnlySpecs} (the CLI's no-tenant fallback).
  * @param discoveredSpecs Result of live API discovery for the tenant.
  * @param installedContextPaths Subscribed app context paths on the tenant.
- * @param specRemoval When true, absent bundled services collapse to null.
  */
 export function resolveSpecs(
   discoveredSpecs: readonly DiscoveredApiSpec[],
   installedContextPaths: ReadonlySet<string>,
-  specRemoval: boolean,
 ): ResolvedSpecs {
   const specs: ServiceSpecs = {}
   const bundledContextPaths = new Set<string>()
@@ -71,8 +74,6 @@ export function resolveSpecs(
       specs[bundled.contextPath] = live.spec
     } else if (installedContextPaths.has(bundled.contextPath)) {
       specs[bundled.contextPath] = bundled.spec
-    } else if (!specRemoval) {
-      specs[bundled.contextPath] = bundled.spec
     }
     // else: omit the key entirely — absence = unavailable.
   }
@@ -83,5 +84,20 @@ export function resolveSpecs(
     }
   }
 
+  return { core: getCoreOpenApiSpec(), specs }
+}
+
+/**
+ * Return every bundled spec unconditionally, ignoring tenant installation
+ * state. Used exclusively by the CLI when no tenant is active so the agent
+ * can browse the full bundled OpenAPI surface for reference. The query
+ * sandbox running on this output must not be used to plan execute calls —
+ * visibility here does not imply the service exists on any tenant.
+ */
+export function getBundledOnlySpecs(): ResolvedSpecs {
+  const specs: ServiceSpecs = {}
+  for (const bundled of BUNDLED_SERVICE_SPECS) {
+    specs[bundled.contextPath] = bundled.spec
+  }
   return { core: getCoreOpenApiSpec(), specs }
 }
