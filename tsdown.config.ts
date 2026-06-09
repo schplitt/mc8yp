@@ -226,6 +226,10 @@ const serverBuilds = OPENAPI_CONFIG.builds.map((build) => ({
   dts: false,
   format: 'module' as const,
   plugins: [coreOpenApiPlugin({ mode: 'server', build }), bundledServicesPlugin({ mode: 'server', build })],
+  // Bundle all non-native deps so the Docker image only needs @iso4/sandbox
+  // (and its per-platform Rust binary) installed at runtime via pnpm install --prod.
+  // @napi-rs/* is excluded defensively (not used in server mode anyway).
+  noExternal: [/^(?!@iso4\/sandbox$|@napi-rs\/)/],
   outDir: `.output/${build.version}`,
 }))
 
@@ -239,8 +243,12 @@ export default defineConfig([
     dts: false,
     format: 'module',
     plugins: [coreOpenApiPlugin({ mode: 'cli' }), bundledServicesPlugin({ mode: 'cli' })],
-    // no external -> everything starting with @c8y/ should be bundled for cli usage
-    noExternal: [/^@c8y\/.*$/],
+    // Bundle every non-native dep to reduce supply-chain risk for CLI users.
+    // @iso4/sandbox must stay external: it resolves per-platform Rust binaries
+    // (@iso4/v8-*) at runtime and cannot be statically inlined.
+    // @napi-rs/* must stay external for the same reason (N-API native bindings).
+    // @iso4/fetch is pure JS (rou3 + undici) and is safe to bundle.
+    noExternal: [/^(?!@iso4\/sandbox$|@napi-rs\/)/],
     outDir: 'dist',
   },
 ])

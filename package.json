@@ -47,31 +47,31 @@
     "release": "bumpp"
   },
   "dependencies": {
+    "@iso4/sandbox": "catalog:",
+    "@napi-rs/keyring": "catalog:"
+  },
+  "devDependencies": {
     "@c8y/client": "catalog:",
     "@clack/prompts": "catalog:",
     "@iso4/fetch": "catalog:",
-    "@iso4/sandbox": "catalog:",
-    "@napi-rs/keyring": "catalog:",
+    "@schplitt/eslint-config": "catalog:",
     "@tmcp/adapter-valibot": "catalog:",
     "@tmcp/transport-http": "catalog:",
     "@tmcp/transport-stdio": "catalog:",
     "@toon-format/toon": "catalog:",
+    "@types/node": "catalog:",
     "bumpp": "catalog:",
+    "changelogithub": "catalog:",
     "citty": "catalog:",
     "consola": "catalog:",
+    "eslint": "catalog:",
     "h3": "catalog:",
     "tmcp": "catalog:",
-    "ufo": "catalog:",
-    "unctx": "catalog:",
-    "valibot": "catalog:"
-  },
-  "devDependencies": {
-    "@schplitt/eslint-config": "catalog:",
-    "@types/node": "catalog:",
-    "changelogithub": "catalog:",
-    "eslint": "catalog:",
     "tsdown": "catalog:",
     "typescript": "catalog:",
+    "ufo": "catalog:",
+    "unctx": "catalog:",
+    "valibot": "catalog:",
     "vitest": "catalog:"
   },
   "engines": {

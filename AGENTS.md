@@ -204,7 +204,7 @@ pnpm prerelease    # lint + typecheck + build
 
 - `tsdown.config.ts` builds versioned HTTP server bundles into `.output/<version>/`
 - `tsdown.config.ts` builds the CLI bundle into `dist/`
-- Server bundles intentionally keep runtime dependencies external.
+- Both CLI and server bundles use `noExternal: [/^(?!@iso4\/sandbox$|@napi-rs\/)/]` to inline all non-native dependencies. Only `@iso4/sandbox` (per-platform Rust binaries) and `@napi-rs/keyring` (N-API, CLI only) remain external and are the only packages in `dependencies`. Everything else lives in `devDependencies` and is inlined at build time.
 - Release zip artifacts are created in the repository root by `pnpm package:microservices`
 - `pnpm package:microservices` names artifacts from the bundled API combination, for example `mc8yp-core-2026-dtm-v2.x.x.zip`.
 - `pnpm package:microservices` uses a temporary `.c8y/` staging directory, deletes old root `*.zip` artifacts before creating fresh ones, installs production dependencies inside a Linux Docker build so platform-specific optional native packages resolve correctly, and builds `linux/amd64` images unless `DOCKER_PLATFORM` is set explicitly.
@@ -293,7 +293,7 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 - The CLI build inlines all bundled core snapshots plus the default version of every service-backed source (currently DTM `release`); each server build inlines exactly the configured combination for that build.
 - Bundled service specs land in the query sandbox as `serviceSpecs[contextPath]`, alongside any non-bundled services discovered live on the tenant. Core is the only named binding (`coreSpec`).
 - `resolveSpecs` returns a single `{ core, specs }` object. An absent key in `specs` means the spec is unavailable for this tenant; there are no `null` values.
-- Server builds should not use `noExternal: [/^.*$/]`. The microservice bundle is allowed to depend on runtime `node_modules`, and the release image must install those dependencies inside the Linux image rather than copying host `node_modules` from macOS.
+- `@iso4/fetch` is pure JS (`rou3` + `undici`) and is bundled into both CLI and server outputs. Only `@iso4/sandbox` must stay external in all builds.
 - `scripts/package-microservices.mjs` intentionally targets `linux/amd64` by default to avoid Apple Silicon release images failing with `exec format error` in Cumulocity.
 - Restrictions and allow rules are both discoverability metadata and enforcement logic; both layers matter.
 - When creating branches for user-requested work, prefer conventional prefixes that match the intended change type, especially `feat/`, `test/`, and `chore/`.
@@ -306,4 +306,4 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 - Do not assume tests live in `tests/`; this repository uses `test/`.
 - Do not add tenant URL handling to server mode user flows; deployed mode derives tenant context from the environment and request auth.
 - Do not bypass `src/codemode/execute.ts` when changing execution behavior; that file is the main runtime boundary.
-- Do not rebundle `@iso4/sandbox` or `@iso4/fetch` into the microservice server build unless you have verified the emitted server bundle starts cleanly with `node .output/<version>/server.mjs` on a Linux target with the matching platform binary installed.
+- Do not rebundle `@iso4/sandbox` into any build. It resolves per-platform Rust binaries at runtime and cannot be statically inlined. `@iso4/fetch` is already bundled and does not need special treatment.
