@@ -55,8 +55,8 @@ catalogs:
       specifier: ^10.4.1
       version: 10.4.1
     h3:
-      specifier: 2.0.1-rc.6
-      version: 2.0.1-rc.6
+      specifier: 2.0.1-rc.22
+      version: 2.0.1-rc.22
     tmcp:
       specifier: ^1.19.4
       version: 1.19.4
@@ -121,7 +121,7 @@ importers:
         version: 3.4.2
       h3:
         specifier: 'catalog:'
-        version: 2.0.1-rc.6
+        version: 2.0.1-rc.22
       tmcp:
         specifier: 'catalog:'
         version: 1.19.4(typescript@6.0.3)
@@ -2090,9 +2090,10 @@ packages:
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
 
-  h3@2.0.1-rc.6:
-    resolution: {integrity: sha512-kKLFVFNJlDVTbQjakz1ZTFSHB9+oi9+Khf0v7xQsUKU3iOqu2qmrFzTD56YsDvvj2nBgqVDphGRXB2VRursw4w==}
+  h3@2.0.1-rc.22:
+    resolution: {integrity: sha512-Esv0DMIuPkCTSWCA0vO73vcTqwzH1wjSrAO1TXNu/K3up1sZHa9EKMapbmxCDYBeymC3fVTk4qxp7ogQWQ+KgA==}
     engines: {node: '>=20.11.1'}
+    hasBin: true
     peerDependencies:
       crossws: ^0.4.1
     peerDependenciesMeta:
@@ -2988,9 +2989,6 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
 
-  rou3@0.7.12:
-    resolution: {integrity: sha512-iFE4hLDuloSWcD7mjdCDhx2bKcIsYbtOTpfH5MHHLSKMOUyjqQXTeZVa289uuwEGEKFoE/BAPbhaU4B774nceg==}
-
   rou3@0.8.1:
     resolution: {integrity: sha512-ePa+XGk00/3HuCqrEnK3LxJW7I0SdNg6EFzKUJG73hMAdDcOUC/i/aSz7LSDwLrGr33kal/rqOGydzwl6U7zBA==}
 
@@ -3110,8 +3108,8 @@ packages:
   sqids@0.3.0:
     resolution: {integrity: sha512-lOQK1ucVg+W6n3FhRwwSeUijxe93b51Bfz5PMRMihVf1iVkl82ePQG7V5vwrhzB11v0NtsR25PSZRGiSomJaJw==}
 
-  srvx@0.9.8:
-    resolution: {integrity: sha512-RZaxTKJEE/14HYn8COLuUOJAt0U55N9l1Xf6jj+T0GoA01EUH1Xz5JtSUOI+EHn+AEgPCVn7gk6jHJffrr06fQ==}
+  srvx@0.11.16:
+    resolution: {integrity: sha512-bp07zRuycfTY43IjAvvTFnmnJi8ikW0VFiHwOhhYcVW/L4xQ1XY4PAd4Nuum1rsA17C39zL7x+CDhrn5AL32Rw==}
     engines: {node: '>=20.16.0'}
     hasBin: true
 
@@ -4192,7 +4190,7 @@ snapshots:
 
   '@npmcli/fs@5.0.0':
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.2
 
   '@npmcli/git@7.0.2':
     dependencies:
@@ -4202,7 +4200,7 @@ snapshots:
       lru-cache: 11.5.1
       npm-pick-manifest: 11.0.3
       proc-log: 6.1.0
-      semver: 7.7.4
+      semver: 7.8.2
       which: 6.0.1
 
   '@npmcli/installed-package-contents@4.0.0':
@@ -4219,7 +4217,7 @@ snapshots:
       hosted-git-info: 9.0.3
       json-parse-even-better-errors: 5.0.0
       proc-log: 6.1.0
-      semver: 7.7.4
+      semver: 7.8.2
       spdx-expression-parse: 4.0.0
 
   '@npmcli/promise-spawn@9.0.1':
@@ -5649,10 +5647,10 @@ snapshots:
 
   graceful-fs@4.2.11: {}
 
-  h3@2.0.1-rc.6:
+  h3@2.0.1-rc.22:
     dependencies:
-      rou3: 0.7.12
-      srvx: 0.9.8
+      rou3: 0.8.1
+      srvx: 0.11.16
 
   has-symbols@1.1.0: {}
 
@@ -6352,7 +6350,7 @@ snapshots:
       graceful-fs: 4.2.11
       nopt: 9.0.0
       proc-log: 6.1.0
-      semver: 7.7.4
+      semver: 7.8.2
       tar: 7.5.16
       tinyglobby: 0.2.17
       undici: 6.26.0
@@ -6370,7 +6368,7 @@ snapshots:
 
   npm-install-checks@8.0.0:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.2
 
   npm-normalize-package-bin@5.0.0: {}
 
@@ -6378,7 +6376,7 @@ snapshots:
     dependencies:
       hosted-git-info: 9.0.3
       proc-log: 6.1.0
-      semver: 7.7.4
+      semver: 7.8.2
       validate-npm-package-name: 7.0.2
 
   npm-packlist@10.0.4:
@@ -6391,7 +6389,7 @@ snapshots:
       npm-install-checks: 8.0.0
       npm-normalize-package-bin: 5.0.0
       npm-package-arg: 13.0.2
-      semver: 7.7.4
+      semver: 7.8.2
 
   npm-registry-fetch@19.1.1:
     dependencies:
@@ -6725,8 +6723,6 @@ snapshots:
       '@rolldown/binding-win32-arm64-msvc': 1.1.0
       '@rolldown/binding-win32-x64-msvc': 1.1.0
 
-  rou3@0.7.12: {}
-
   rou3@0.8.1: {}
 
   router@2.2.0:
@@ -6871,7 +6867,7 @@ snapshots:
 
   sqids@0.3.0: {}
 
-  srvx@0.9.8: {}
+  srvx@0.11.16: {}
 
   ssri@13.0.1:
     dependencies:

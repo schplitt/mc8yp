@@ -29,7 +29,7 @@ catalog:
   citty: ^0.2.2
   consola: ^3.4.2
   eslint: ^10.4.1
-  h3: 2.0.1-rc.6
+  h3: 2.0.1-rc.22
   tmcp: ^1.19.4
   tsdown: ^0.22.2
   typescript: ^6.0.3
