@@ -110,8 +110,8 @@ src/openapi-modules.d.ts      Ambient type declarations for the `#core-openapi` 
 
 - `query` executes JavaScript against the bundled OpenAPI specs with network access disabled.
 - `execute` executes JavaScript with a provided `cumulocity.request()` helper.
-- Both runtimes use `secure-exec` with a 128 MB memory limit and 50 second CPU time limit.
-- A semaphore limits concurrent sandbox runs to 3.
+- Both runtimes use [`@iso4/sandbox`](https://www.npmjs.com/package/@iso4/sandbox) — a V8-isolate sandbox running in a separate Rust subprocess — with a 128 MB memory limit and 50 second CPU time limit. A single lazy-initialised `Sandbox` is shared across all `query`/`execute` calls; iso4's connection pool serialises runs across isolate slots.
+- `execute` exposes the tenant API to sandbox code through a single bridged global: `cumulocity.request({ method, path, body, headers })`. The host-side handler (`createCumulocityRequestHandler` in `src/codemode/execute.ts`) injects auth headers, evaluates restriction/allow rules, performs the live request through [`@iso4/fetch`](https://www.npmjs.com/package/@iso4/fetch)'s `createSafeFetch` (which adds DNS-pinning and SSRF protection at the network layer), and returns plain parsed data. The sandbox never sees raw `fetch`.
 - Input code is normalized before execution so fenced code blocks can still run.
 
 ### Bundled OpenAPI Selection
@@ -157,7 +157,7 @@ The restriction system is implemented in two places:
 
 - `src/utils/restrictions.ts` parses both deny rules and allow rules and handles CLI/query input.
 - `src/utils/restriction-matcher.ts` owns rule compilation, path matching, and restriction-vs-allow precedence.
-- `src/codemode/network-permissions.ts` enforces secure-exec network decisions for live execute requests.
+- Restriction and allow-rule enforcement live entirely on the host inside `createCumulocityRequestHandler`. There is no separate network-permission layer file — `evaluateAccessPolicy` from `src/utils/restriction-matcher.ts` is called directly before any HTTP request leaves the host.
 
 ## Authentication And Credentials
 
@@ -278,11 +278,12 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 
 ### Tools & Dependencies
 
-- `secure-exec` is the execution boundary for both `query` and `execute`.
+- `@iso4/sandbox` is the execution boundary for both `query` and `execute`. It spawns a long-lived Rust child process on first use; `disposeSandbox()` shuts it down (called from the `excute.test.ts` `afterAll` hook and via a `process.once('exit')` handler in `execute.ts`).
+- `@iso4/fetch` provides the hardened `safeFetch` used by the `cumulocity.request` host handler.
 - `tsdown` produces separate server and CLI bundles.
 - `@napi-rs/keyring` is used for local(cli) credential storage.
 - `@clack/prompts` is used for interactive CLI credential entry so password input is masked.
-- `secure-exec` must stay external in server builds. Bundling it into the microservice server output pulls in `node-stdlib-browser` resolution code and can crash at startup with `Cannot find module 'assert/'`.
+- `@iso4/sandbox` must stay external in server builds. It depends on per-platform Rust binaries (`@iso4/v8-linux-x64-gnu`, etc.) shipped as optional dependencies, and bundling the entry would break the platform binary resolution. The microservice Dockerfile must install production dependencies inside the Linux image so the correct `@iso4/v8-linux-*` binary is fetched.
 
 ### Patterns & Conventions
 
@@ -305,4 +306,4 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 - Do not assume tests live in `tests/`; this repository uses `test/`.
 - Do not add tenant URL handling to server mode user flows; deployed mode derives tenant context from the environment and request auth.
 - Do not bypass `src/codemode/execute.ts` when changing execution behavior; that file is the main runtime boundary.
-- Do not rebundle `secure-exec` into the microservice server build unless you have verified the emitted server bundle starts cleanly with `node .output/<version>/server.mjs`.
+- Do not rebundle `@iso4/sandbox` or `@iso4/fetch` into the microservice server build unless you have verified the emitted server bundle starts cleanly with `node .output/<version>/server.mjs` on a Linux target with the matching platform binary installed.
