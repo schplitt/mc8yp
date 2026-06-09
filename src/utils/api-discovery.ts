@@ -11,6 +11,8 @@
  */
 
 import consola from 'consola'
+import type { Client, IApplication } from '@c8y/client'
+import { c8yErrorSummary } from './client'
 import type { PathItem, Spec } from './spec-resolution'
 
 // ---------------------------------------------------------------------------
@@ -44,18 +46,14 @@ export interface DiscoveredApiSpec {
 // Internal C8y response types
 // ---------------------------------------------------------------------------
 
-interface C8yCurrentUser { id?: string }
-
-interface C8yAppManifest {
+interface AppManifest {
   openApiSpec?: string | Array<{ label: string, path: string }>
   [key: string]: unknown
 }
 
-interface C8yApplication {
-  id?: string
-  name?: string
+type DiscoveryApplication = IApplication & {
   contextPath?: string
-  manifest?: C8yAppManifest
+  manifest?: AppManifest
 }
 
 // ---------------------------------------------------------------------------
@@ -76,40 +74,11 @@ export interface DiscoveryResult {
   installedContextPaths: ReadonlySet<string>
 }
 
-const specPromises = new Map<string, Promise<DiscoveryResult>>()
-
-const refreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
-
-export const DISCOVERY_REFRESH_INTERVAL_MS = 30 * 60 * 1000
-
-function normalizeTenantUrl(url: string): string {
-  try {
-    return new URL(url).toString().replace(/\/$/, '')
-  } catch {
-    return url.replace(/\/$/, '')
-  }
-}
-
-function clearRefreshTimer(key: string): void {
-  const t = refreshTimers.get(key)
-  if (t) {
-    clearTimeout(t)
-    refreshTimers.delete(key)
-  }
-}
-
-function scheduleRefresh(key: string, authHeaders: Record<string, string>): void {
-  clearRefreshTimer(key)
-  const timer = setTimeout(() => {
-    refreshTimers.delete(key)
-    const empty: DiscoveryResult = { specs: [], installedContextPaths: new Set() }
-    const promise = discoverApiSpecs(key, authHeaders).catch((): DiscoveryResult => empty)
-    specPromises.set(key, promise)
-    promise.then(() => scheduleRefresh(key, authHeaders)).catch(() => {})
-  }, DISCOVERY_REFRESH_INTERVAL_MS)
-  timer.unref?.()
-  refreshTimers.set(key, timer)
-}
+// Cache only holds last-known-good results plus any in-flight promise used
+// to dedupe concurrent first-time callers. A failed discovery is never
+// persisted: the in-flight entry is removed so the next caller retries, and
+// the failure propagates to the current request.
+const cache = new Map<string, Promise<DiscoveryResult>>()
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -117,84 +86,77 @@ function scheduleRefresh(key: string, authHeaders: Record<string, string>): void
 
 /**
  * Start discovery for the given tenant if not already started, or return the
- * existing in-flight promise. Idempotent — safe to call on every request.
- * @param tenantUrl - Base URL of the Cumulocity tenant
- * @param authHeaders - Auth headers used for all discovery requests
+ * existing in-flight / last-known-good promise. Idempotent — safe to call
+ * on every request.
+ *
+ * Failure handling: if the discovery promise rejects and there is no
+ * prior cached result, the in-flight entry is removed so the next caller
+ * retries, and the rejection propagates to the current caller (the request
+ * fails). A prior successful entry is never overwritten by a failure.
+ * @param tenantId - Cumulocity tenant ID; used as the cache key
+ * @param client - Configured Cumulocity client for all API reads
  */
-export function startDiscovery(
-  tenantUrl: string,
-  authHeaders: Record<string, string>,
-): Promise<DiscoveryResult> {
-  const key = normalizeTenantUrl(tenantUrl)
-  if (specPromises.has(key))
-    return specPromises.get(key)!
+export function startDiscovery(tenantId: string, client: Client): Promise<DiscoveryResult> {
+  const existing = cache.get(tenantId)
+  if (existing)
+    return existing
 
-  const empty: DiscoveryResult = { specs: [], installedContextPaths: new Set() }
-  const promise = discoverApiSpecs(key, authHeaders).catch((err: unknown): DiscoveryResult => {
-    consola.warn(`API spec discovery failed for ${key}:`, err instanceof Error ? err.message : String(err))
-    return empty
+  const promise = discoverApiSpecs(client, tenantId)
+  cache.set(tenantId, promise)
+  promise.catch((err: unknown) => {
+    consola.warn(`API spec discovery failed for tenant ${tenantId}:`, c8yErrorSummary(err))
+    if (cache.get(tenantId) === promise)
+      cache.delete(tenantId)
   })
-
-  promise.then(() => scheduleRefresh(key, authHeaders)).catch(() => {})
-
-  specPromises.set(key, promise)
   return promise
 }
 
 /**
  * Bust the cache for a tenant and immediately start fresh discovery.
- * @param tenantUrl - Base URL of the Cumulocity tenant
- * @param authHeaders - Auth headers for the new discovery request
+ * @param tenantId - Cumulocity tenant ID for the cache key
+ * @param client - Configured Cumulocity client for the fresh discovery run
  */
-export function refreshApiSpecs(
-  tenantUrl: string,
-  authHeaders: Record<string, string>,
-): Promise<DiscoveryResult> {
-  const key = normalizeTenantUrl(tenantUrl)
-  clearRefreshTimer(key)
-  specPromises.delete(key)
-  return startDiscovery(key, authHeaders)
+export function refreshApiSpecs(tenantId: string, client: Client): Promise<DiscoveryResult> {
+  cache.delete(tenantId)
+  return startDiscovery(tenantId, client)
 }
 
 /**
- * Clear the cache (and refresh timers) for one tenant or all tenants.
- * @param tenantUrl - If provided, only that tenant is cleared
+ * Peek the cache without triggering discovery. Returns the in-flight or
+ * resolved promise for this tenant, or undefined when no entry exists.
+ * @param tenantId - Cumulocity tenant ID for the cache key
  */
-export function bustApiSpecCache(tenantUrl?: string): void {
-  if (tenantUrl) {
-    const key = normalizeTenantUrl(tenantUrl)
-    clearRefreshTimer(key)
-    specPromises.delete(key)
-  } else {
-    for (const key of specPromises.keys()) clearRefreshTimer(key)
-    specPromises.clear()
-  }
+export function getCachedDiscovery(tenantId: string): Promise<DiscoveryResult> | undefined {
+  return cache.get(tenantId)
 }
 
 /**
- * Seed the cache with a pre-resolved result. Intended for tests.
- * @param tenantUrl - Base URL of the Cumulocity tenant
- * @param specs - Specs to treat as the ready result
+ * Clear the cache for one tenant or every tenant.
+ * @param tenantId - If provided, only that tenant's entry is cleared
  */
+export function bustApiSpecCache(tenantId?: string): void {
+  if (tenantId)
+    cache.delete(tenantId)
+  else
+    cache.clear()
+}
+
 /**
  * Seed the cache with a pre-resolved result. Intended for tests.
  * installedContextPaths defaults to the context paths present in specs.
- * @param tenantUrl - Base URL of the Cumulocity tenant
+ * @param tenantId - Cumulocity tenant ID for the cache key
  * @param specs - Discovered specs to cache
  * @param installedContextPaths - Installed context paths (defaults to spec context paths)
  */
 export function setCachedApiSpecs(
-  tenantUrl: string,
+  tenantId: string,
   specs: DiscoveredApiSpec[],
   installedContextPaths?: ReadonlySet<string>,
 ): void {
-  const key = normalizeTenantUrl(tenantUrl)
-  clearRefreshTimer(key)
-  const result: DiscoveryResult = {
+  cache.set(tenantId, Promise.resolve({
     specs,
     installedContextPaths: installedContextPaths ?? new Set(specs.map((s) => s.contextPath)),
-  }
-  specPromises.set(key, Promise.resolve(result))
+  }))
 }
 
 // ---------------------------------------------------------------------------
@@ -217,34 +179,32 @@ function rewriteDiscoveredSpecPaths(spec: Spec, servicePrefix: string): Spec {
 
 /**
  * Fetch and return discovered specs for the given tenant.
- * Throws on fatal errors; individual spec download failures are skipped.
- * @param tenantUrl - Normalised base URL of the Cumulocity tenant
- * @param authHeaders - Auth headers for all HTTP requests
+ * Throws on fatal errors (applications listing); individual spec download
+ * failures are skipped.
+ *
+ * Uses `applicationsByTenant/{tenantId}` (via `listByTenant`) rather than
+ * the user-scoped `applicationsByUser` endpoint so the call works with
+ * service-user credentials — service users cannot call /user/currentUser,
+ * which the user-scoped endpoint depends on. The tenantId is always known
+ * at the call site (it is the discovery cache key).
+ *
+ * All Cumulocity API calls go through the provided \@c8y/client. This module
+ * never touches `fetch` directly so auth strategy choice (Basic, Bearer,
+ * cookie, service-user) stays in the client construction layer.
+ * @param client - Configured Cumulocity client used for all API reads
+ * @param tenantId - Cumulocity tenant ID to list applications for
  */
-export async function discoverApiSpecs(
-  tenantUrl: string,
-  authHeaders: Record<string, string>,
-): Promise<DiscoveryResult> {
-  const baseUrl = normalizeTenantUrl(tenantUrl)
-  const headers: Record<string, string> = { ...authHeaders, Accept: 'application/json' }
-
-  const userRes = await fetch(`${baseUrl}/user/currentUser`, { headers })
-  if (!userRes.ok)
-    throw new Error(`Failed to fetch current user: ${userRes.status} ${userRes.statusText}`)
-  const currentUser = await userRes.json() as C8yCurrentUser
-  if (!currentUser.id)
-    throw new Error('Could not determine current user ID from /user/currentUser response')
-
-  const appsRes = await fetch(
-    `${baseUrl}/application/applicationsByUser/${encodeURIComponent(currentUser.id)}?pageSize=2000`,
-    { headers },
-  )
-  if (!appsRes.ok)
-    throw new Error(`Failed to fetch applications: ${appsRes.status} ${appsRes.statusText}`)
-  const apps = ((await appsRes.json() as { applications?: C8yApplication[] }).applications) ?? []
+export async function discoverApiSpecs(client: Client, tenantId: string): Promise<DiscoveryResult> {
+  let apps: DiscoveryApplication[]
+  try {
+    const res = await client.application.listByTenant(tenantId, { pageSize: 2000 })
+    apps = (res.data ?? []) as DiscoveryApplication[]
+  } catch (err) {
+    throw new Error(`Failed to fetch applications: ${c8yErrorSummary(err)}`)
+  }
 
   const appsWithSpec = apps.filter(
-    (app): app is C8yApplication & { contextPath: string, name: string, manifest: C8yAppManifest & { openApiSpec: NonNullable<C8yAppManifest['openApiSpec']> } } =>
+    (app): app is DiscoveryApplication & { contextPath: string, name: string, manifest: AppManifest & { openApiSpec: NonNullable<AppManifest['openApiSpec']> } } =>
       typeof app.contextPath === 'string' && app.contextPath.length > 0
       && typeof app.name === 'string' && app.name.length > 0
       && app.manifest != null && app.manifest.openApiSpec != null,
@@ -265,7 +225,7 @@ export async function discoverApiSpecs(
   // Track all installed context paths (not just those with a spec URL)
   const installedContextPaths = new Set<string>(
     apps
-      .filter((app): app is C8yApplication & { contextPath: string } =>
+      .filter((app): app is DiscoveryApplication & { contextPath: string } =>
         typeof app.contextPath === 'string' && app.contextPath.length > 0)
       .map((app) => app.contextPath),
   )
@@ -286,7 +246,9 @@ export async function discoverApiSpecs(
 
     for (const entry of entries) {
       try {
-        const specRes = await fetch(`${baseUrl}${servicePrefix}/${entry.path.replace(/^\//, '')}`, { headers })
+        // Use the low-level FetchClient so we get a raw Response (services
+        // would throw on >=400 which would defeat per-entry skip).
+        const specRes = await client.core.fetch(`${servicePrefix}/${entry.path.replace(/^\//, '')}`)
         if (!specRes.ok)
           continue
         specs.push({

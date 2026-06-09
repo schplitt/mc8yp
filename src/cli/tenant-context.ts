@@ -1,3 +1,4 @@
+import { BasicAuth, Client } from '@c8y/client'
 import { startDiscovery } from '../utils/api-discovery'
 import { createC8yAuthHeaders } from '../utils/client'
 import type { ResolvedSpecs } from '../utils/spec-resolution'
@@ -52,13 +53,19 @@ export async function setCliTenantContext(tenantUrl: string): Promise<CliTenantC
   const creds = await globalThis._getCredentialsByTenantUrl(tenantUrl)
   const authHeaders = createC8yAuthHeaders(creds)
 
+  // CLI creds from the keyring are always UserC8yAuth (user/password).
+  // Build the Cumulocity client directly so discovery has a typed
+  // entrypoint into the platform.
+  const cliClient = new Client(
+    new BasicAuth({ tenant: creds.tenantId, user: creds.user, password: creds.password }),
+    tenantUrl,
+  )
+
   // startDiscovery is idempotent: returns the cached promise if already running.
-  // It also schedules the 30-minute auto-refresh timer on first call for this
-  // tenant so the underlying discovery cache stays current.
-  // _context.specs is a resolved snapshot; after a background refresh the
-  // discovery cache updates automatically. Call set-active-tenant again to
-  // pull a refreshed snapshot into the context (or rely on server restart).
-  const { specs: discovered, installedContextPaths } = await startDiscovery(tenantUrl, authHeaders)
+  // _context.specs is a resolved snapshot; the cache is busted externally
+  // when service-user credentials rotate. Call set-active-tenant again to
+  // force a fresh snapshot into the context.
+  const { specs: discovered, installedContextPaths } = await startDiscovery(creds.tenantId, cliClient)
 
   _context = {
     tenantUrl,

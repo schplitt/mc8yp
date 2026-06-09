@@ -84,8 +84,10 @@ const main = defineCommand({
     if (activeTenant) {
       try {
         const tenantCtx = await setCliTenantContext(activeTenant)
-        const specKeys = ['core', ...Object.keys(tenantCtx.specs.specs)]
-        consola.info(`Active tenant: ${activeTenant}. Available specs: ${specKeys.join(', ')}`)
+        const serviceKeys = Object.keys(tenantCtx.specs.specs)
+        consola.info(`Active tenant: ${activeTenant}`)
+        consola.info(`Startup discovery complete: ${serviceKeys.length} microservice API spec(s) found${serviceKeys.length > 0 ? ` [${serviceKeys.join(', ')}]` : ''}`)
+        consola.info(`Available specs: ${['core', ...serviceKeys].join(', ')}`)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         // Drift recovery: if the persistence file points at a tenant whose
@@ -100,7 +102,7 @@ const main = defineCommand({
         }
       }
     } else {
-      consola.info('No active tenant set. Call set-active-tenant to connect before using query or execute.')
+      consola.info('No active tenant set. Call set-active-tenant to connect before using query or execute. Discovery will run once a tenant is activated.')
     }
 
     setupMcpServer('cli')

@@ -191,7 +191,15 @@ function normalizeCode(functionCode: string): string {
 
 function buildQueryScript(sourceCode: string): string {
   const functionExpression = normalizeCode(sourceCode)
-  const resolved = c8yMcpServer.ctx.custom?.specs!
+  const custom = c8yMcpServer.ctx.custom
+  const resolved = custom?.specs
+  if (!resolved) {
+    throw new Error(
+      custom?.env === 'cli'
+        ? 'No active tenant set. Call set-active-tenant first.'
+        : 'No tenant specs available for this MCP connection. This usually means the request reached the server without a resolvable tenant context (e.g. a platform probe). Reconnect with valid tenant auth.',
+    )
+  }
   return [
     `const coreSpec = ${JSON.stringify(resolved.core)};`,
     `const serviceSpecs = ${JSON.stringify(resolved.specs)};`,

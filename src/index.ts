@@ -3,7 +3,6 @@ import consola from 'consola'
 import { getQuery, H3, HTTPError, serve } from 'h3'
 import { c8yMcpServer, setupMcpServer } from './server'
 import process from 'node:process'
-import { extractAuthFromHeaders } from './utils/auth'
 import {
   ALLOW_HEADER,
   ALLOW_QUERY_KEYS,
@@ -14,32 +13,16 @@ import {
   parseAllowRule,
   parseRestrictionRule,
 } from './utils/restrictions'
-import { Buffer } from 'node:buffer'
-import { refreshApiSpecs, startDiscovery } from './utils/api-discovery'
-import { createC8yAuthHeaders } from './utils/client'
+import { BasicAuth, Client, MicroserviceClientRequestAuth } from '@c8y/client'
+import { getCachedDiscovery, refreshApiSpecs } from './utils/api-discovery'
 import { resolveSpecs } from './utils/spec-resolution'
+import { getServiceUserCredentials, startSubscriptionsRefresh } from './utils/subscriptions'
 
-// Eagerly start API spec discovery at server startup using Cumulocity bootstrap
-// credentials if they are available in the environment. This warms the cache
-// before the first user request arrives so tool descriptions show accurate types.
-const C8Y_BASEURL = process.env.C8Y_BASEURL ?? ''
-const C8Y_BOOTSTRAP_TENANT = process.env.C8Y_BOOTSTRAP_TENANT ?? ''
-const C8Y_BOOTSTRAP_USER = process.env.C8Y_BOOTSTRAP_USER ?? ''
-const C8Y_BOOTSTRAP_PASSWORD = process.env.C8Y_BOOTSTRAP_PASSWORD ?? ''
-
-if (C8Y_BASEURL && C8Y_BOOTSTRAP_USER && C8Y_BOOTSTRAP_PASSWORD) {
-  const principal = C8Y_BOOTSTRAP_TENANT
-    ? `${C8Y_BOOTSTRAP_TENANT}/${C8Y_BOOTSTRAP_USER}`
-    : C8Y_BOOTSTRAP_USER
-  const bootstrapAuth = `Basic ${Buffer.from(`${principal}:${C8Y_BOOTSTRAP_PASSWORD}`).toString('base64')}`
-  startDiscovery(C8Y_BASEURL, { Authorization: bootstrapAuth })
-    .then((result) => {
-      consola.info(`Startup discovery complete: ${result.specs.length} microservice API spec(s) found`)
-    })
-    .catch((err: unknown) => {
-      consola.warn('Startup API spec discovery failed:', err instanceof Error ? err.message : String(err))
-    })
-}
+// Microservice mode requires bootstrap credentials. The subscriptions cache
+// fetches per-tenant service-user creds via the bootstrap user, and proactive
+// discovery rides on every successful refresh. Hard-fail at startup so
+// misconfigured deployments do not silently degrade.
+startSubscriptionsRefresh() // throws synchronously if C8Y_BOOTSTRAP_* / C8Y_BASEURL are missing
 
 setupMcpServer('server')
 
@@ -48,21 +31,45 @@ const transport = new HttpTransport(c8yMcpServer, {
   disableSse: true,
 })
 
+const C8Y_BASEURL = process.env.C8Y_BASEURL!
+
 const app = new H3().all('/mcp', async (event) => {
-  // Extract authentication from request headers
-  const credentials = extractAuthFromHeaders(event.req)
+  // Probe fast path: the Cumulocity platform makes MCP requests without a
+  // usable auth context (tool discovery, health-style introspection). Hand
+  // the MCP server a minimal context so it can still list tools/prompts.
+  // Any tool actually invoked in this state errors cleanly at call time.
+  const authorizationHeader = event.req.headers.get('authorization') ?? undefined
+  const cookieHeader = event.req.headers.get('cookie') ?? undefined
+  if (!authorizationHeader && !cookieHeader) {
+    return transport.respond(event.req, { env: 'server' as const })
+  }
 
-  // Per-tenant discovery cache. The first request for a tenant blocks until
-  // discovery completes; subsequent requests resolve immediately from the cached
-  // promise. The 30-minute refresh timer replaces the promise so new callers
-  // automatically await the refreshed result while old callers keep their result.
-  const discoveryResult = await startDiscovery(credentials.tenantUrl, createC8yAuthHeaders(credentials))
-  const { specs: discoveredSpecs, installedContextPaths } = discoveryResult
+  // Authed request. Resolve the tenant via /tenant/currentTenant using the
+  // user's own auth — works for Basic, Bearer, and OAI cookie alike because
+  // MicroserviceClientRequestAuth handles all three. Best-effort: on any
+  // failure we degrade to bundled-only specs instead of failing the request.
+  const userClient = new Client(
+    new MicroserviceClientRequestAuth({ authorization: authorizationHeader, cookie: cookieHeader }),
+    C8Y_BASEURL,
+  )
+  let tenantId: string | undefined
+  try {
+    tenantId = (await userClient.tenant.current()).data?.name
+  } catch {
+    // Tenant resolution failed (rare). Specs stay undefined → bundled-only.
+  }
 
-  // Bundled service specs absent from this tenant are dropped from the
-  // sandbox surface (unconditional in resolveSpecs) so the agent only sees
-  // what is actually reachable on this tenant.
-  const specs = resolveSpecs(discoveredSpecs, installedContextPaths)
+  // Pre-warmed discovery cache lookup. On rejection the discovery cache has
+  // already self-cleaned, so the client can retry and a fresh attempt runs
+  // on the next subscriptions refresh.
+  let specs: ReturnType<typeof resolveSpecs> | undefined
+  if (tenantId) {
+    const cached = getCachedDiscovery(tenantId)
+    if (cached) {
+      const result = await cached
+      specs = resolveSpecs(result.specs, result.installedContextPaths)
+    }
+  }
 
   const query = getQuery(event)
   const restrictionSources = collectServerRestrictionSources(query, event.req.headers)
@@ -73,9 +80,7 @@ const app = new H3().all('/mcp', async (event) => {
       status: 400,
       statusText: 'Invalid restriction policy',
       message: `One or more restriction values from query params (${RESTRICTION_QUERY_KEYS.map((key) => `?${key}`).join(', ')}) or the ${RESTRICTION_HEADER} header could not be parsed.`,
-      data: {
-        failedRules: failedRestrictions,
-      },
+      data: { failedRules: failedRestrictions },
     })
   }
 
@@ -87,15 +92,19 @@ const app = new H3().all('/mcp', async (event) => {
       status: 400,
       statusText: 'Invalid allow policy',
       message: `One or more allow values from query params (${ALLOW_QUERY_KEYS.map((key) => `?${key}`).join(', ')}) or the ${ALLOW_HEADER} header could not be parsed.`,
-      data: {
-        failedRules: failedAllowRules,
-      },
+      data: { failedRules: failedAllowRules },
     })
   }
 
   return transport.respond(event.req, {
     env: 'server' as const,
-    auth: { tenantUrl: credentials.tenantUrl, authorizationHeader: credentials.authorizationHeader },
+    // execute uses authorizationHeader to forward the user's auth to
+    // Cumulocity. If we only have a cookie, execute will fail with a clear
+    // missing-auth error at invocation time — same shape as the CLI
+    // no-active-tenant path.
+    auth: authorizationHeader
+      ? { tenantUrl: C8Y_BASEURL, authorizationHeader }
+      : undefined,
     restrictions,
     allowRules: parsedAllowRules,
     specs,
@@ -106,22 +115,56 @@ const app = new H3().all('/mcp', async (event) => {
 // Returns the freshly discovered spec metadata.
 app.post('/refresh-apis', async (event) => {
   try {
-    const credentials = extractAuthFromHeaders(event.req)
-    const authHeaders = createC8yAuthHeaders(credentials)
-    const result = await refreshApiSpecs(credentials.tenantUrl, authHeaders)
+    const authorizationHeader = event.req.headers.get('authorization') ?? undefined
+    const cookieHeader = event.req.headers.get('cookie') ?? undefined
+    if (!authorizationHeader && !cookieHeader) {
+      throw new HTTPError({
+        status: 401,
+        statusText: 'Unauthorized',
+        message: 'Refresh requires user auth (Authorization header or session cookie).',
+      })
+    }
+
+    const userClient = new Client(
+      new MicroserviceClientRequestAuth({ authorization: authorizationHeader, cookie: cookieHeader }),
+      C8Y_BASEURL,
+    )
+    const tenantId = (await userClient.tenant.current()).data?.name
+    if (!tenantId) {
+      throw new HTTPError({
+        status: 400,
+        statusText: 'Tenant resolution failed',
+        message: 'Could not resolve current tenant via /tenant/currentTenant.',
+      })
+    }
+
+    const subscribedCred = await getServiceUserCredentials(tenantId)
+    if (!subscribedCred) {
+      throw new HTTPError({
+        status: 403,
+        statusText: 'Tenant not subscribed',
+        message: `Tenant '${tenantId}' is not subscribed to this microservice.`,
+      })
+    }
+
+    const result = await refreshApiSpecs(
+      tenantId,
+      new Client(new BasicAuth(subscribedCred), C8Y_BASEURL),
+    )
     return {
       message: 'API spec discovery completed',
-      tenantUrl: credentials.tenantUrl,
+      tenantUrl: C8Y_BASEURL,
+      tenantId,
       installedContextPaths: [...result.installedContextPaths],
       discovered: result.specs.map((s) => ({
         contextPath: s.contextPath,
         specLabel: s.specLabel,
-        pathCount: Object.keys(
-          (s.spec as { paths?: Record<string, unknown> }).paths ?? {},
-        ).length,
+        pathCount: Object.keys((s.spec as { paths?: Record<string, unknown> }).paths ?? {}).length,
       })),
     }
   } catch (err) {
+    if (err instanceof HTTPError)
+      throw err
     throw new HTTPError({
       status: 500,
       statusText: 'Discovery failed',

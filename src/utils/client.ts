@@ -11,6 +11,20 @@ import type { RequestAuth } from '../types/mcp-context'
 
 export type { RequestAuth }
 
+/**
+ * Map a \@c8y/client error (which is thrown as `{ res, data }` for HTTP
+ * statuses >= 400) to a short human-readable string.
+ * @param err - Error thrown by an \@c8y/client service call
+ */
+export function c8yErrorSummary(err: unknown): string {
+  if (err && typeof err === 'object' && 'res' in err) {
+    const r = (err as { res?: { status?: number, statusText?: string } }).res
+    if (r && typeof r.status === 'number')
+      return `${r.status} ${r.statusText ?? ''}`.trim()
+  }
+  return err instanceof Error ? err.message : String(err)
+}
+
 export async function resolveC8yAuth(): Promise<C8yAuth | RequestAuth> {
   const custom = c8yMcpServer.ctx.custom
   const auth = custom?.auth

@@ -35,10 +35,6 @@ export interface UserC8yAuth extends BaseC8yAuth {
 
 export type C8yAuth = TokenC8yAuth | UserC8yAuth
 
-export type AuthContext
-  = | (TokenC8yAuth & { authorizationHeader: string })
-    | (UserC8yAuth & { authorizationHeader: string })
-
 interface StoredUserC8yAuth extends BaseC8yAuth {
   user: string
   password: string
