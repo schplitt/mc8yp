@@ -158,6 +158,20 @@ pnpm dlx mc8yp creds list
 pnpm dlx mc8yp creds remove
 ```
 
+### Active Tenant Flow
+
+Adding credentials does not automatically activate a tenant. CLI sessions only run `query` against live tenant data and `execute` against the live API once a tenant has been selected via the `set-active-tenant` MCP tool.
+
+First-time setup an agent will perform once the MCP client is connected:
+
+1. Call `cli-status` to see stored credentials and the current active tenant.
+2. Call `set-active-tenant` with one of the tenant URLs from `cli-status`. The selection is written to `~/.config/mc8yp/active-tenant.json` and re-applied automatically on every subsequent CLI start.
+3. Call `query` and `execute` as needed. The query footer and execute marker keep the active tenant visible on every result.
+
+To switch tenants mid-session, call `set-active-tenant` again with the new URL. To deliberately stop working against any tenant and just browse the bundled OpenAPI snapshots, call `set-active-tenant` with `tenantUrl: null`. In that state `query` continues to work against every bundled spec and `execute` returns a missing-auth error — so an agent cannot accidentally hit a tenant it has not selected.
+
+If the stored credentials for the active tenant are removed (for example by `mc8yp creds remove`), the next `cli-status` call — or the next CLI restart — detects the drift and automatically resets the active tenant to `(none)`, preventing stale auth headers from going on the wire.
+
 ### Connecting a Local MCP Client
 
 For Claude Desktop or any MCP client, add:
@@ -223,16 +237,17 @@ This only changes the bundled OpenAPI data that `query` sees. The `execute` tool
 
 ### Tools
 
-| Tool         | Description                                                                                                                                                                                                                                        |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `query`      | Search and inspect the bundled OpenAPI specs by running a JavaScript function expression. The sandbox exposes `coreSpec`, `dtmSpec`, and `specsEnabled`, and it never hides bundled specs from the query surface.                                  |
-| `execute`    | Execute JavaScript against the live Cumulocity API. Provide an async JavaScript function expression. A top-level `cumulocity` binding provides `cumulocity.request({ method, path, body?, headers? })`. Return the final value from that function. |
-| `cli-status` | _(CLI mode only)_ Read the active tenant (or note that none is set) and the list of stored credentials from your system keyring. Call this before `query` / `execute` so you know which tenant they will hit.                                      |
+| Tool                | Description                                                                                                                                                                                                                                                                       |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `query`             | Search and inspect the bundled and discovered OpenAPI specs by running a JavaScript function expression. The sandbox exposes `coreSpec`, `specsEnabled`, and `serviceSpecs` (microservice APIs keyed by `contextPath`).                                                           |
+| `execute`           | Execute JavaScript against the live Cumulocity API. Provide an async JavaScript function expression. A top-level `cumulocity` binding provides `cumulocity.request({ method, path, body?, headers? })`. Return the final value from that function.                                |
+| `cli-status`        | _(CLI mode only)_ Read the active tenant (or note that none is set) and the list of stored credentials from your system keyring. Auto-clears the active tenant if its credentials have been removed. Call this before `query` / `execute` so you know which tenant they will hit. |
+| `set-active-tenant` | _(CLI mode only)_ Select the tenant `query` and `execute` operate against, persisted to `~/.config/mc8yp/active-tenant.json` across CLI restarts. Pass `tenantUrl: null` to clear the selection and fall back to browsing the bundled OpenAPI snapshots.                          |
 
 Both code-mode tools run in a sandboxed V8 runtime ([@iso4/sandbox](https://github.com/schplitt/iso4)) hosted in a separate Rust subprocess.
 
-- `query` returns JSON text for easier inspection of OpenAPI data.
-- `execute` returns the successful function result in [Toon format](https://github.com/nicepkg/toon). If execution is blocked or fails, it returns a plain text message instead.
+- `query` returns JSON text for easier inspection of OpenAPI data. Every result ends with a footer line naming the active tenant (or noting there is none) so the agent can verify which tenant the visible specs reflect.
+- `execute` returns the successful function result in [Toon format](https://github.com/nicepkg/toon). If execution is blocked or fails, it returns a plain text message instead. In CLI mode every `execute` result is prefixed with an `Executed against tenant: <url>` marker line so the active tenant is always visible — the active tenant is global to a CLI session and can be flipped between calls by `set-active-tenant`.
 
 ### Prompts
 
@@ -382,26 +397,14 @@ mc8yp --allow "GET:/inventory/**" --allowed "POST:/alarm/**"
 mc8yp -a "/inventory/**" -r "/inventory/managedObjects"
 ```
 
-To forbid one or more bundled OpenAPI parts for execute policy, repeat `--disable-openapi` (or `-d`) in CLI mode. `query` still sees all bundled specs and can inspect `specsEnabled` to understand which spec families remain enabled for execute policy:
-
-```sh
-# Disable bundled DTM APIs for execute policy on this CLI connection
-mc8yp -d dtm
-
-# Disable multiple bundled specs if more are added in the future
-mc8yp -d dtm -d core
-```
-
 ### Microservice Mode (HTTP)
 
 Pass restrictions as `restriction`, `restrict`, or `r` query parameters on the MCP endpoint URL.
 Pass allow rules as `allowed`, `allow`, or `a` query parameters.
-To forbid bundled OpenAPI parts for execute policy, pass the `openapi-disabled` query parameter.
 You can also send project-scoped HTTP headers to avoid conflicts with well-known headers:
 
 - `mc8yp-restriction` for deny rules
 - `mc8yp-allow` for allow-list rules
-- `mc8yp-openapi-disabled` for bundled OpenAPI part disablement
 
 Both headers accept either repeated header instances or a comma-separated list of values. Query parameters and headers can be combined on the same connection.
 
@@ -409,8 +412,6 @@ Both headers accept either repeated header instances or a comma-separated list o
 /mcp?restriction=/inventory/**&restrict=DELETE:/alarm/**
 /mcp?r=/inventory/**&r=DELETE:/alarm/**
 /mcp?allow=/inventory/**&allowed=POST:/alarm/**
-/mcp?openapi-disabled=dtm
-/mcp?openapi-disabled=dtm&openapi-disabled=core
 ```
 
 ```http
@@ -419,18 +420,15 @@ Authorization: Bearer <token>
 mc8yp-restriction: /inventory/**
 mc8yp-restriction: DELETE:/alarm/**
 mc8yp-allow: GET:/measurement/**
-mc8yp-openapi-disabled: dtm
 ```
 
 ### How Access Policy Works
 
-1. **Query visibility**: The `query` tool exposes the raw bundled OpenAPI specs for the current MCP connection. Bundled specs are not hidden or rewritten, and the query sandbox exposes `specsEnabled` so the model can see which spec families are enabled for execute policy.
+1. **Query visibility**: The `query` tool exposes resolved OpenAPI specs through `coreSpec`, `specsEnabled`, and `serviceSpecs`. With an active tenant, services not installed on that tenant are dropped from the sandbox surface so the agent only sees what is actually reachable. In CLI mode with no active tenant, every bundled snapshot is exposed for reference browsing only — `execute` is unavailable in that state.
 
-2. **Sandbox request enforcement**: The `execute` tool checks restrictions and allow rules inside the generated sandbox request helper, where the actual HTTP method and normalized path are both available. Matching deny rules block first. If any allow rules are configured, requests must also match at least one allow rule.
+2. **Request enforcement**: The host-side bridge that backs `cumulocity.request` evaluates restrictions and allow rules before any HTTP request leaves the host. Matching deny rules block first. If any allow rules are configured, requests must also match at least one allow rule. Blocked requests never reach Cumulocity.
 
-3. **Bundled spec disablement**: When the connection disables bundled OpenAPI parts such as `dtm`, `query` still shows all bundled specs, while the server expands that selection into additional restrictions so `execute` stays path-and-method based.
-
-4. **Network boundary**: The sandbox itself has no `fetch` global. Sandbox code reaches the tenant only through a single host-bridged `cumulocity.request` helper that injects auth, evaluates restriction/allow rules, and issues the live HTTP call via [@iso4/fetch](https://www.npmjs.com/package/@iso4/fetch) (DNS-pinned, SSRF-hardened). Every other network egress is unavailable to the agent.
+3. **Network boundary**: The sandbox itself has no `fetch` global. Sandbox code reaches the tenant only through the host-bridged `cumulocity.request` helper, which injects auth, evaluates restriction and allow rules, and issues the live HTTP call via [@iso4/fetch](https://www.npmjs.com/package/@iso4/fetch) (DNS-pinned, SSRF-hardened). Every other network egress is unavailable to the agent.
 
 When an `execute` request is blocked by MCP connection policy, the tool returns explanatory text stating whether the operation was denied by a restriction or blocked because it is outside the configured allow list, no request was sent to Cumulocity, and retrying through the same connection will not help.
 
