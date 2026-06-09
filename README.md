@@ -82,6 +82,12 @@ In this mode, mc8yp exposes an HTTP MCP endpoint at `/mcp` and is intended for u
 
 ### 2. CLI Mode (local development)
 
+> **Platform requirement:** CLI mode requires **macOS or Linux**. The sandboxed V8 runtime
+> (`@iso4/sandbox`) communicates with a Rust subprocess over Unix domain sockets, which are not
+> available on Windows. If you are on Windows, use
+> [WSL 2](https://learn.microsoft.com/windows/wsl/) or connect to a
+> [Cumulocity microservice deployment](#1-cumulocity-microservice-mode-recommended) instead.
+
 CLI mode is ideal for:
 
 - local debugging
