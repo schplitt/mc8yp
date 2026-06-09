@@ -22,8 +22,8 @@ export function createCodeModeGuidePrompt() {
     const resolvedSpecs = c8yMcpServer.ctx.custom?.specs!
     const serviceKeys = Object.keys(resolvedSpecs.specs)
     const serviceSpecsType = serviceKeys.length === 0
-      ? 'Record<string, ServiceSpecEntry>'
-      : `{\n${serviceKeys.map((k) => `  ${k}: ServiceSpecEntry`).join('\n')}\n}`
+      ? 'Record<string, Spec>'
+      : `{\n${serviceKeys.map((k) => `  ${k}: Spec`).join('\n')}\n}`
     const policyLines = [
       ...restrictions.map((rule) => `- deny: \`${rule.source}\``),
       ...allowRules.map((rule) => `- allow: \`${rule.source}\``),
@@ -43,7 +43,7 @@ Use \`query\` to inspect OpenAPI specs (bundled core or discovered microservices
 - Input: a **zero-parameter** JavaScript function expression
 - Do NOT declare \`coreSpec\` or \`serviceSpecs\` as function parameters — they are already declared as top-level constants in the surrounding scope
 - \`coreSpec\` is for the main Cumulocity REST surface: inventory, alarms, events, measurements, identity, device control, users, tenants, audit
-- \`serviceSpecs\` contains microservice APIs discovered on the current tenant, keyed by contextPath (e.g. \`serviceSpecs['dtm']\`). Paths are already prefixed for direct use with \`cumulocity.request()\`
+- \`serviceSpecs\` contains microservice APIs available on the current tenant, keyed by contextPath (e.g. \`serviceSpecs.dtm\`). An entry is present iff the service is actually reachable on this tenant — use \`serviceSpecs.<key>\` or \`'<key>' in serviceSpecs\` to check availability. Paths are already prefixed for direct use with \`cumulocity.request()\`
 - Return the exact value you want back from that function
 - Sync and async functions are both supported
 - Strings are returned as-is; other results are returned as JSON text
@@ -77,14 +77,7 @@ type Spec = {
   tags?: Array<{ name: string, description?: string }>
 }
 
-type ServiceSpecEntry = {
-  label: string
-  contextPath: string
-  spec: Spec
-}
-
 declare const coreSpec: Spec
-declare const specsEnabled: Record<string, boolean>
 declare const serviceSpecs: ${serviceSpecsType}
 \`\`\`
 
@@ -95,7 +88,7 @@ Examples (all zero-parameter — note no arguments in the arrow function signatu
 
 \`\`\`js
 () => {
-  const op = serviceSpecs['dtm']?.spec.paths['/service/dtm/assets']?.get
+  const op = serviceSpecs.dtm?.paths['/service/dtm/assets']?.get
   return op?.parameters
 }
 \`\`\`

@@ -239,7 +239,7 @@ This only changes the bundled OpenAPI data that `query` sees. The `execute` tool
 
 | Tool                | Description                                                                                                                                                                                                                                                                       |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `query`             | Search and inspect the bundled and discovered OpenAPI specs by running a JavaScript function expression. The sandbox exposes `coreSpec`, `specsEnabled`, and `serviceSpecs` (microservice APIs keyed by `contextPath`).                                                           |
+| `query`             | Search and inspect the bundled and discovered OpenAPI specs by running a JavaScript function expression. The sandbox exposes `coreSpec` and `serviceSpecs` (microservice APIs keyed by `contextPath`).                                                                            |
 | `execute`           | Execute JavaScript against the live Cumulocity API. Provide an async JavaScript function expression. A top-level `cumulocity` binding provides `cumulocity.request({ method, path, body?, headers? })`. Return the final value from that function.                                |
 | `cli-status`        | _(CLI mode only)_ Read the active tenant (or note that none is set) and the list of stored credentials from your system keyring. Auto-clears the active tenant if its credentials have been removed. Call this before `query` / `execute` so you know which tenant they will hit. |
 | `set-active-tenant` | _(CLI mode only)_ Select the tenant `query` and `execute` operate against, persisted to `~/.config/mc8yp/active-tenant.json` across CLI restarts. Pass `tenantUrl: null` to clear the selection and fall back to browsing the bundled OpenAPI snapshots.                          |
@@ -424,7 +424,7 @@ mc8yp-allow: GET:/measurement/**
 
 ### How Access Policy Works
 
-1. **Query visibility**: The `query` tool exposes resolved OpenAPI specs through `coreSpec`, `specsEnabled`, and `serviceSpecs`. With an active tenant, services not installed on that tenant are dropped from the sandbox surface so the agent only sees what is actually reachable. In CLI mode with no active tenant, every bundled snapshot is exposed for reference browsing only — `execute` is unavailable in that state.
+1. **Query visibility**: The `query` tool exposes resolved OpenAPI specs through `coreSpec` and `serviceSpecs`. With an active tenant, services not installed on that tenant are dropped from the sandbox surface so the agent only sees what is actually reachable. In CLI mode with no active tenant, every bundled snapshot is exposed for reference browsing only — `execute` is unavailable in that state.
 
 2. **Request enforcement**: The host-side bridge that backs `cumulocity.request` evaluates restrictions and allow rules before any HTTP request leaves the host. Matching deny rules block first. If any allow rules are configured, requests must also match at least one allow rule. Blocked requests never reach Cumulocity.
 

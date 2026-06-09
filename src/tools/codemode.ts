@@ -69,30 +69,20 @@ type Spec = {
   tags?: Array<{ name: string, description?: string }>
 }
 
-type ServiceSpecEntry = {
-  label: string
-  contextPath: string
-  spec: Spec
-}
-
-type SpecsEnabled = Record<string, boolean>
-
 declare const coreSpec: Spec
-declare const specsEnabled: SpecsEnabled
-declare const serviceSpecs: Record<string, ServiceSpecEntry>
+declare const serviceSpecs: Record<string, Spec>
 \`\`\`
 
 - \`coreSpec\` — the main Cumulocity REST surface. Always present.
-- \`specsEnabled\` — which bundled specs are available on this tenant (e.g. \`specsEnabled.dtm\`). Check before using optional specs.
-- \`serviceSpecs\` — additional microservice APIs discovered on the tenant, keyed by contextPath. Paths are already prefixed (e.g. \`/service/myservice/items\`).
+- \`serviceSpecs\` — microservice APIs available on the active tenant, keyed by contextPath. An entry is **present iff** the service is reachable on this tenant. Paths are already prefixed (e.g. \`/service/myservice/items\`). Check with \`serviceSpecs.dtm\` (or \`'dtm' in serviceSpecs\`) before reaching in.
 
 If your function returns a string it is returned as-is. Any other value is returned as JSON. A footer line naming the active tenant (or noting there is none) is appended after a \`---\` separator on every successful result.
 The current MCP connection may still block \`execute\` calls even when an operation is visible in a spec.
 
 Examples:
-\`() => specsEnabled\`
-\`() => Object.keys(coreSpec.paths).filter((p) => p.includes('inventory'))\`
 \`() => Object.keys(serviceSpecs)\`
+\`() => Object.keys(coreSpec.paths).filter((p) => p.includes('inventory'))\`
+\`() => serviceSpecs.dtm?.paths['/service/dtm/assets']?.get\`
 
 \`\`\`js
 () => {
@@ -103,7 +93,7 @@ Examples:
 `,
     schema: v.object({
       code: createCodeSchema(
-        'A zero-parameter JavaScript function expression. coreSpec, specsEnabled, and serviceSpecs are already declared as top-level constants — do not redeclare them as function parameters. Return the final result. Async functions are supported.',
+        'A zero-parameter JavaScript function expression. coreSpec and serviceSpecs are already declared as top-level constants — do not redeclare them as function parameters. Return the final result. Async functions are supported.',
       ),
     }),
   }, async (input) => {

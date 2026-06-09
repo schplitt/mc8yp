@@ -137,9 +137,9 @@ Build-time behaviour:
 ### Query vs Execute
 
 - `query` expects a JavaScript function expression and returns strings directly or other values as JSON text.
-- `query` injects three deterministic top-level bindings into the sandbox: `coreSpec`, `serviceSpecs`, and `specsEnabled`.
-- `coreSpec` is the main Cumulocity REST surface (always present). `serviceSpecs` is a `Record<string, { label, contextPath, spec }>` keyed by contextPath; bundled service specs like DTM land here as `serviceSpecs.dtm` (only when actually available on the tenant). `specsEnabled` is `{ core: true, [contextPath]: true }` for every spec the sandbox can read.
-- An unavailable spec is **absent** from `serviceSpecs`/`specsEnabled`, not `null`. Agent code should check `specsEnabled.dtm` (or `serviceSpecs.dtm`) before reaching into a bundled-but-optional surface.
+- `query` injects two deterministic top-level bindings into the sandbox: `coreSpec` and `serviceSpecs`.
+- `coreSpec` is the main Cumulocity REST surface (always present). `serviceSpecs` is a `Record<string, Spec>` keyed by contextPath; bundled and discovered service specs like DTM land here as `serviceSpecs.dtm` only when actually available on the tenant.
+- An unavailable spec is **absent** from `serviceSpecs`, not `null`. Agent code should check `serviceSpecs.dtm` (or `'dtm' in serviceSpecs`) before reaching into an optional surface.
 - `execute` expects a JavaScript function expression and returns successful results in Toon format.
 - Visible operations remain raw OpenAPI data; blocked live requests fail before network access.
 
@@ -151,7 +151,7 @@ Restrictions and allow rules both use the format `[METHOD:]<path-pattern>`.
 - Allow rules are allow-list entries. When any allow rule exists, requests must match at least one allow rule unless a restriction blocks them first.
 - Restrictions take priority over allow rules.
 - In microservice mode, prefer the project-scoped `mc8yp-restriction` and `mc8yp-allow` headers for HTTP policy transport; repeated headers and comma-separated values are both accepted.
-- Bundled services that are not installed on the tenant are simply absent from `serviceSpecs` and `specsEnabled`. There is no pre-emptive auto-restriction layer — if an `execute` call ends up hitting an uninstalled service route, the Cumulocity API itself returns the failure and the sandbox propagates it. The connection-level restriction/allow policy is the only layer above that.
+- Bundled services that are not installed on the tenant are simply absent from `serviceSpecs`. There is no pre-emptive auto-restriction layer — if an `execute` call ends up hitting an uninstalled service route, the Cumulocity API itself returns the failure and the sandbox propagates it. The connection-level restriction/allow policy is the only layer above that.
 
 The restriction system is implemented in two places:
 

@@ -455,13 +455,13 @@ describe('query', () => {
     return () => ctxSpy.mockRestore()
   }
 
-  it('exposes coreSpec, specsEnabled, and serviceSpecs through the query sandbox', async () => {
+  it('exposes coreSpec and serviceSpecs through the query sandbox', async () => {
     const restore = withSpecs({ core: { paths: {} }, specs: {} })
     try {
       const result = await query(
-        '() => ({ hasCore: !!coreSpec, hasSpecsEnabled: typeof specsEnabled === "object", hasServiceSpecs: typeof serviceSpecs === "object" })',
+        '() => ({ hasCore: !!coreSpec, hasServiceSpecs: typeof serviceSpecs === "object", noSpecsEnabled: typeof specsEnabled === "undefined" })',
       )
-      expect(JSON.parse(stripQueryFooter(result))).toEqual({ hasCore: true, hasSpecsEnabled: true, hasServiceSpecs: true })
+      expect(JSON.parse(stripQueryFooter(result))).toEqual({ hasCore: true, hasServiceSpecs: true, noSpecsEnabled: true })
     } finally {
       restore()
     }
@@ -497,21 +497,21 @@ describe('query', () => {
     }
   })
 
-  it('specsEnabled lists every available spec (core + serviceSpecs keys)', async () => {
-    const restore = withSpecs({ core: { paths: {} }, specs: { dtm: { paths: {} }, svc: { paths: {} } } })
+  it('serviceSpecs entries are bare Spec objects (no wrapper) so paths read directly', async () => {
+    const restore = withSpecs({ core: { paths: {} }, specs: { dtm: { paths: { '/service/dtm/assets': {} } } } })
     try {
-      const result = await query('() => specsEnabled')
-      expect(JSON.parse(stripQueryFooter(result))).toEqual({ core: true, dtm: true, svc: true })
+      const result = await query(`() => Object.keys(serviceSpecs.dtm.paths)`)
+      expect(JSON.parse(stripQueryFooter(result))).toEqual(['/service/dtm/assets'])
     } finally {
       restore()
     }
   })
 
-  it('unavailable services are simply absent from serviceSpecs/specsEnabled', async () => {
+  it('unavailable services are simply absent from serviceSpecs', async () => {
     const restore = withSpecs({ core: { paths: {} }, specs: {} })
     try {
-      const result = await query('() => ({ keys: Object.keys(serviceSpecs), enabled: specsEnabled })')
-      expect(JSON.parse(stripQueryFooter(result))).toEqual({ keys: [], enabled: { core: true } })
+      const result = await query(`() => ({ keys: Object.keys(serviceSpecs), hasDtm: 'dtm' in serviceSpecs })`)
+      expect(JSON.parse(stripQueryFooter(result))).toEqual({ keys: [], hasDtm: false })
     } finally {
       restore()
     }
