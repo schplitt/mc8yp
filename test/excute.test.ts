@@ -614,10 +614,10 @@ describe('execute — CLI tenant marker', () => {
 })
 
 describe('query — tenant footer', () => {
-  function withAuth(tenantUrl: string | undefined): () => void {
+  function withAuth(tenantUrl: string | undefined, env: 'cli' | 'server' = 'cli'): () => void {
     const ctxSpy = vi.spyOn(c8yMcpServer, 'ctx', 'get').mockReturnValue({
       custom: {
-        env: 'cli' as const,
+        env,
         restrictions: [],
         allowRules: [],
         specs: { core: { paths: {} }, specs: {} },
@@ -643,6 +643,18 @@ describe('query — tenant footer', () => {
       const result = await query('() => ({ ok: true })')
       expect(result).toContain('\n\n---\nQuery ran against bundled OpenAPI snapshots only')
       expect(result).toContain('no active tenant')
+    } finally {
+      restore()
+    }
+  })
+
+  it('does NOT append a footer in server mode', async () => {
+    const restore = withAuth('https://acme.cumulocity.com', 'server')
+    try {
+      const result = await query('() => ({ ok: true })')
+      expect(result).not.toContain('Query ran against')
+      expect(result).not.toContain('---')
+      expect(result).toBe(JSON.stringify({ ok: true }))
     } finally {
       restore()
     }

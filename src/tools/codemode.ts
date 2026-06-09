@@ -13,25 +13,26 @@ function getOpenApiNote(): string {
 }
 
 function getQuerySafetyPreface(env: Env): string {
-  const sharedFooter = 'Every result ends with a footer line naming the active tenant (or noting there is none) so you can verify which tenant the result reflects before acting on it.'
-  if (env !== 'cli')
+  if (env === 'server')
+    return 'Searches the bundled and discovered OpenAPI specs available to the current connection.'
+  return '**Read first.** The active tenant is global to this CLI session and can be flipped between calls by `set-active-tenant`. Every result ends with a footer line naming the active tenant (or noting there is none) so you can verify which tenant the result reflects before acting on it. If the footer says "no active tenant" you are looking at bundled reference snapshots — call `cli-status` to see stored credentials and `set-active-tenant` to connect before relying on the result.'
+}
+
+function getExecuteSafetyPreface(env: Env): string {
+  const sharedFooter = 'An endpoint visible in `query` may still return 404 from `execute` when the service is not actually installed on the current tenant.'
+  if (env === 'server')
     return sharedFooter
   return [
-    '**CLI mode — read first.** The active tenant is global to this CLI session and can be flipped between calls by `set-active-tenant`. Always check the footer line at the bottom of every result. If it says "no active tenant" you are looking at bundled reference snapshots — call `cli-status` to see stored credentials and `set-active-tenant` to connect before relying on the result.',
+    '**Read first.** Every result starts with an `Executed against tenant: <url>` marker line followed by a blank line. Verify it matches the tenant you intend to mutate before reporting the result. The active tenant is global to this CLI session and can be flipped between calls by `set-active-tenant`. If no tenant is active `execute` fails with a missing-auth error — call `cli-status` and `set-active-tenant` to connect first.',
     '',
     sharedFooter,
   ].join('\n')
 }
 
-function getExecuteSafetyPreface(env: Env): string {
-  const sharedFooter = 'An endpoint visible in `query` may still return 404 from `execute` when the service is not actually installed on the current tenant.'
-  if (env !== 'cli')
-    return sharedFooter
-  return [
-    '**CLI mode — read first.** Every result starts with an `Executed against tenant: <url>` marker line followed by a blank line. Verify it matches the tenant you intend to mutate before reporting the result. The active tenant is global to this CLI session and can be flipped between calls by `set-active-tenant`. If no tenant is active `execute` fails with a missing-auth error — call `cli-status` and `set-active-tenant` to connect first.',
-    '',
-    sharedFooter,
-  ].join('\n')
+function getQueryResultDescription(env: Env): string {
+  if (env === 'server')
+    return 'If your function returns a string it is returned as-is. Any other value is returned as JSON.'
+  return 'If your function returns a string it is returned as-is. Any other value is returned as JSON. A footer line naming the active tenant (or noting there is none) is appended after a `---` separator on every successful result.'
 }
 
 export function createQueryTool(env: Env) {
@@ -76,7 +77,7 @@ declare const serviceSpecs: Record<string, Spec>
 - \`coreSpec\` — the main Cumulocity REST surface. Always present.
 - \`serviceSpecs\` — microservice APIs available on the active tenant, keyed by contextPath. An entry is **present iff** the service is reachable on this tenant. Paths are already prefixed (e.g. \`/service/myservice/items\`). Check with \`serviceSpecs.dtm\` (or \`'dtm' in serviceSpecs\`) before reaching in.
 
-If your function returns a string it is returned as-is. Any other value is returned as JSON. A footer line naming the active tenant (or noting there is none) is appended after a \`---\` separator on every successful result.
+${getQueryResultDescription(env)}
 The current MCP connection may still block \`execute\` calls even when an operation is visible in a spec.
 
 Examples:

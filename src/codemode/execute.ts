@@ -287,6 +287,13 @@ export async function query(functionCode: string): Promise<string> {
 
   const value = extractDefaultExport(result.exports)
   const body = typeof value === 'string' ? value : JSON.stringify(value)
+  // The tenant footer is a CLI-only affordance: in CLI mode the active tenant
+  // is global session state that can flip between calls, so the agent needs a
+  // visible marker to verify which tenant a result reflects. In server mode
+  // the tenant is fixed by deployment and request auth, so the footer would
+  // just be noise.
+  if (c8yMcpServer.ctx.custom?.env !== 'cli')
+    return body
   const tenantUrl = c8yMcpServer.ctx.custom?.auth?.tenantUrl
   const footer = tenantUrl
     ? `Query ran against tenant: ${tenantUrl}. Visible specs are everything currently available for that tenant.`
