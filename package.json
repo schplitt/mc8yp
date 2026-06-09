@@ -49,6 +49,8 @@
   "dependencies": {
     "@c8y/client": "catalog:",
     "@clack/prompts": "catalog:",
+    "@iso4/fetch": "catalog:",
+    "@iso4/sandbox": "catalog:",
     "@napi-rs/keyring": "catalog:",
     "@tmcp/adapter-valibot": "catalog:",
     "@tmcp/transport-http": "catalog:",
@@ -58,7 +60,6 @@
     "citty": "catalog:",
     "consola": "catalog:",
     "h3": "catalog:",
-    "secure-exec": "catalog:",
     "tmcp": "catalog:",
     "ufo": "catalog:",
     "unctx": "catalog:",

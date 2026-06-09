@@ -229,7 +229,7 @@ This only changes the bundled OpenAPI data that `query` sees. The `execute` tool
 | `execute`          | Execute JavaScript against the live Cumulocity API. Provide an async JavaScript function expression. A top-level `cumulocity` binding provides `cumulocity.request({ method, path, body?, headers? })`. Return the final value from that function. |
 | `list-credentials` | _(CLI mode only)_ List stored credentials from your system keyring.                                                                                                                                                                                |
 
-Both code-mode tools run in a sandboxed runtime ([secure-exec](https://github.com/nicepkg/secure-exec)).
+Both code-mode tools run in a sandboxed V8 runtime ([@iso4/sandbox](https://github.com/schplitt/iso4)) hosted in a separate Rust subprocess.
 
 - `query` returns JSON text for easier inspection of OpenAPI data.
 - `execute` returns the successful function result in [Toon format](https://github.com/nicepkg/toon). If execution is blocked or fails, it returns a plain text message instead.
@@ -430,7 +430,7 @@ mc8yp-openapi-disabled: dtm
 
 3. **Bundled spec disablement**: When the connection disables bundled OpenAPI parts such as `dtm`, `query` still shows all bundled specs, while the server expands that selection into additional restrictions so `execute` stays path-and-method based.
 
-4. **Network boundary**: The secure-exec permission layer independently restricts network access to the configured tenant host. Other network operations are denied.
+4. **Network boundary**: The sandbox itself has no `fetch` global. Sandbox code reaches the tenant only through a single host-bridged `cumulocity.request` helper that injects auth, evaluates restriction/allow rules, and issues the live HTTP call via [@iso4/fetch](https://www.npmjs.com/package/@iso4/fetch) (DNS-pinned, SSRF-hardened). Every other network egress is unavailable to the agent.
 
 When an `execute` request is blocked by MCP connection policy, the tool returns explanatory text stating whether the operation was denied by a restriction or blocked because it is outside the configured allow list, no request was sent to Cumulocity, and retrying through the same connection will not help.
 

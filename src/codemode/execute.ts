@@ -1,99 +1,193 @@
+import process from 'node:process'
 import { encode } from '@toon-format/toon'
-import { NodeRuntime, createNodeDriver, createNodeRuntimeDriverFactory } from 'secure-exec'
-import { AsyncSemaphore } from './semaphore'
-import { createNetworkPermissionDecision } from './network-permissions'
+import { createSafeFetch } from '@iso4/fetch'
+import type { SafeFetchGlobal } from '@iso4/fetch'
+import { createSandbox } from '@iso4/sandbox'
+import type { HostGlobals, Sandbox } from '@iso4/sandbox'
 import { createC8yAuthHeaders, resolveC8yAuth } from '../utils/client'
 import { c8yMcpServer } from '../server-instance'
-import {
-  compileRestrictionRule,
-  compileRestrictionSegment,
-  escapeRestrictionRegex,
-  matchCompiledSegments,
-  matchesCompiledRule,
-} from '../utils/restriction-matcher'
+import { evaluateAccessPolicy } from '../utils/restriction-matcher'
 import { HTTP_METHODS } from '../utils/restrictions'
 import type { AllowRule, RestrictionRule } from '../utils/restrictions'
 import type { Spec } from '../utils/spec-resolution'
 
-const NO_DEFAULT_EXPORT_MESSAGE = 'Execution completed without returning a value.'
 const QUERY_ENTRY_PATH = '/codemode-query.mjs'
 const EXECUTE_ENTRY_PATH = '/codemode-execute.mjs'
-const runtimeSemaphore = new AsyncSemaphore(3)
-const BLOCKED_REQUEST_PREFIX = 'Request blocked by MCP connection policy.'
 
-interface ExecuteSuccessEnvelope {
-  status: 'success'
-  result: unknown
+export const BLOCKED_REQUEST_PREFIX = 'Request blocked by MCP connection policy.'
+
+const SANDBOX_LIMITS = {
+  memoryMb: 128,
+  cpuTimeMs: 50_000,
+} as const
+
+// ─────────────────────────────────────────────────────────────────────────
+// Sandbox lifecycle (lazy singleton)
+// ─────────────────────────────────────────────────────────────────────────
+
+let sandboxPromise: Promise<Sandbox> | null = null
+
+async function getSandbox(): Promise<Sandbox> {
+  sandboxPromise ??= createSandbox({ maxIsolates: 10 })
+  return sandboxPromise
 }
 
-interface ExecuteErrorEnvelope {
-  status: 'blocked' | 'failed'
-  error: {
-    message: string
+export async function disposeSandbox(): Promise<void> {
+  if (!sandboxPromise)
+    return
+  const pending = sandboxPromise
+  sandboxPromise = null
+  try {
+    const sandbox = await pending
+    await sandbox.dispose()
+  } catch {
+    // already disposed or failed to start
   }
 }
 
-type ExecuteEnvelope = ExecuteSuccessEnvelope | ExecuteErrorEnvelope
+// Best-effort shutdown for CLI stdio mode where there is no explicit teardown.
+process.once('exit', () => {
+  if (sandboxPromise) {
+    sandboxPromise.then((s) => s.dispose()).catch(() => undefined)
+  }
+})
 
-function serializeExecuteConfig(
-  tenantUrl: string,
-  headers: Record<string, string>,
-  restrictions: readonly RestrictionRule[],
+// ─────────────────────────────────────────────────────────────────────────
+// Blocked-policy error formatters
+// ─────────────────────────────────────────────────────────────────────────
+
+function formatRestrictionBlockMessage(
+  method: string,
+  pathname: string,
+  matching: readonly RestrictionRule[],
+): string {
+  return [
+    BLOCKED_REQUEST_PREFIX,
+    '',
+    'This operation is intentionally denied by the current MCP connection configuration.',
+    'It did not fail at the Cumulocity API and it was not executed against the tenant.',
+    'Retrying or trying the same operation again through this connection will not succeed.',
+    '',
+    'Report this to the user as a connection-level access restriction.',
+    'If the operation is needed, the MCP restrictions for this connection must be updated by whoever manages that configuration.',
+    '',
+    'Blocked operation:',
+    `Method: ${method}`,
+    `Path: ${pathname}`,
+    'Matching restrictions:',
+    ...matching.map((rule) => `- ${rule.source}`),
+  ].join('\n')
+}
+
+function formatAllowBlockMessage(
+  method: string,
+  pathname: string,
   allowRules: readonly AllowRule[],
 ): string {
-  const normalizedTenantUrl = new URL(tenantUrl).toString()
-  const serializedRestrictions = restrictions.map(({ type, method, pathPattern, source }) => ({ type, method, pathPattern, source }))
-  const serializedAllowRules = allowRules.map(({ type, method, pathPattern, source }) => ({ type, method, pathPattern, source }))
-
-  return JSON.stringify({
-    tenantUrl: normalizedTenantUrl,
-    authHeaders: headers,
-    restrictions: serializedRestrictions,
-    allowRules: serializedAllowRules,
-  })
+  return [
+    BLOCKED_REQUEST_PREFIX,
+    '',
+    'This operation is intentionally blocked because it is not included in the current MCP connection allow list.',
+    'It did not fail at the Cumulocity API and it was not executed against the tenant.',
+    'Retrying or trying the same operation again through this connection will not succeed.',
+    '',
+    'Report this to the user as a connection-level access restriction.',
+    'If the operation is needed, the MCP allow list for this connection must be updated by whoever manages that configuration.',
+    '',
+    'Blocked operation:',
+    `Method: ${method}`,
+    `Path: ${pathname}`,
+    'Configured allow rules:',
+    ...(allowRules.length > 0 ? allowRules.map((rule) => `- ${rule.source}`) : ['- (none)']),
+  ].join('\n')
 }
 
-function createQueryRuntime() {
-  return new NodeRuntime({
-    systemDriver: createNodeDriver({
-      useDefaultNetwork: true,
-      permissions: {
-        network: () => ({ allow: false, reason: 'Network access is disabled for query execution.' }),
-      },
-    }),
-    runtimeDriverFactory: createNodeRuntimeDriverFactory(),
-    memoryLimit: 128,
-    cpuTimeLimitMs: 50000,
-  })
-}
+// ─────────────────────────────────────────────────────────────────────────
+// safeFetch wiring
+//
+// All host-side responsibilities live as origin middleware:
+//   1. restriction / allow-rule enforcement (throws blocked-policy message)
+//   2. auth header injection (last write wins so agent cannot override)
+//   3. response unwrap: parse body, throw on non-2xx, replace ctx.res.body
+//      with the parsed value so the sandbox-side wrapper can return it
+//      directly without ever calling res.json() / res.text().
+// ─────────────────────────────────────────────────────────────────────────
 
-function createExecuteRuntime(
+export function createCumulocitySafeFetch(
   tenantUrl: string,
-  restrictions: readonly RestrictionRule[],
-  allowRules: readonly AllowRule[],
-) {
-  return new NodeRuntime({
-    systemDriver: createNodeDriver({
-      useDefaultNetwork: true,
-      permissions: {
-        network: (request) => createNetworkPermissionDecision(tenantUrl, request, restrictions, allowRules),
+  authHeaders: Record<string, string>,
+  restrictions: readonly RestrictionRule[] = [],
+  allowRules: readonly AllowRule[] = [],
+): SafeFetchGlobal {
+  const parsedTenant = new URL(tenantUrl)
+
+  return createSafeFetch({
+    rules: {
+      host: parsedTenant.hostname,
+      port: parsedTenant.port ? Number(parsedTenant.port) : undefined,
+      httpsOnly: parsedTenant.protocol === 'https:',
+      routes: [{ path: '/**' }],
+      middleware: async (ctx, next) => {
+        const method = ctx.req.method.toUpperCase()
+        const pathname = new URL(ctx.req.url).pathname
+
+        const decision = evaluateAccessPolicy(restrictions, allowRules, method, pathname)
+        if (decision.blocked) {
+          throw new Error(
+            decision.blockedBy === 'restriction'
+              ? formatRestrictionBlockMessage(method, pathname, decision.matchingRestrictions)
+              : formatAllowBlockMessage(method, pathname, allowRules),
+          )
+        }
+
+        for (const [k, v] of Object.entries(authHeaders)) {
+          ctx.req.header(k, v)
+        }
+
+        await next()
+
+        const res = ctx.res!
+        const raw = res.body
+        const text = raw instanceof Uint8Array
+          ? new TextDecoder().decode(raw)
+          : typeof raw === 'string'
+            ? raw
+            : ''
+        const contentType = String(res.headers['content-type'] ?? '')
+        const data = text === ''
+          ? null
+          : contentType.includes('json')
+            ? JSON.parse(text)
+            : text
+
+        if (res.status < 200 || res.status >= 300) {
+          const detail = typeof data === 'string' ? data : JSON.stringify(data)
+          throw new Error(
+            `Cumulocity request failed with ${res.status} ${res.statusText ?? ''}${detail ? `: ${detail}` : ''}`.trim(),
+          )
+        }
+
+        ctx.res = { ...res, body: data }
       },
-    }),
-    runtimeDriverFactory: createNodeRuntimeDriverFactory(),
-    memoryLimit: 128,
-    cpuTimeLimitMs: 50000,
+    },
+    // Cumulocity tenants are operator-configured, not agent-chosen — the
+    // SSRF surface that pinDns guards against does not exist here. Disabling
+    // it also lets on-prem tenants resolved to private IPs work.
+    pinDns: false,
+    allowCompressedResponses: false,
   })
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Code generation
+// ─────────────────────────────────────────────────────────────────────────
 
 function normalizeCode(functionCode: string): string {
-  let normalized = functionCode.trim()
-
-  normalized = normalized
+  return functionCode
+    .trim()
     .replace(/^```(?:js|javascript|ts|typescript)?\s*/i, '')
     .replace(/\s*```$/, '')
     .trim()
-
-  return normalized
 }
 
 function buildQueryScript(sourceCode: string): string {
@@ -102,9 +196,6 @@ function buildQueryScript(sourceCode: string): string {
   const core = resolved.core
   const serviceMap = resolved.specs
 
-  // coreSpec is the only named binding. Every other spec lands in serviceSpecs
-  // keyed by contextPath. specsEnabled reports availability for all of them so
-  // agent code can check before reading any optional spec.
   const specsEnabled: Record<string, boolean> = { core: true }
   const serviceSpecsMap: Record<string, { label: string, contextPath: string, spec: Spec }> = {}
   for (const [contextPath, spec] of Object.entries(serviceMap)) {
@@ -117,215 +208,62 @@ function buildQueryScript(sourceCode: string): string {
     `const specsEnabled = ${JSON.stringify(specsEnabled)};`,
     `const serviceSpecs = ${JSON.stringify(serviceSpecsMap)};`,
     `const __mc8ypQuery = (${functionExpression});`,
-    '',
-    'if (typeof __mc8ypQuery !== "function") {',
-    '  throw new TypeError("Query code must evaluate to a function.");',
-    '}',
-    '',
+    'if (typeof __mc8ypQuery !== "function") { throw new TypeError("Query code must evaluate to a function.") }',
     'export default await __mc8ypQuery();',
-  ].join('\n\n')
+  ].join('\n')
 }
 
-export function buildExecutePrelude(
-  tenantUrl: string,
-  headers: Record<string, string>,
-  restrictions: readonly RestrictionRule[] = [],
-  allowRules: readonly AllowRule[] = [],
-): string {
-  const serializedConfig = JSON.stringify(serializeExecuteConfig(tenantUrl, headers, restrictions, allowRules))
-
-  return [
-    'const cumulocity = Object.freeze((() => {',
-    `  const config = JSON.parse(${serializedConfig});`,
-    '  if (!config || typeof config !== "object") {',
-    '    throw new TypeError("Invalid execute configuration.");',
-    '  }',
-    '  const { tenantUrl, authHeaders, restrictions, allowRules } = config;',
-    '  if (typeof tenantUrl !== "string") {',
-    '    throw new TypeError("Execute configuration must contain a string tenant URL.");',
-    '  }',
-    '  if (!Array.isArray(restrictions) || restrictions.some((rule) => !rule || typeof rule !== "object" || typeof rule.type !== "string" || typeof rule.method !== "string" || typeof rule.pathPattern !== "string" || typeof rule.source !== "string")) {',
-    '    throw new TypeError("Execute configuration must contain valid restriction rules.");',
-    '  }',
-    '  if (!Array.isArray(allowRules) || allowRules.some((rule) => !rule || typeof rule !== "object" || typeof rule.type !== "string" || typeof rule.method !== "string" || typeof rule.pathPattern !== "string" || typeof rule.source !== "string")) {',
-    '    throw new TypeError("Execute configuration must contain valid allow rules.");',
-    '  }',
-
-    '  const resolveUrl = (descriptor) => {',
-    '    return new URL(descriptor, tenantUrl.endsWith("/") ? tenantUrl : tenantUrl + "/");',
-    '  };',
-    '  const normalizeRequest = (options) => {',
-    '    if (!options || typeof options !== "object") {',
-    '      throw new TypeError("request options must be an object");',
-    '    }',
-    '    const { path, ...rest } = options;',
-    '    return { path, init: rest };',
-    '  };',
-    `  const HTTP_METHODS = ${JSON.stringify(HTTP_METHODS)};`,
-    '  const HTTP_METHOD_SET = new Set(HTTP_METHODS);',
-    `  const escapeRestrictionRegex = ${escapeRestrictionRegex.toString()};`,
-    `  const compileRestrictionSegment = ${compileRestrictionSegment.toString()};`,
-    `  const matchCompiledSegments = ${matchCompiledSegments.toString()};`,
-    `  const compileRestrictionRule = ${compileRestrictionRule.toString()};`,
-    `  const matchesCompiledRule = ${matchesCompiledRule.toString()};`,
-    '  const compiledRestrictions = restrictions.map(compileRestrictionRule);',
-    '  const compiledAllowRules = allowRules.map(compileRestrictionRule);',
-    '  const validateRequestMethod = (method) => {',
-    '    if (typeof method !== "string" || method.trim().length === 0) {',
-    '      throw new TypeError("request method must be a non-empty string");',
-    '    }',
-    '    const normalizedMethod = method.trim().toUpperCase();',
-    '    if (!HTTP_METHOD_SET.has(normalizedMethod)) {',
-    '      throw new TypeError("request method must be one of: " + HTTP_METHODS.join(", "));',
-    '    }',
-    '    return normalizedMethod;',
-    '  };',
-    '  const evaluateAccessPolicy = (method, pathname) => {',
-    '    const matchingRestrictions = compiledRestrictions.filter((rule) => matchesCompiledRule(rule, method, pathname === "/" ? [] : pathname.slice(1).split("/")));',
-    '    if (matchingRestrictions.length > 0) {',
-    '      return { blocked: true, blockedBy: "restriction", matchingRestrictions };',
-    '    }',
-    '    if (compiledAllowRules.length === 0) {',
-    '      return { blocked: false };',
-    '    }',
-    '    const matchingAllowRules = compiledAllowRules.filter((rule) => matchesCompiledRule(rule, method, pathname === "/" ? [] : pathname.slice(1).split("/")));',
-    '    if (matchingAllowRules.length > 0) {',
-    '      return { blocked: false };',
-    '    }',
-    '    return { blocked: true, blockedBy: "allow" };',
-    '  };',
-    '  const formatBlockedRequestMessage = (method, path, accessDecision) => {',
-    '    if (accessDecision.blockedBy === "allow") {',
-    '      return [',
-    '        "Request blocked by MCP connection policy.",',
-    '        "",',
-    '        "This operation is intentionally blocked because it is not included in the current MCP connection allow list.",',
-    '        "It did not fail at the Cumulocity API and it was not executed against the tenant.",',
-    '        "Retrying or trying the same operation again through this connection will not succeed.",',
-    '        "",',
-    '        "Report this to the user as a connection-level access restriction.",',
-    '        "If the operation is needed, the MCP allow list for this connection must be updated by whoever manages that configuration.",',
-    '        "",',
-    '        "Blocked operation:",',
-    '        "Method: " + method,',
-    '        "Path: " + path,',
-    '        "Configured allow rules:",',
-    '        ...(allowRules.length > 0 ? allowRules.map((rule) => "- " + rule.source) : ["- (none)"]),',
-    '      ].join("\\n");',
-    '    }',
-    '    return [',
-    '      "Request blocked by MCP connection policy.",',
-    '      "",',
-    '      "This operation is intentionally denied by the current MCP connection configuration.",',
-    '      "It did not fail at the Cumulocity API and it was not executed against the tenant.",',
-    '      "Retrying or trying the same operation again through this connection will not succeed.",',
-    '      "",',
-    '      "Report this to the user as a connection-level access restriction.",',
-    '      "If the operation is needed, the MCP restrictions for this connection must be updated by whoever manages that configuration.",',
-    '      "",',
-    '      "Blocked operation:",',
-    '      "Method: " + method,',
-    '      "Path: " + path,',
-    '      "Matching restrictions:",',
-    '      ...accessDecision.matchingRestrictions.map((rule) => "- " + rule.source),',
-    '    ].join("\\n");',
-    '  };',
-    '  const normalizeBody = (headers, body) => {',
-    '    if (body == null || typeof body === "string") {',
-    '      return body;',
-    '    }',
-    '    if (body instanceof ArrayBuffer || ArrayBuffer.isView(body) || body instanceof Blob || body instanceof FormData || body instanceof URLSearchParams) {',
-    '      return body;',
-    '    }',
-    '    if (!headers.has("Content-Type")) {',
-    '      headers.set("Content-Type", "application/json");',
-    '    }',
-    '    return JSON.stringify(body);',
-    '  };',
-    '  const readBody = async (response) => {',
-    '    const text = await response.text();',
-    '    if (!text) {',
-    '      return null;',
-    '    }',
-    '    const contentType = response.headers.get("content-type") ?? "";',
-    '    if (contentType.includes("json")) {',
-    '      return JSON.parse(text);',
-    '    }',
-    '    return text;',
-    '  };',
-    '  return {',
-    '    request: async (options) => {',
-    '      const { path, init } = normalizeRequest(options);',
-    '      if (typeof path !== "string" || path.length === 0) {',
-    '        throw new TypeError("request path must be a non-empty string");',
-    '      }',
-    '      const method = validateRequestMethod(init.method);',
-    '      const resolvedUrl = resolveUrl(path);',
-    '      const accessDecision = evaluateAccessPolicy(method, resolvedUrl.pathname);',
-    '      if (accessDecision.blocked) {',
-    '        throw new Error(formatBlockedRequestMessage(method, resolvedUrl.pathname, accessDecision));',
-    '      }',
-    '      const headers = new Headers(init.headers ?? {});',
-    '      for (const [key, value] of Object.entries(authHeaders)) {',
-    '        headers.set(key, value);',
-    '      }',
-    '      const body = normalizeBody(headers, init.body);',
-    '      const requestHeaders = Object.fromEntries(headers.entries());',
-    '      const response = await fetch(resolvedUrl.toString(), {',
-    '        ...init,',
-    '        method,',
-    '        headers: requestHeaders,',
-    '        body,',
-    '      });',
-    '      const data = await readBody(response);',
-    '      if (!response.ok) {',
-    '        const detail = typeof data === "string" ? data : JSON.stringify(data);',
-    '        throw new Error("Cumulocity request failed with " + response.status + " " + response.statusText + (detail ? ": " + detail : ""));',
-    '      }',
-    '      return data;',
-    '    },',
-    '  };',
-    '})());',
-  ].join('\n\n')
+/**
+ * String-form HostGlobalValue for `cumulocity`.
+ *
+ * Installed by iso4 as `globalThis.cumulocity = (<expr>)`. Thin sandbox-side
+ * wrapper that validates input, normalises object bodies to JSON, builds the
+ * tenant-relative URL, and calls the bridged safeFetch. Everything else
+ * (policy enforcement, auth injection, response parsing, error mapping) runs
+ * host-side in the middleware above.
+ * @param tenantUrl - canonical tenant origin used to resolve agent-supplied
+ *   relative paths.
+ */
+function buildCumulocityPreamble(tenantUrl: string): string {
+  const baseUrl = tenantUrl.endsWith('/') ? tenantUrl : `${tenantUrl}/`
+  return `(() => {
+  const BASE_URL = ${JSON.stringify(baseUrl)};
+  const HTTP_METHODS = ${JSON.stringify(HTTP_METHODS)};
+  return Object.freeze({
+    request: async (opts) => {
+      if (!opts || typeof opts !== 'object') throw new TypeError('request options must be an object');
+      if (typeof opts.path !== 'string' || opts.path.length === 0) throw new TypeError('request path must be a non-empty string');
+      if (typeof opts.method !== 'string' || opts.method.trim().length === 0) throw new TypeError('request method must be a non-empty string');
+      const method = opts.method.trim().toUpperCase();
+      if (!HTTP_METHODS.includes(method)) throw new TypeError('request method must be one of: ' + HTTP_METHODS.join(', '));
+      // BASE_URL is normalised to end with '/'. iso4 does not expose URL as
+      // a sandbox global, so resolve relative paths via string concat.
+      const path = opts.path.startsWith('/') ? opts.path.slice(1) : opts.path;
+      const url = BASE_URL + path;
+      const headers = {};
+      if (opts.headers && typeof opts.headers === 'object') {
+        for (const [k, v] of Object.entries(opts.headers)) {
+          if (typeof v === 'string') headers[k] = v;
+        }
+      }
+      let body = opts.body == null ? null : opts.body;
+      if (body !== null && typeof body !== 'string' && !(body instanceof Uint8Array)) {
+        const hasCT = Object.keys(headers).some((k) => k.toLowerCase() === 'content-type');
+        if (!hasCT) headers['content-type'] = 'application/json';
+        body = JSON.stringify(body);
+      }
+      const res = await __c8y_fetch(url, { method, headers, body });
+      return res.body;
+    },
+  });
+})()`
 }
 
-export function buildExecuteScript(
-  sourceCode: string,
-  tenantUrl: string,
-  headers: Record<string, string>,
-  restrictions: readonly RestrictionRule[] = [],
-  allowRules: readonly AllowRule[] = [],
-): string {
-  const functionExpression = normalizeCode(sourceCode)
+// ─────────────────────────────────────────────────────────────────────────
+// Public surface
+// ─────────────────────────────────────────────────────────────────────────
 
-  return [
-    buildExecutePrelude(tenantUrl, headers, restrictions, allowRules),
-    `const __mc8ypExecute = (${functionExpression});`,
-    '',
-    'const __mc8ypErrorMessage = (error) => error instanceof Error ? error.message : String(error);',
-    '',
-    'let __mc8ypEnvelope;',
-    'try {',
-    '  if (typeof __mc8ypExecute !== "function") {',
-    '    throw new TypeError("Execute code must evaluate to a function.");',
-    '  }',
-    '  __mc8ypEnvelope = {',
-    '    status: "success",',
-    '    result: await __mc8ypExecute(),',
-    '  };',
-    '} catch (error) {',
-    '  const message = __mc8ypErrorMessage(error);',
-    '  __mc8ypEnvelope = {',
-    `    status: message.startsWith(${JSON.stringify(BLOCKED_REQUEST_PREFIX)}) ? "blocked" : "failed",`,
-    '    error: {',
-    '      message,',
-    '    },',
-    '  };',
-    '}',
-    '',
-    'export default __mc8ypEnvelope;',
-  ].join('\n\n')
-}
+const NO_DEFAULT_EXPORT_MESSAGE = 'Execution completed without returning a value.'
 
 function extractDefaultExport(exportsObject: unknown): unknown {
   if ((typeof exportsObject === 'object' && exportsObject !== null) || typeof exportsObject === 'function') {
@@ -333,63 +271,26 @@ function extractDefaultExport(exportsObject: unknown): unknown {
       return (exportsObject as { default: unknown }).default
     }
   }
-
-  if (typeof exportsObject !== 'undefined') {
+  if (typeof exportsObject !== 'undefined')
     return exportsObject
-  }
-
   throw new Error(NO_DEFAULT_EXPORT_MESSAGE)
 }
 
-async function runExecuteScript(
-  code: string,
-  tenantUrl: string,
-  restrictions: readonly RestrictionRule[],
-  allowRules: readonly AllowRule[],
-): Promise<unknown> {
-  const release = await runtimeSemaphore.acquire()
-  const runtime = createExecuteRuntime(tenantUrl, restrictions, allowRules)
-
-  try {
-    const result = await runtime.run<unknown>(code, EXECUTE_ENTRY_PATH)
-
-    if (result.code !== 0) {
-      const errorMessage = `Execution failed with code ${result.code}${result.errorMessage ? `: ${result.errorMessage}` : ''}`
-      throw new Error(errorMessage)
-    }
-
-    return extractDefaultExport(result.exports)
-  } finally {
-    runtime.dispose()
-    release()
-  }
-}
-
-async function runQueryScript(code: string): Promise<unknown> {
-  return runModule(code, QUERY_ENTRY_PATH, createQueryRuntime())
-}
-
-async function runModule(code: string, entryPath: string, runtime: NodeRuntime): Promise<unknown> {
-  const release = await runtimeSemaphore.acquire()
-
-  try {
-    const result = await runtime.run<unknown>(code, entryPath)
-
-    if (result.code !== 0) {
-      const errorMessage = `Execution failed with code ${result.code}${result.errorMessage ? `: ${result.errorMessage}` : ''}`
-      throw new Error(errorMessage)
-    }
-
-    return extractDefaultExport(result.exports)
-  } finally {
-    runtime.dispose()
-    release()
-  }
-}
-
 export async function query(functionCode: string): Promise<string> {
-  const result = await runQueryScript(buildQueryScript(functionCode))
-  return typeof result === 'string' ? result : JSON.stringify(result)
+  const sandbox = await getSandbox()
+  const result = await sandbox.run({
+    code: buildQueryScript(functionCode),
+    filename: QUERY_ENTRY_PATH,
+    limits: SANDBOX_LIMITS,
+    // No globals → no fetch surface; the query sandbox cannot reach the network.
+  })
+
+  if (!result.ok) {
+    throw new Error(`Execution failed with code ${result.error.code}: ${result.error.message}`)
+  }
+
+  const value = extractDefaultExport(result.exports)
+  return typeof value === 'string' ? value : JSON.stringify(value)
 }
 
 export async function execute(functionCode: string): Promise<string> {
@@ -398,16 +299,31 @@ export async function execute(functionCode: string): Promise<string> {
   const restrictions = c8yMcpServer.ctx.custom?.restrictions ?? []
   const allowRules = c8yMcpServer.ctx.custom?.allowRules ?? []
 
-  const result = await runExecuteScript(
-    buildExecuteScript(functionCode, auth.tenantUrl, authHeaders, restrictions, allowRules),
-    auth.tenantUrl,
-    restrictions,
-    allowRules,
-  ) as ExecuteEnvelope
+  const functionExpression = normalizeCode(functionCode)
+  const code = [
+    `const __mc8ypExecute = (${functionExpression});`,
+    'if (typeof __mc8ypExecute !== "function") { throw new TypeError("Execute code must evaluate to a function.") }',
+    'export default await __mc8ypExecute();',
+  ].join('\n')
 
-  if (result.status === 'success') {
-    return encode(result.result)
+  const globals: HostGlobals = {
+    __c8y_fetch: createCumulocitySafeFetch(auth.tenantUrl, authHeaders, restrictions, allowRules),
+    cumulocity: buildCumulocityPreamble(auth.tenantUrl),
   }
 
-  return result.error.message
+  const sandbox = await getSandbox()
+  const result = await sandbox.run({
+    code,
+    filename: EXECUTE_ENTRY_PATH,
+    limits: SANDBOX_LIMITS,
+    globals,
+  })
+
+  if (!result.ok) {
+    // User error or blocked-policy throw — surface the raw message so the
+    // BLOCKED_REQUEST_PREFIX prefix stays intact for callers that branch on it.
+    return result.error.message
+  }
+
+  return encode(extractDefaultExport(result.exports))
 }

@@ -1,8 +1,10 @@
 /* eslint-disable no-template-curly-in-string */
-/* eslint-disable no-new-func */
+import type { Buffer } from 'node:buffer'
+import http from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { encode } from '@toon-format/toon'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildExecutePrelude, buildExecuteScript, execute, query } from '../src/codemode/execute'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { BLOCKED_REQUEST_PREFIX, disposeSandbox, execute, query } from '../src/codemode/execute'
 import type { ResolvedSpecs } from '../src/utils/spec-resolution'
 import { resolveSpecs } from '../src/utils/spec-resolution'
 import { bustApiSpecCache, setCachedApiSpecs } from '../src/utils/api-discovery'
@@ -16,43 +18,20 @@ const TEST_TENANT = 'https://tenant.example.com'
 function parseSingleRule(input: string): RestrictionRule {
   const result = parseRestrictionRule([input])
   const rule = result.parsedRules[0]
-
   if (!rule || result.failedRules.length > 0) {
     throw new Error(`Expected a valid restriction rule: ${input}`)
   }
-
   return rule
 }
 
 function parseSingleAllowRule(input: string): AllowRule {
   const result = parseAllowRule([input])
   const rule = result.parsedRules[0]
-
   if (!rule || result.failedRules.length > 0) {
     throw new Error(`Expected a valid allow rule: ${input}`)
   }
-
   return rule
 }
-
-interface ExecuteHarnessResult {
-  called: boolean
-  method?: string
-  pwned?: unknown
-  result?: unknown
-  url?: string
-}
-
-type TestGlobals = typeof globalThis & {
-  __called?: boolean
-  __done?: Promise<unknown>
-  __method?: string
-  __result?: unknown
-  __url?: string
-  pwned?: unknown
-}
-
-const testGlobals = globalThis as TestGlobals
 
 const INVALID_RESTRICTION_QUERY_PAYLOADS = [
   '/inventory/managedObjects");globalThis.pwned=true;("',
@@ -72,96 +51,9 @@ const INVALID_RESTRICTION_QUERY_PAYLOADS = [
   'GET:inventory/managedObjects',
 ] as const
 
-function resetTestGlobals() {
-  delete testGlobals.__called
-  delete testGlobals.__done
-  delete testGlobals.__method
-  delete testGlobals.__result
-  delete testGlobals.__url
-  delete testGlobals.pwned
-}
-
-async function runGeneratedExecuteScript(
-  sourceCode: string,
-  restrictions: readonly RestrictionRule[] = [],
-  allowRules: readonly AllowRule[] = [],
-  headers: Record<string, string> = { Authorization: 'Bearer test' },
-): Promise<ExecuteHarnessResult> {
-  resetTestGlobals()
-
-  const run = new Function([
-    buildExecutePrelude('https://tenant.example.com', headers, restrictions, allowRules),
-    `const __mc8ypExecute = (${sourceCode});`,
-    'globalThis.__done = (async () => {',
-    '  try {',
-    '    if (typeof __mc8ypExecute !== "function") {',
-    '      throw new TypeError("Execute code must evaluate to a function.");',
-    '    }',
-    '    globalThis.__result = {',
-    '      status: "success",',
-    '      result: await __mc8ypExecute(),',
-    '    };',
-    '  } catch (error) {',
-    '    const message = error instanceof Error ? error.message : String(error);',
-    '    globalThis.__result = {',
-    '      status: message.startsWith("Request blocked by MCP connection policy.") ? "blocked" : "failed",',
-    '      error: { message },',
-    '    };',
-    '  }',
-    '})();',
-    'if (typeof globalThis.__done === "undefined") {',
-    '  globalThis.__done = Promise.resolve();',
-    '}',
-    'return Promise.resolve(globalThis.__done).then(() => ({',
-    '  called: globalThis.__called === true,',
-    '  method: globalThis.__method,',
-    '  pwned: globalThis.pwned,',
-    '  result: globalThis.__result,',
-    '  url: globalThis.__url,',
-    '}));',
-  ].join('\n')) as () => Promise<ExecuteHarnessResult>
-
-  try {
-    return await run()
-  } finally {
-    resetTestGlobals()
-  }
-}
-
-function installFetchTrap() {
-  globalThis.fetch = async () => {
-    ;(globalThis as TestGlobals).__called = true
-    throw new Error('fetch should not be called')
-  }
-}
-
-function installEchoFetch() {
-  globalThis.fetch = async (url, init) => {
-    const globals = globalThis as TestGlobals
-    globals.__called = true
-    globals.__url = String(url)
-    globals.__method = init?.method ?? 'GET'
-
-    return new Response(JSON.stringify({ ok: true }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    })
-  }
-}
-
-beforeEach(() => {
-  // Pre-seed an empty cache so execute() skips live discovery in tests.
-  setCachedApiSpecs(TEST_TENANT, [])
-})
-
-afterEach(() => {
-  resetTestGlobals()
-  bustApiSpecCache()
-})
-
 function expectedRestrictedRequestMessage(method: string, path: string, matchingRules: readonly string[]): string {
   return [
-    'Request blocked by MCP connection policy.',
+    BLOCKED_REQUEST_PREFIX,
     '',
     'This operation is intentionally denied by the current MCP connection configuration.',
     'It did not fail at the Cumulocity API and it was not executed against the tenant.',
@@ -180,7 +72,7 @@ function expectedRestrictedRequestMessage(method: string, path: string, matching
 
 function expectedAllowedRequestMessage(method: string, path: string, allowRules: readonly string[]): string {
   return [
-    'Request blocked by MCP connection policy.',
+    BLOCKED_REQUEST_PREFIX,
     '',
     'This operation is intentionally blocked because it is not included in the current MCP connection allow list.',
     'It did not fail at the Cumulocity API and it was not executed against the tenant.',
@@ -197,218 +89,341 @@ function expectedAllowedRequestMessage(method: string, path: string, allowRules:
   ].join('\n')
 }
 
-function expectedBlockedResult(message: string): { status: 'blocked', error: { message: string } } {
+// ─────────────────────────────────────────────────────────────────────────
+// Shared harness: stub the MCP context so execute() picks up restrictions
+// and stub resolveC8yAuth so it does not look in the keychain.
+// ─────────────────────────────────────────────────────────────────────────
+
+function stubExecuteCtx(opts: {
+  restrictions?: readonly RestrictionRule[]
+  allowRules?: readonly AllowRule[]
+} = {}): () => void {
+  const ctxSpy = vi.spyOn(c8yMcpServer, 'ctx', 'get').mockReturnValue({
+    custom: {
+      env: 'cli' as const,
+      restrictions: opts.restrictions ?? [],
+      allowRules: opts.allowRules ?? [],
+      specs: { core: { paths: {} }, specs: {} },
+    },
+  } as unknown as ReturnType<typeof c8yMcpServer['ctx']['valueOf']>)
+  return () => ctxSpy.mockRestore()
+}
+
+function mockAuth(tenantUrl: string, authorizationHeader = 'Bearer test'): void {
+  vi.spyOn(client, 'resolveC8yAuth').mockResolvedValueOnce({ tenantUrl, authorizationHeader })
+}
+
+beforeEach(() => {
+  setCachedApiSpecs(TEST_TENANT, [])
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  bustApiSpecCache()
+})
+
+afterAll(async () => {
+  // Tear down the lazy sandbox singleton so the Rust child process exits.
+  await disposeSandbox()
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// Sandbox-side wrapper validation — these errors happen *before* any bridge
+// call, so they never touch the network.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('cumulocity.request — sandbox-side input validation', () => {
+  it('rejects requests without an explicit method', async () => {
+    const restore = stubExecuteCtx()
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute(`async () => await cumulocity.request({ path: '/event/events' })`)
+      expect(result).toBe('request method must be a non-empty string')
+    } finally {
+      restore()
+    }
+  })
+
+  it('rejects unsupported request methods', async () => {
+    const restore = stubExecuteCtx()
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute(`async () => await cumulocity.request({ method: 'MERGE', path: '/event/events' })`)
+      expect(result).toBe('request method must be one of: DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT, TRACE')
+    } finally {
+      restore()
+    }
+  })
+
+  it('rejects non-object options', async () => {
+    const restore = stubExecuteCtx()
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute(`async () => await cumulocity.request('hello')`)
+      expect(result).toBe('request options must be an object')
+    } finally {
+      restore()
+    }
+  })
+
+  it('rejects empty paths', async () => {
+    const restore = stubExecuteCtx()
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute(`async () => await cumulocity.request({ method: 'GET', path: '' })`)
+      expect(result).toBe('request path must be a non-empty string')
+    } finally {
+      restore()
+    }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// safeFetch middleware — restriction and allow-list enforcement.
+// These run host-side and throw before undici is touched, so they need no
+// HTTP server.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('cumulocity.request — policy enforcement (middleware)', () => {
+  it('blocks restricted requests before any HTTP call', async () => {
+    const restore = stubExecuteCtx({ restrictions: [parseSingleRule('GET:/inventory/**')] })
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute(
+        `async () => await cumulocity.request({ method: 'GET', path: '/inventory/managedObjects?pageSize=5' })`,
+      )
+      expect(result).toBe(
+        expectedRestrictedRequestMessage('GET', '/inventory/managedObjects', ['GET:/inventory/**']),
+      )
+    } finally {
+      restore()
+    }
+  })
+
+  it('blocks requests outside the configured allow list', async () => {
+    const restore = stubExecuteCtx({ allowRules: [parseSingleAllowRule('GET:/inventory/**')] })
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute(
+        `async () => await cumulocity.request({ method: 'GET', path: '/alarm/alarms?pageSize=5' })`,
+      )
+      expect(result).toBe(
+        expectedAllowedRequestMessage('GET', '/alarm/alarms', ['GET:/inventory/**']),
+      )
+    } finally {
+      restore()
+    }
+  })
+
+  it('lets restrictions take priority over matching allow rules', async () => {
+    const restore = stubExecuteCtx({
+      restrictions: [parseSingleRule('GET:/inventory/managedObjects')],
+      allowRules: [parseSingleAllowRule('GET:/inventory/**')],
+    })
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute(
+        `async () => await cumulocity.request({ method: 'GET', path: '/inventory/managedObjects?pageSize=5' })`,
+      )
+      expect(result).toBe(
+        expectedRestrictedRequestMessage('GET', '/inventory/managedObjects', ['GET:/inventory/managedObjects']),
+      )
+    } finally {
+      restore()
+    }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// Success-path tests — run a local HTTP server and point the tenant URL at
+// it so the full sandbox → bridge → safeFetch → undici → server roundtrip
+// is exercised.
+// ─────────────────────────────────────────────────────────────────────────
+
+interface CapturedHttpRequest {
+  method: string
+  url: string
+  headers: http.IncomingHttpHeaders
+  body: string
+}
+
+interface TestServer {
+  url: string
+  requests: CapturedHttpRequest[]
+  setResponse: (response: { status?: number, body?: unknown, contentType?: string }) => void
+  close: () => Promise<void>
+}
+
+async function startTestServer(): Promise<TestServer> {
+  const requests: CapturedHttpRequest[] = []
+  let nextResponse = {
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true }) as string,
+  }
+
+  const server = http.createServer((req, res) => {
+    let body = ''
+    req.on('data', (chunk: Buffer) => {
+      body += chunk.toString('utf8')
+    })
+    req.on('end', () => {
+      requests.push({
+        method: req.method ?? '',
+        url: req.url ?? '',
+        headers: req.headers,
+        body,
+      })
+      res.statusCode = nextResponse.status
+      res.setHeader('content-type', nextResponse.contentType)
+      res.end(nextResponse.body)
+    })
+  })
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      resolve()
+    })
+  })
+  const port = (server.address() as AddressInfo).port
+
   return {
-    status: 'blocked',
-    error: { message },
+    url: `http://127.0.0.1:${port}`,
+    requests,
+    setResponse: (next) => {
+      nextResponse = {
+        status: next.status ?? 200,
+        contentType: next.contentType ?? 'application/json',
+        body: typeof next.body === 'string'
+          ? next.body
+          : next.body == null ? '' : JSON.stringify(next.body),
+      }
+    },
+    close: () => new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve()
+      })
+    }),
   }
 }
 
-describe('buildExecuteScript', () => {
-  it('embeds restriction and allow-list enforcement in the generated request wrapper', () => {
-    const script = buildExecuteScript(
-      'async () => null',
-      'https://tenant.example.com',
-      { Authorization: 'Bearer test' },
-      [parseSingleRule('GET:/inventory/**')],
-      [parseSingleAllowRule('GET:/inventory/**')],
-    )
+describe('cumulocity.request — success path', () => {
+  let testServer: TestServer
 
-    expect(script).toContain('const compiledRestrictions = restrictions.map(compileRestrictionRule);')
-    expect(script).toContain('const compiledAllowRules = allowRules.map(compileRestrictionRule);')
-    expect(script).toContain('const accessDecision = evaluateAccessPolicy(method, resolvedUrl.pathname);')
-    expect(script).toContain('Configured allow rules:')
-    expect(script).toContain('Request blocked by MCP connection policy.')
-    expect(script).toContain('const __mc8ypExecute = (async () => null);')
-    expect(script).toContain('status: "success"')
-    expect(script).toContain('status: message.startsWith("Request blocked by MCP connection policy.") ? "blocked" : "failed"')
+  beforeEach(async () => {
+    testServer = await startTestServer()
   })
 
-  it('does not embed tenant-origin enforcement in the generated request wrapper', () => {
-    const script = buildExecuteScript('async () => null', 'https://tenant.example.com', { Authorization: 'Bearer test' })
-
-    expect(script).not.toContain('tenantOrigin')
-    expect(script).not.toContain('Cumulocity requests must target the configured tenant origin.')
+  afterEach(async () => {
+    await testServer.close()
   })
 
-  it('initializes the generated execute prelude without side effects for safe restrictions and allow rules', () => {
-    const prelude = buildExecutePrelude(
-      'https://tenant.example.com',
-      { Authorization: 'Bearer test' },
-      [parseSingleRule('GET:/inventory/**')],
-      [parseSingleAllowRule('GET:/inventory/**')],
-    )
-    const run = new Function(`${prelude}\nreturn globalThis.pwned;`) as () => unknown
+  it('issues the request, injects auth, and returns the parsed JSON body', async () => {
+    const restore = stubExecuteCtx({ restrictions: [parseSingleRule('GET:/forbidden/**')] })
+    try {
+      mockAuth(testServer.url, 'Bearer host-token')
+      const result = await execute(
+        `async () => await cumulocity.request({ method: 'POST', path: '/event/events' })`,
+      )
 
-    expect(run()).toBeUndefined()
-  })
-
-  it('blocks restricted requests before fetch is called when the generated code executes', async () => {
-    const result = await runGeneratedExecuteScript([
-      'async () => {',
-      `${installFetchTrap.toString()}`,
-      'installFetchTrap();',
-      'return await cumulocity.request({',
-      '  method: "GET",',
-      '  path: "/inventory/managedObjects?pageSize=5",',
-      '});',
-      '}',
-    ].join('\n'), [parseSingleRule('GET:/inventory/**')])
-
-    expect(result.called).toBe(false)
-    expect(result.result).toEqual(expectedBlockedResult(expectedRestrictedRequestMessage('GET', '/inventory/managedObjects', ['GET:/inventory/**'])))
-  })
-
-  it('blocks requests outside the configured allow list before fetch is called', async () => {
-    const result = await runGeneratedExecuteScript([
-      'async () => {',
-      `${installFetchTrap.toString()}`,
-      'installFetchTrap();',
-      'return await cumulocity.request({',
-      '  method: "GET",',
-      '  path: "/alarm/alarms?pageSize=5",',
-      '});',
-      '}',
-    ].join('\n'), [], [parseSingleAllowRule('GET:/inventory/**')])
-
-    expect(result.called).toBe(false)
-    expect(result.result).toEqual(expectedBlockedResult(expectedAllowedRequestMessage('GET', '/alarm/alarms', ['GET:/inventory/**'])))
-  })
-
-  it('lets restrictions take priority over matching allow rules in the generated wrapper', async () => {
-    const result = await runGeneratedExecuteScript([
-      'async () => {',
-      `${installFetchTrap.toString()}`,
-      'installFetchTrap();',
-      'return await cumulocity.request({',
-      '  method: "GET",',
-      '  path: "/inventory/managedObjects?pageSize=5",',
-      '});',
-      '}',
-    ].join('\n'), [parseSingleRule('GET:/inventory/managedObjects')], [parseSingleAllowRule('GET:/inventory/**')])
-
-    expect(result.called).toBe(false)
-    expect(result.result).toEqual(expectedBlockedResult(expectedRestrictedRequestMessage('GET', '/inventory/managedObjects', ['GET:/inventory/managedObjects'])))
-  })
-
-  it('rejects requests without an explicit method before fetch is called', async () => {
-    const result = await runGeneratedExecuteScript([
-      'async () => {',
-      `${installFetchTrap.toString()}`,
-      'installFetchTrap();',
-      'return await cumulocity.request({',
-      '  path: "/event/events",',
-      '});',
-      '}',
-    ].join('\n'))
-
-    expect(result.called).toBe(false)
-    expect(result.result).toEqual({
-      status: 'failed',
-      error: {
-        message: 'request method must be a non-empty string',
-      },
-    })
-  })
-
-  it('rejects unsupported request methods before fetch is called', async () => {
-    const result = await runGeneratedExecuteScript([
-      'async () => {',
-      `${installFetchTrap.toString()}`,
-      'installFetchTrap();',
-      'return await cumulocity.request({',
-      '  method: "MERGE",',
-      '  path: "/event/events",',
-      '});',
-      '}',
-    ].join('\n'))
-
-    expect(result.called).toBe(false)
-    expect(result.result).toEqual({
-      status: 'failed',
-      error: {
-        message: 'request method must be one of: DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT, TRACE',
-      },
-    })
-  })
-
-  it('allows safe requests when valid restrictions are present', async () => {
-    const result = await runGeneratedExecuteScript([
-      'async () => {',
-      `${installEchoFetch.toString()}`,
-      'installEchoFetch();',
-      'return await cumulocity.request({',
-      '  method: "POST",',
-      '  path: "/event/events",',
-      '});',
-      '}',
-    ].join('\n'), [parseSingleRule('GET:/inventory/**'), parseSingleRule('/alarm/*')])
-
-    expect(result.called).toBe(true)
-    expect(result.url).toBe('https://tenant.example.com/event/events')
-    expect(result.method).toBe('POST')
-    expect(result.pwned).toBeUndefined()
-    expect(result.result).toEqual({
-      status: 'success',
-      result: { ok: true },
-    })
+      expect(result).toBe(encode({ ok: true }))
+      expect(testServer.requests).toHaveLength(1)
+      expect(testServer.requests[0]!.method).toBe('POST')
+      expect(testServer.requests[0]!.url).toBe('/event/events')
+      expect(testServer.requests[0]!.headers.authorization).toBe('Bearer host-token')
+    } finally {
+      restore()
+    }
   })
 
   it('allows requests that match the configured allow list', async () => {
-    const result = await runGeneratedExecuteScript([
-      'async () => {',
-      `${installEchoFetch.toString()}`,
-      'installEchoFetch();',
-      'return await cumulocity.request({',
-      '  method: "GET",',
-      '  path: "/inventory/managedObjects?pageSize=5",',
-      '});',
-      '}',
-    ].join('\n'), [], [parseSingleAllowRule('GET:/inventory/**')])
+    const restore = stubExecuteCtx({ allowRules: [parseSingleAllowRule('GET:/inventory/**')] })
+    try {
+      mockAuth(testServer.url)
+      const result = await execute(
+        `async () => await cumulocity.request({ method: 'GET', path: '/inventory/managedObjects?pageSize=5' })`,
+      )
 
-    expect(result.called).toBe(true)
-    expect(result.url).toBe('https://tenant.example.com/inventory/managedObjects?pageSize=5')
-    expect(result.method).toBe('GET')
-    expect(result.result).toEqual({
-      status: 'success',
-      result: { ok: true },
-    })
+      expect(result).toBe(encode({ ok: true }))
+      expect(testServer.requests[0]!.method).toBe('GET')
+      expect(testServer.requests[0]!.url).toBe('/inventory/managedObjects?pageSize=5')
+    } finally {
+      restore()
+    }
   })
 
-  it.each(INVALID_RESTRICTION_QUERY_PAYLOADS)('reports invalid malicious restriction text from query params: %s', (payload) => {
+  it('does not let sandbox-supplied headers override the configured auth header', async () => {
+    const restore = stubExecuteCtx()
+    try {
+      mockAuth(testServer.url, 'Bearer host-only')
+      await execute(
+        `async () => await cumulocity.request({
+          method: 'GET',
+          path: '/inventory/managedObjects',
+          headers: { Authorization: 'Bearer agent-injected' },
+        })`,
+      )
+
+      expect(testServer.requests[0]!.headers.authorization).toBe('Bearer host-only')
+    } finally {
+      restore()
+    }
+  })
+
+  it('JSON-encodes object bodies and sets a JSON content-type when absent', async () => {
+    const restore = stubExecuteCtx()
+    try {
+      mockAuth(testServer.url)
+      await execute(
+        `async () => await cumulocity.request({ method: 'POST', path: '/event/events', body: { type: 'thing' } })`,
+      )
+
+      expect(testServer.requests[0]!.body).toBe(JSON.stringify({ type: 'thing' }))
+      expect(testServer.requests[0]!.headers['content-type']).toBe('application/json')
+    } finally {
+      restore()
+    }
+  })
+
+  it('surfaces non-2xx Cumulocity responses as failed execution', async () => {
+    const restore = stubExecuteCtx()
+    try {
+      testServer.setResponse({ status: 404, body: { message: 'no such resource' } })
+      mockAuth(testServer.url)
+      const result = await execute(
+        `async () => await cumulocity.request({ method: 'GET', path: '/inventory/managedObjects' })`,
+      )
+
+      expect(result).toMatch(/Cumulocity request failed with 404[\s\S]*no such resource/)
+      expect(result).not.toContain(BLOCKED_REQUEST_PREFIX)
+    } finally {
+      restore()
+    }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// Restriction / allow rule parsing — unaffected by the sandbox swap.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('restriction & allow rule parsing rejects malicious payloads', () => {
+  it.each(INVALID_RESTRICTION_QUERY_PAYLOADS)('reports invalid malicious restriction text: %s', (payload) => {
     expect(parseRestrictionRule([payload])).toEqual({
       parsedRules: [],
-      failedRules: [{
-        rule: payload,
-        reason: expect.any(String),
-      }],
+      failedRules: [{ rule: payload, reason: expect.any(String) }],
     })
     expect(parseAllowRule([payload])).toEqual({
       parsedRules: [],
-      failedRules: [{
-        rule: payload,
-        reason: expect.any(String),
-      }],
-    })
-  })
-
-  it('classifies non-function execute code as a failed envelope', async () => {
-    const result = await runGeneratedExecuteScript('({ not: "a function" })')
-
-    expect(result.result).toEqual({
-      status: 'failed',
-      error: {
-        message: 'Execute code must evaluate to a function.',
-      },
+      failedRules: [{ rule: payload, reason: expect.any(String) }],
     })
   })
 })
 
+// ─────────────────────────────────────────────────────────────────────────
+// query — unchanged behavioural coverage.
+// ─────────────────────────────────────────────────────────────────────────
+
 describe('query', () => {
-  /**
-   * Helper: stub the MCP context so buildQueryScript reads our specs.
-   * @param specs - The ResolvedSpecs to expose to the sandbox.
-   */
   function withSpecs(specs: ResolvedSpecs): () => void {
     const ctxSpy = vi.spyOn(c8yMcpServer, 'ctx', 'get').mockReturnValue({
       custom: { env: 'cli' as const, restrictions: [], allowRules: [], specs },
@@ -469,7 +484,6 @@ describe('query', () => {
   })
 
   it('unavailable services are simply absent from serviceSpecs/specsEnabled', async () => {
-    // dtm not installed and specRemoval=true → dtm not in the resolved map at all.
     const restore = withSpecs({ core: { paths: {} }, specs: {} })
     try {
       const result = await query('() => ({ keys: Object.keys(serviceSpecs), enabled: specsEnabled })')
@@ -478,39 +492,57 @@ describe('query', () => {
       restore()
     }
   })
+
+  it('cannot make network calls from the query sandbox', async () => {
+    const restore = withSpecs({ core: { paths: {} }, specs: {} })
+    try {
+      await expect(query('() => fetch("https://example.com")')).rejects.toThrow()
+    } finally {
+      restore()
+    }
+  })
 })
 
+// ─────────────────────────────────────────────────────────────────────────
+// execute — high-level behaviour (envelope contract has been removed: a
+// successful run returns the Toon-encoded function result; any thrown error
+// surfaces as plain text, with BLOCKED_REQUEST_PREFIX preserved verbatim so
+// callers can still differentiate policy denials from generic failures).
+// ─────────────────────────────────────────────────────────────────────────
+
 describe('execute', () => {
-  it('returns only the successful function result encoded in Toon format', async () => {
-    vi.spyOn(client, 'resolveC8yAuth').mockResolvedValueOnce({
-      tenantUrl: 'https://tenant.example.com',
-      authorizationHeader: 'Bearer test',
-    })
-
-    const result = await execute('async () => ({ ok: true, answer: 42 })')
-
-    expect(result).toBe(encode({ ok: true, answer: 42 }))
+  it('returns the successful function result encoded in Toon format', async () => {
+    const restore = stubExecuteCtx()
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute('async () => ({ ok: true, answer: 42 })')
+      expect(result).toBe(encode({ ok: true, answer: 42 }))
+    } finally {
+      restore()
+    }
   })
 
-  it('returns blocked execution as plain text', async () => {
-    vi.spyOn(client, 'resolveC8yAuth').mockResolvedValueOnce({
-      tenantUrl: 'https://tenant.example.com',
-      authorizationHeader: 'Bearer test',
-    })
-
-    const result = await execute('async () => { throw new Error("Request blocked by MCP connection policy.\\n\\nblocked") }')
-
-    expect(result).toBe('Request blocked by MCP connection policy.\n\nblocked')
+  it('returns blocked execution as plain text (BLOCKED prefix preserved)', async () => {
+    const restore = stubExecuteCtx()
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute(
+        `async () => { throw new Error(${JSON.stringify(`${BLOCKED_REQUEST_PREFIX}\n\nblocked`)}) }`,
+      )
+      expect(result).toBe(`${BLOCKED_REQUEST_PREFIX}\n\nblocked`)
+    } finally {
+      restore()
+    }
   })
 
   it('returns failed execution as plain text', async () => {
-    vi.spyOn(client, 'resolveC8yAuth').mockResolvedValueOnce({
-      tenantUrl: 'https://tenant.example.com',
-      authorizationHeader: 'Bearer test',
-    })
-
-    const result = await execute('async () => { throw new Error("boom") }')
-
-    expect(result).toBe('boom')
+    const restore = stubExecuteCtx()
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute('async () => { throw new Error("boom") }')
+      expect(result).toBe('boom')
+    } finally {
+      restore()
+    }
   })
 })
