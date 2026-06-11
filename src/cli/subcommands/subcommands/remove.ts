@@ -35,11 +35,15 @@ const command: CommandDef = defineCommand({
       let removed = 0
       for (const sel of selections) {
         const tenantUrl = typeof sel === 'string' ? sel : sel.value
-        const ok = await deleteStoredC8yAuth(tenantUrl)
-        if (ok) {
-          removed++
-        } else {
-          consola.warn(`Failed to remove credentials for: ${tenantUrl}`)
+        try {
+          const ok = await deleteStoredC8yAuth(tenantUrl)
+          if (ok) {
+            removed++
+          } else {
+            consola.warn(`No stored credentials found for: ${tenantUrl}`)
+          }
+        } catch (err) {
+          consola.warn(`Failed to remove credentials for ${tenantUrl}: ${err instanceof Error ? err.message : String(err)}`)
         }
       }
 

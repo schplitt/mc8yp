@@ -148,18 +148,40 @@ export function cleanTenantUrl(url: string): string {
 
 export async function deleteStoredC8yAuth(tenantUrl: string): Promise<boolean> {
   const cleanedUrl = cleanTenantUrl(tenantUrl)
+
+  // Existence check via list-all (resilient to libsecret backends that
+  // obscure the `target` attribute, e.g. WSL2 / Ubuntu 24 with a locked
+  // default collection). Normalize the stored account before comparing
+  // so a historical trailing-slash entry still matches.
   const found = await findCredentialsAsync(pkgjson.name)
-  const exists = found.some((entry) => entry.account === cleanedUrl)
+  const exists = found.some((entry) => cleanTenantUrl(entry.account) === cleanedUrl)
 
   if (!exists) {
     return false
   }
 
+  // Attempt the targeted delete. On healthy backends this is the
+  // matching half of the targeted lookup. On broken backends the
+  // target attribute is obscured, so deletePassword can throw or
+  // silently no-op — verify by re-listing and surface a clear error
+  // instead of swallowing into `false`, which used to make the CLI
+  // report a generic 'Failed to remove' that the user could not act on.
   const entry = new AsyncEntry(pkgjson.name, cleanedUrl)
+  let deleteError: unknown
   try {
     await entry.deletePassword()
-    return true
-  } catch {
-    return false
+  } catch (err) {
+    deleteError = err
   }
+
+  const stillThere = (await findCredentialsAsync(pkgjson.name))
+    .some((e) => cleanTenantUrl(e.account) === cleanedUrl)
+  if (!stillThere) {
+    return true
+  }
+
+  throw new Error(
+    `Keyring refused to delete the credentials for ${cleanedUrl}. The entry is present when listing but cannot be removed by target — this is typically a libsecret / WSL2 locked-collection issue. Unlock the login keyring (e.g. \`gnome-keyring-daemon --unlock --components=secrets\`) and try again, or remove the entry manually with \`secret-tool clear service ${pkgjson.name} account ${cleanedUrl}\`.`,
+    deleteError instanceof Error ? { cause: deleteError } : undefined,
+  )
 }
