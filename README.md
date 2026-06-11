@@ -46,6 +46,8 @@ The practical effect: **any Cumulocity microservice that ships an OpenAPI spec i
 
 No extra credential setup is required — the microservice uses Cumulocity's deployment environment and request authentication.
 
+The microservice manifest declares `exposeMcpServers`, so once the application is subscribed it auto-registers with AI Agent Manager as an MCP server at `/service/mc8yp-server/mcp` (with the user's authentication forwarded). No manual MCP server entry is needed in AI Agent Manager.
+
 **Example: read-only production agent** (allow only safe GETs):
 
 ```txt

@@ -46,5 +46,14 @@
     "periodSeconds": 10
   },
   "settings": [],
-  "key": "set-by-cumulocity-mjs"
+  "key": "set-by-cumulocity-mjs",
+  "exposeMcpServers": [
+    {
+      "name": "mc8yp",
+      "description": "Code-mode MCP server exposing the bundled Cumulocity OpenAPI specs (core + discovered microservice specs) via `query` and `execute` tools, running inside a V8-isolate sandbox.",
+      "url": "/service/mc8yp-server/mcp",
+      "type": "http",
+      "sendAuthentication": true
+    }
+  ]
 }
