@@ -1,6 +1,7 @@
 import { HttpTransport } from '@tmcp/transport-http'
 import consola from 'consola'
 import { getQuery, H3, HTTPError, serve } from 'h3'
+import openApiSpec from '../openapi.json' with { type: 'json' }
 import { c8yMcpServer, setupMcpServer } from './server'
 import process from 'node:process'
 import {
@@ -174,6 +175,7 @@ app.post('/refresh-apis', async (event) => {
 })
 
 app.get('/health', () => 'OK')
+app.get('/openapi.json', () => openApiSpec)
 
 app.get('/', () => 'C8Y MCP Server is running!')
 

@@ -1,0 +1,129 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "mc8yp HTTP API",
+    "version": "1.0.0",
+    "description": "Auxiliary REST surface of the mc8yp Cumulocity MCP microservice.\n\nThis spec intentionally documents only the non-MCP HTTP routes (`/refresh-apis`, `/health`). The MCP protocol itself is served at `POST /mcp` over JSON-RPC and is **not** documented here — MCP clients discover tools and prompts via the MCP `tools/list` / `prompts/list` flow, not via OpenAPI. If you are an agent reading this through `serviceSpecs['mc8yp-server']`, you are talking to mc8yp through mc8yp; do not call `/service/mc8yp-server/mcp` from inside `execute`.\n\nThe primary use case for this spec is letting an agent trigger a fresh API discovery in mc8yp itself after subscribing or unsubscribing a microservice in the tenant."
+  },
+  "paths": {
+    "/refresh-apis": {
+      "post": {
+        "operationId": "refreshApis",
+        "summary": "Bust the API discovery cache and re-run discovery for the calling tenant.",
+        "description": "Resolves the tenant from the caller's `Authorization` header (or session cookie), busts the per-tenant discovery cache, and synchronously re-runs Cumulocity application + OpenAPI spec discovery using the microservice's service user for that tenant. Returns the freshly discovered spec metadata.\n\nUse this after a new microservice has been subscribed in the tenant — otherwise discovered specs stay cached for 30 minutes.",
+        "responses": {
+          "200": {
+            "description": "Discovery completed successfully.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RefreshApisResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "No Authorization header or session cookie was provided.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "400": {
+            "description": "Could not resolve the calling tenant via `/tenant/currentTenant`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "403": {
+            "description": "Tenant is not subscribed to this microservice.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "500": {
+            "description": "Discovery failed for an unexpected reason.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Kubernetes-style liveness/readiness probe.",
+        "description": "Returns the static string `OK` with a 200 status when the process is alive. No authentication required.",
+        "responses": {
+          "200": {
+            "description": "Process is healthy.",
+            "content": {
+              "text/plain": {
+                "schema": { "type": "string", "const": "OK" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "RefreshApisResponse": {
+        "type": "object",
+        "required": ["message", "tenantUrl", "tenantId", "installedContextPaths", "discovered"],
+        "properties": {
+          "message": {
+            "type": "string",
+            "const": "API spec discovery completed"
+          },
+          "tenantUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Base URL of the Cumulocity tenant the microservice is deployed against."
+          },
+          "tenantId": {
+            "type": "string",
+            "description": "Cumulocity tenant ID resolved from the caller's auth."
+          },
+          "installedContextPaths": {
+            "type": "array",
+            "description": "Context paths of every Cumulocity application currently subscribed by the tenant, regardless of whether the application exposes an OpenAPI spec.",
+            "items": { "type": "string" }
+          },
+          "discovered": {
+            "type": "array",
+            "description": "One entry per application that exposes a reachable OpenAPI spec. Paths in each spec have already been prefixed with the application's service URL prefix.",
+            "items": { "$ref": "#/components/schemas/DiscoveredSpecSummary" }
+          }
+        }
+      },
+      "DiscoveredSpecSummary": {
+        "type": "object",
+        "required": ["contextPath", "specLabel", "pathCount"],
+        "properties": {
+          "contextPath": {
+            "type": "string",
+            "description": "Cumulocity application contextPath (e.g. `dtm`)."
+          },
+          "specLabel": {
+            "type": "string",
+            "description": "Human-readable label of the spec entry. Equals the application name for single-spec applications."
+          },
+          "pathCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of paths declared by the spec after the service-prefix rewrite."
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "description": "Standard H3 error envelope.",
+        "properties": {
+          "status": { "type": "integer" },
+          "statusText": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      }
+    }
+  }
+}

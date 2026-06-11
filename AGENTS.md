@@ -62,6 +62,7 @@ test/
   restrictions.test.ts
   restrictions.bench.ts
   semaphore.test.ts
+openapi.json                 Self-describing OpenAPI for mc8yp's non-MCP HTTP surface; referenced from cumulocity.json so the deployed microservice is discoverable via the standard openApiSpec discovery flow
 openapi/
   core/
     release.json             Bundled latest Cumulocity core OpenAPI snapshot
@@ -301,7 +302,8 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 - Server-mode auth must stay request-local.
 - For deployed microservice mode, prefer POST-only streamable HTTP over long-lived GET/SSE. The optional SSE channel can go inactive behind Cumulocity ingress and break later tool calls even when initialization and tool discovery succeeded.
 - The `status` tool is the in-protocol on-demand refresh path for CLI mode. It busts the per-tenant discovery cache via `refreshApiSpecs`, re-resolves specs, and patches both `getCliTenantContext().specs` and `c8yMcpServer.ctx.custom.specs` so the very next `query`/`execute` sees the new surface. There is no rate-limit — a local human-driven session has no runaway-agent risk and a forced refresh after a deploy should always work.
-- Server mode has no in-protocol refresh path today; only the `POST /refresh-apis` HTTP route exists for ops/CI use. An in-protocol server-side equivalent (with rate-limiting) is planned for a separate PR and will need to re-introduce a tenant-ID stash on `c8yMcpServer.ctx.custom` and a global cooldown timestamp in `src/utils/api-discovery.ts`.
+- Server mode has no in-protocol `status` tool yet; only the `POST /refresh-apis` HTTP route exists for ops/CI use. An in-protocol server-side equivalent (with rate-limiting) is planned for a separate PR and will need to re-introduce a tenant-ID stash on `c8yMcpServer.ctx.custom` and a global cooldown timestamp in `src/utils/api-discovery.ts`.
+- mc8yp ships its own `openapi.json` (repo root) describing the non-MCP HTTP surface (`/refresh-apis`, `/health`). It is referenced from `cumulocity.json#openApiSpec` and served by the H3 server at `GET /openapi.json` via a `with { type: 'json' }` import in `src/index.ts` so it inlines into every server bundle. When mc8yp is subscribed on a tenant, the standard discovery loop in `src/utils/api-discovery.ts` picks it up and exposes it to agents as `serviceSpecs['mc8yp-server']`. The MCP endpoint at `/mcp` is intentionally NOT documented in this spec — MCP discovery is out-of-band via `tools/list`. Keep `openapi.json` in sync with any change to the HTTP surface, and never list `/mcp` there.
 - CLI mode is a single stdio process; there is no IPC channel from a second terminal into the running CLI. Out-of-process triggers (e.g. "refresh from a shell after deploying") are intentionally not supported. Refresh has to flow through the in-protocol `status` tool.
 
 ### Common Mistakes To Avoid

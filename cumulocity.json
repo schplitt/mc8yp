@@ -47,6 +47,7 @@
   },
   "settings": [],
   "key": "set-by-cumulocity-mjs",
+  "openApiSpec": "openapi.json",
   "exposeMcpServers": [
     {
       "name": "mc8yp",
