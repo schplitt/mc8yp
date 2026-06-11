@@ -8,7 +8,7 @@ The project exposes a small code-mode surface to AI agents instead of a large fi
 
 - `query` inspects the bundled Cumulocity OpenAPI specs
 - `execute` calls the live Cumulocity API through a sandboxed request helper
-- `cli-status` is available only in CLI mode to inspect the active tenant and locally stored tenants
+- `status` is available only in CLI mode: it lists the active tenant, stored credentials, and the specs currently visible to `query`. It accepts `{ refresh: true }` to force a fresh API discovery on demand (noop when no tenant is active). Server mode has no in-protocol equivalent yet — use the `POST /refresh-apis` HTTP route for ops-driven refresh; an in-protocol server-side flow will land in a separate PR.
 
 The repository supports two runtime modes:
 
@@ -42,7 +42,7 @@ src/
     index.ts                  Prompt registration
   tools/
     codemode.ts               `query` and `execute` tool definitions
-    cli-status.ts             `cli-status` tool (active tenant + stored credentials)
+    status.ts                 `status` tool (CLI only: active tenant + stored credentials + visible specs + on-demand refresh)
     index.ts                  Tool registration
   types/
     mcp-context.ts            MCP custom context shape
@@ -99,7 +99,7 @@ src/openapi-modules.d.ts      Ambient type declarations for the `#core-openapi` 
 
 #### Shared MCP surface
 
-- `src/server.ts` creates the MCP server, registers tools and prompts, and conditionally enables `cli-status` only in CLI mode.
+- `src/server.ts` creates the MCP server, registers tools and prompts, and conditionally enables `status` and `set-active-tenant` only in CLI mode.
 - `openapi/core/` and `openapi/dtm/` contain the bundled OpenAPI snapshots consumed by the build.
 - `src/tools/codemode.ts` defines the `query` and `execute` tools.
 - `src/prompts/codemode.ts` defines the `code-mode-guide` prompt.
@@ -300,6 +300,9 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 - If the user asks to open a PR from an already-active feature branch, treat that existing branch as the PR head by default and target `main` unless they say otherwise.
 - Server-mode auth must stay request-local.
 - For deployed microservice mode, prefer POST-only streamable HTTP over long-lived GET/SSE. The optional SSE channel can go inactive behind Cumulocity ingress and break later tool calls even when initialization and tool discovery succeeded.
+- The `status` tool is the in-protocol on-demand refresh path for CLI mode. It busts the per-tenant discovery cache via `refreshApiSpecs`, re-resolves specs, and patches both `getCliTenantContext().specs` and `c8yMcpServer.ctx.custom.specs` so the very next `query`/`execute` sees the new surface. There is no rate-limit — a local human-driven session has no runaway-agent risk and a forced refresh after a deploy should always work.
+- Server mode has no in-protocol refresh path today; only the `POST /refresh-apis` HTTP route exists for ops/CI use. An in-protocol server-side equivalent (with rate-limiting) is planned for a separate PR and will need to re-introduce a tenant-ID stash on `c8yMcpServer.ctx.custom` and a global cooldown timestamp in `src/utils/api-discovery.ts`.
+- CLI mode is a single stdio process; there is no IPC channel from a second terminal into the running CLI. Out-of-process triggers (e.g. "refresh from a shell after deploying") are intentionally not supported. Refresh has to flow through the in-protocol `status` tool.
 
 ### Common Mistakes To Avoid
 

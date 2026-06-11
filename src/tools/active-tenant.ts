@@ -13,7 +13,7 @@ import { getBundledOnlySpecs } from '../utils/spec-resolution'
  * the no-tenant state — query falls back to bundled-only specs, execute
  * errors loudly on missing auth.
  *
- * Exported so the drift-recovery paths (cli-status, CLI startup) can reuse
+ * Exported so the drift-recovery paths (status, CLI startup) can reuse
  * the same teardown the explicit reset uses.
  */
 export function resetActiveTenant(): void {
@@ -31,13 +31,13 @@ export function createSetActiveTenantTool() {
     {
       name: 'set-active-tenant',
       title: 'Set Active Tenant',
-      description: 'Set the Cumulocity tenant for this CLI session, or pass tenantUrl: null to clear the active tenant. The tenantUrl must match one returned by cli-status. The selection is persisted across sessions so you only need to call this once (or when switching tenants). Clearing falls back to bundled-only browsing — query still works but execute is unavailable until a tenant is set again.',
+      description: 'Set the Cumulocity tenant for this CLI session, or pass tenantUrl: null to clear the active tenant. The tenantUrl must match one returned by the status tool. The selection is persisted across sessions so you only need to call this once (or when switching tenants). Clearing falls back to bundled-only browsing — query still works but execute is unavailable until a tenant is set again.',
       schema: v.object({
         tenantUrl: v.nullable(
           v.pipe(
             v.string(),
             v.url('Must be a valid URL, e.g. https://mytenant.cumulocity.com'),
-            v.description('Base URL of the Cumulocity tenant — must be present in cli-status. Pass null to clear the active tenant.'),
+            v.description('Base URL of the Cumulocity tenant — must be present in the status tool output. Pass null to clear the active tenant.'),
           ),
         ),
       }),
@@ -47,7 +47,7 @@ export function createSetActiveTenantTool() {
         if (input.tenantUrl === null) {
           resetActiveTenant()
           return tool.text(
-            'Active tenant cleared. Query now falls back to all bundled OpenAPI snapshots; execute is unavailable until you set a tenant. Call set-active-tenant with a tenantUrl from cli-status to reconnect.',
+            'Active tenant cleared. Query now falls back to all bundled OpenAPI snapshots; execute is unavailable until you set a tenant. Call set-active-tenant with a tenantUrl from the status tool to reconnect.',
           )
         }
 

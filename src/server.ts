@@ -2,8 +2,8 @@ import consola from 'consola'
 import { c8yMcpServer } from './server-instance'
 import { createPrompts } from './prompts'
 import { createTools } from './tools'
-import { createCliStatusTool } from './tools/cli-status'
 import { createSetActiveTenantTool } from './tools/active-tenant'
+import { createStatusTool } from './tools/status'
 import type { Env } from './types'
 
 export { c8yMcpServer } from './server-instance'
@@ -18,7 +18,7 @@ export function setupMcpServer(env: Env): void {
   consola.info('Running in execution environment:', env)
 
   if (env === 'cli') {
-    c8yMcpServer.tool(createCliStatusTool())
+    c8yMcpServer.tool(createStatusTool())
     c8yMcpServer.tool(createSetActiveTenantTool())
   }
 }

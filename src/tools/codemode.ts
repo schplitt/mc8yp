@@ -15,7 +15,7 @@ function getOpenApiNote(): string {
 function getQuerySafetyPreface(env: Env): string {
   if (env === 'server')
     return 'Searches the bundled and discovered OpenAPI specs available to the current connection.'
-  return '**Read first.** The active tenant is global to this CLI session and can be flipped between calls by `set-active-tenant`. Every result ends with a footer line naming the active tenant (or noting there is none) so you can verify which tenant the result reflects before acting on it. If the footer says "no active tenant" you are looking at bundled reference snapshots — call `cli-status` to see stored credentials and `set-active-tenant` to connect before relying on the result.'
+  return '**Read first.** The active tenant is global to this CLI session and can be flipped between calls by `set-active-tenant`. Every result ends with a footer line naming the active tenant (or noting there is none) so you can verify which tenant the result reflects before acting on it. If the footer says "no active tenant" you are looking at bundled reference snapshots — call `status` to see stored credentials and `set-active-tenant` to connect before relying on the result.'
 }
 
 function getExecuteSafetyPreface(env: Env): string {
@@ -23,7 +23,7 @@ function getExecuteSafetyPreface(env: Env): string {
   if (env === 'server')
     return sharedFooter
   return [
-    '**Read first.** Every result starts with an `Executed against tenant: <url>` marker line followed by a blank line. Verify it matches the tenant you intend to mutate before reporting the result. The active tenant is global to this CLI session and can be flipped between calls by `set-active-tenant`. If no tenant is active `execute` fails with a missing-auth error — call `cli-status` and `set-active-tenant` to connect first.',
+    '**Read first.** Every result starts with an `Executed against tenant: <url>` marker line followed by a blank line. Verify it matches the tenant you intend to mutate before reporting the result. The active tenant is global to this CLI session and can be flipped between calls by `set-active-tenant`. If no tenant is active `execute` fails with a missing-auth error — call `status` and `set-active-tenant` to connect first.',
     '',
     sharedFooter,
   ].join('\n')

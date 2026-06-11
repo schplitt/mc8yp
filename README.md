@@ -26,6 +26,8 @@ When a tenant is active, mc8yp asks Cumulocity which applications the tenant is 
 
 The practical effect: **any Cumulocity microservice that ships an OpenAPI spec is automatically usable by the agent**, whether it is one of the bundled snapshots, a Cumulocity-provided service, or a custom microservice built in-house. The bundled specs are just guaranteed offline coverage; the discovery layer fills in everything else.
 
+When a new service is subscribed mid-session, CLI agents can call the `status` tool with `refresh: true` to bust the cache without waiting for the 30-minute window. Server mode does not yet expose an in-protocol refresh trigger — use the `POST /refresh-apis` HTTP route from ops/CI scripts that sit outside the MCP protocol.
+
 ## Two ways to run it
 
 - **Microservice mode** (recommended for production) — deploy inside Cumulocity IoT, expose `/mcp`, integrate with [AI Agent Manager](https://cumulocity.com/docs/ai/aim-introduction/). Auth comes from the request and the service user.
@@ -185,13 +187,13 @@ After this, `mc8yp creds add` will work.
 
 Adding credentials does **not** auto-activate a tenant. `execute` only runs against a live tenant once one has been selected, and the agent does that itself through MCP tools:
 
-1. The agent calls `cli-status` to see stored credentials and the current active tenant.
+1. The agent calls `status` to see stored credentials, the current active tenant, and the specs currently visible to `query`.
 2. The agent calls `set-active-tenant` with one of the tenant URLs. The selection is written to `~/.config/mc8yp/active-tenant.json` and reused across CLI restarts.
 3. The agent runs `query` and `execute` as needed. Each result includes a footer or marker line showing which tenant it ran against.
 
 To switch tenants, call `set-active-tenant` again. To stop targeting any tenant (browse bundled specs only), call it with `tenantUrl: null` — `query` keeps working, `execute` returns a missing-auth error so the agent cannot accidentally hit a tenant.
 
-If the active tenant's credentials are removed via `mc8yp creds remove`, the next `cli-status` call clears the active tenant automatically.
+If the active tenant's credentials are removed via `mc8yp creds remove`, the next `status` call clears the active tenant automatically.
 
 ### Connect a local MCP client
 
@@ -233,12 +235,12 @@ With read-only access rules:
 
 ## Tools and prompts
 
-| Tool                | Description                                                                                                                                                                                                                |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `query`             | Inspect the bundled and discovered OpenAPI specs by running a JavaScript function expression in a sandbox. Exposes `coreSpec` and `serviceSpecs` (keyed by `contextPath`). Returns JSON text.                              |
-| `execute`           | Run an async JavaScript function expression that calls the live Cumulocity API via `cumulocity.request({ method, path, body?, headers? })`. Returns the function result in [Toon format](https://github.com/nicepkg/toon). |
-| `cli-status`        | _(CLI only)_ Show the active tenant and stored credentials. Auto-clears the active tenant if its credentials are gone.                                                                                                     |
-| `set-active-tenant` | _(CLI only)_ Select the tenant `query` and `execute` operate against. Pass `tenantUrl: null` to clear.                                                                                                                     |
+| Tool                | Description                                                                                                                                                                                                                                                                                                                                               |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `query`             | Inspect the bundled and discovered OpenAPI specs by running a JavaScript function expression in a sandbox. Exposes `coreSpec` and `serviceSpecs` (keyed by `contextPath`). Returns JSON text.                                                                                                                                                             |
+| `execute`           | Run an async JavaScript function expression that calls the live Cumulocity API via `cumulocity.request({ method, path, body?, headers? })`. Returns the function result in [Toon format](https://github.com/nicepkg/toon).                                                                                                                                |
+| `status`            | _(CLI only)_ Show the active tenant, stored credentials, and the specs currently visible to `query`. Auto-clears the active tenant if its credentials are gone. Pass `refresh: true` to bust the 30-minute discovery cache and re-run discovery for the active tenant — useful right after (un)subscribing a microservice. Noop when no tenant is active. |
+| `set-active-tenant` | _(CLI only)_ Select the tenant `query` and `execute` operate against. Pass `tenantUrl: null` to clear.                                                                                                                                                                                                                                                    |
 
 Both code-mode tools run in a sandboxed V8 runtime ([`@iso4/sandbox`](https://github.com/schplitt/iso4)) hosted in a separate Rust subprocess. The sandbox has no `fetch` global — the only path to the tenant is the host-bridged `cumulocity.request` helper, which is DNS-pinned and SSRF-hardened via [`@iso4/fetch`](https://www.npmjs.com/package/@iso4/fetch).
 
