@@ -94,13 +94,26 @@ export async function getStoredC8yAuth(): Promise<UserC8yAuth[]> {
 
 export async function getCredentialsByTenantUrl(tenantUrl: string): Promise<UserC8yAuth> {
   const cleanedUrl = cleanTenantUrl(tenantUrl)
-  const found = await findCredentialsAsync(pkgjson.name, cleanedUrl)
-  if (found.length === 0) {
+
+  // Primary path: target-filtered keyring query. Fast on healthy keyrings.
+  let entry = (await findCredentialsAsync(pkgjson.name, cleanedUrl))[0]
+
+  // Fallback: some keyring backends (notably libsecret on WSL2 / Ubuntu 24
+  // with a locked default collection) obscure the `target` attribute, so
+  // target-filtered lookups return empty even though the entry exists and
+  // is fully readable via an unfiltered listing. Mirror the resilience
+  // pattern already used by deleteStoredC8yAuth: list everything for the
+  // service and match by cleaned account. Identical semantics on healthy
+  // backends, but recovers the stored credentials on broken ones.
+  if (!entry) {
+    const all = await findCredentialsAsync(pkgjson.name)
+    entry = all.find((e) => cleanTenantUrl(e.account) === cleanedUrl)
+  }
+
+  if (!entry) {
     throw new Error(`No stored credentials found for tenant URL: ${cleanedUrl}`)
   }
-  const entry = found[0]!
-  const { password: jsonString } = entry
-  return parseStoredUserC8yAuth(jsonString, cleanedUrl)
+  return parseStoredUserC8yAuth(entry.password, cleanedUrl)
 }
 
 export async function setStoredC8yAuth(creds: NewStoredUserC8yAuth): Promise<void> {
@@ -135,18 +148,40 @@ export function cleanTenantUrl(url: string): string {
 
 export async function deleteStoredC8yAuth(tenantUrl: string): Promise<boolean> {
   const cleanedUrl = cleanTenantUrl(tenantUrl)
+
+  // Existence check via list-all (resilient to libsecret backends that
+  // obscure the `target` attribute, e.g. WSL2 / Ubuntu 24 with a locked
+  // default collection). Normalize the stored account before comparing
+  // so a historical trailing-slash entry still matches.
   const found = await findCredentialsAsync(pkgjson.name)
-  const exists = found.some((entry) => entry.account === cleanedUrl)
+  const exists = found.some((entry) => cleanTenantUrl(entry.account) === cleanedUrl)
 
   if (!exists) {
     return false
   }
 
+  // Attempt the targeted delete. On healthy backends this is the
+  // matching half of the targeted lookup. On broken backends the
+  // target attribute is obscured, so deletePassword can throw or
+  // silently no-op — verify by re-listing and surface a clear error
+  // instead of swallowing into `false`, which used to make the CLI
+  // report a generic 'Failed to remove' that the user could not act on.
   const entry = new AsyncEntry(pkgjson.name, cleanedUrl)
+  let deleteError: unknown
   try {
     await entry.deletePassword()
-    return true
-  } catch {
-    return false
+  } catch (err) {
+    deleteError = err
   }
+
+  const stillThere = (await findCredentialsAsync(pkgjson.name))
+    .some((e) => cleanTenantUrl(e.account) === cleanedUrl)
+  if (!stillThere) {
+    return true
+  }
+
+  throw new Error(
+    `Keyring refused to delete the credentials for ${cleanedUrl}. The entry is present when listing but cannot be removed by target — this is typically a libsecret / WSL2 locked-collection issue. Unlock the login keyring (e.g. \`gnome-keyring-daemon --unlock --components=secrets\`) and try again, or remove the entry manually with \`secret-tool clear service ${pkgjson.name} account ${cleanedUrl}\`.`,
+    deleteError instanceof Error ? { cause: deleteError } : undefined,
+  )
 }
