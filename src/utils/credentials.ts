@@ -94,13 +94,26 @@ export async function getStoredC8yAuth(): Promise<UserC8yAuth[]> {
 
 export async function getCredentialsByTenantUrl(tenantUrl: string): Promise<UserC8yAuth> {
   const cleanedUrl = cleanTenantUrl(tenantUrl)
-  const found = await findCredentialsAsync(pkgjson.name, cleanedUrl)
-  if (found.length === 0) {
+
+  // Primary path: target-filtered keyring query. Fast on healthy keyrings.
+  let entry = (await findCredentialsAsync(pkgjson.name, cleanedUrl))[0]
+
+  // Fallback: some keyring backends (notably libsecret on WSL2 / Ubuntu 24
+  // with a locked default collection) obscure the `target` attribute, so
+  // target-filtered lookups return empty even though the entry exists and
+  // is fully readable via an unfiltered listing. Mirror the resilience
+  // pattern already used by deleteStoredC8yAuth: list everything for the
+  // service and match by cleaned account. Identical semantics on healthy
+  // backends, but recovers the stored credentials on broken ones.
+  if (!entry) {
+    const all = await findCredentialsAsync(pkgjson.name)
+    entry = all.find((e) => cleanTenantUrl(e.account) === cleanedUrl)
+  }
+
+  if (!entry) {
     throw new Error(`No stored credentials found for tenant URL: ${cleanedUrl}`)
   }
-  const entry = found[0]!
-  const { password: jsonString } = entry
-  return parseStoredUserC8yAuth(jsonString, cleanedUrl)
+  return parseStoredUserC8yAuth(entry.password, cleanedUrl)
 }
 
 export async function setStoredC8yAuth(creds: NewStoredUserC8yAuth): Promise<void> {
