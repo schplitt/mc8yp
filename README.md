@@ -1,126 +1,58 @@
-# mc8yp - Full Cumulocity API Access for AI Agents
+# mc8yp — Cumulocity API access for AI agents
 
 ![Version](https://img.shields.io/npm/v/mc8yp)
 ![License](https://img.shields.io/npm/l/mc8yp)
 ![Node Version](https://img.shields.io/node/v/mc8yp)
 
-mc8yp is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gives AI agents access to the **full Cumulocity API surface** through a compact code-mode interface.
+mc8yp is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gives AI agents access to the **full Cumulocity API surface** through just two code-mode tools instead of a huge fixed tool inventory:
 
-It supports the two bundled Cumulocity API families exposed by this project:
+- **`query`** — inspect the OpenAPI specs available on the current tenant
+- **`execute`** — call the live Cumulocity API
 
-- **Core API**
-- **DTM API**
+The agent sees not only the bundled **Core** and **DTM** specs, but **any microservice installed on the tenant** that declares an OpenAPI spec in its manifest — mc8yp discovers those live and exposes them alongside the bundled ones. No code changes or rebuild required to support a new service.
 
-Instead of limiting agents to a small fixed set of prebuilt tools, mc8yp gives them broad access to Cumulocity through two code-mode tools:
-
-- `query` — inspect the bundled Core + DTM OpenAPI specs
-- `execute` — call the live Cumulocity API
-
-The result is an MCP integration where agents can work across the broader Cumulocity platform, while operators still keep **fine-grained control** over what is actually allowed at runtime.
-
-mc8yp is available in two modes:
-
-- **Cumulocity microservice mode** for production use with [AI Agent Manager](https://cumulocity.com/docs/ai/aim-introduction/)
-- **CLI mode** for local debugging, testing, and development
-
-## Why mc8yp
-
-### Full API power for agents
-
-mc8yp is built to give agents access to the **complete Cumulocity API surface available through the bundled Core and DTM specs**, instead of a tiny curated subset of actions.
-
-That means agents are not blocked just because a specific endpoint was never wrapped as a custom MCP tool.
-
-### Built for AI Agent Manager first
-
-The primary production deployment model is **Cumulocity microservice mode**.
-
-Deploy mc8yp as a Cumulocity microservice and expose `/mcp` to **AI Agent Manager**, so agents can use broad Cumulocity API capabilities inside the platform.
-
-### Full power, controlled access
-
-Broad capability does **not** have to mean unrestricted access.
-
-mc8yp lets you constrain live API usage with:
-
-- **restrictions** to deny specific methods or paths
-- **allow rules** to define an allow-list
-- **bundled OpenAPI disablement** for selected API families
-- **sandboxed execution** and a tenant-host network boundary
-- normal **Cumulocity permissions** from the authenticated user or service user
-
-This makes setups like these possible:
-
-- **read-only agents**
-- **non-destructive production agents**
-- agents limited to **inventory**, **alarms**, or other selected API families
-- agents allowed to write only to a small approved set of endpoints
-
-### Token efficiency comes from the small MCP surface
-
-The agent gets broad API reach without requiring a huge fixed tool inventory. Instead of many endpoint-specific tools, mc8yp keeps the MCP surface compact and lets the model reason over the bundled OpenAPI specs.
+Operators stay in control through per-connection **restrictions** and **allow rules**, so the same broad capability can be deployed as a read-only agent, a non-destructive production agent, or anything in between.
 
 ## How it works
 
-1. The agent uses `query` to inspect the bundled Cumulocity OpenAPI specs.
-2. The agent decides which Core or DTM endpoint it needs.
+1. mc8yp discovers every microservice installed on the tenant that declares an OpenAPI spec, and exposes those alongside the bundled Core (+ DTM) specs.
+2. The agent uses `query` to inspect the available specs and pick an endpoint.
 3. The agent uses `execute` to call the live Cumulocity API.
-4. mc8yp enforces configured restrictions and allow rules before sending the request.
+4. mc8yp enforces configured restrictions and allow rules before the request leaves the host.
 
-## Deployment Modes
+### Live microservice API discovery
 
-### 1. Cumulocity Microservice Mode (recommended)
+When a tenant is active, mc8yp asks Cumulocity which applications the tenant is subscribed to, reads the `openApiSpec` declaration from each application manifest, fetches the spec, prefixes its paths with the service's `contextPath`, and exposes it to the sandbox as `serviceSpecs[contextPath]`. Results are cached per tenant for 30 minutes.
 
-Designed for deployment inside **Cumulocity IoT**.
+The practical effect: **any Cumulocity microservice that ships an OpenAPI spec is automatically usable by the agent**, whether it is one of the bundled snapshots, a Cumulocity-provided service, or a custom microservice built in-house. The bundled specs are just guaranteed offline coverage; the discovery layer fills in everything else.
 
-In this mode, mc8yp exposes an HTTP MCP endpoint at `/mcp` and is intended for use with **AI Agent Manager**.
+## Two ways to run it
 
-- deploy through Cumulocity microservice packaging
-- integrate with [AI Agent Manager](https://cumulocity.com/docs/ai/aim-introduction/)
-- use the service user's permissions automatically
-- configure per-connection MCP policy with restrictions, allow rules, and bundled OpenAPI disablement
+- **Microservice mode** (recommended for production) — deploy inside Cumulocity IoT, expose `/mcp`, integrate with [AI Agent Manager](https://cumulocity.com/docs/ai/aim-introduction/). Auth comes from the request and the service user.
+- **CLI mode** (local development) — run locally over stdio with an MCP client such as Claude Desktop. Credentials are stored in the OS keyring.
 
-### 2. CLI Mode (local development)
+---
 
-> **Platform requirement:** CLI mode requires **macOS or Linux**. The sandboxed V8 runtime
-> (`@iso4/sandbox`) communicates with a Rust subprocess over Unix domain sockets, which are not
-> available on Windows. If you are on Windows, use
-> [WSL 2](https://learn.microsoft.com/windows/wsl/) or connect to a
-> [Cumulocity microservice deployment](#1-cumulocity-microservice-mode-recommended) instead.
+## Quick start — Microservice (recommended)
 
-CLI mode is ideal for:
+1. Download the latest release zip from [GitHub Releases](https://github.com/schplitt/mc8yp/releases).
+2. Upload the `.zip` in Cumulocity **Application Management**.
+3. Subscribe the application in your tenant.
+4. Point your agent at:
 
-- local debugging
-- testing agent prompts and workflows
-- validating access-policy setups before deployment
-- working with MCP clients such as Claude Desktop
+   ```txt
+   https://<tenant>.cumulocity.com/service/mc8yp-server/mcp
+   ```
 
-Credentials are stored in your operating system's secure credential manager.
+No extra credential setup is required — the microservice uses Cumulocity's deployment environment and request authentication.
 
-## Quick Start: AI Agent Manager / Microservice
-
-1. Download the latest release package from [GitHub Releases](https://github.com/schplitt/mc8yp/releases)
-2. Upload the `.zip` in **Application Management**
-3. Subscribe the application in your tenant
-4. Connect your agent workflow to:
-
-```txt
-https://<tenant>.cumulocity.com/service/mc8yp-server/mcp
-```
-
-No extra tenant credential setup is required in microservice mode. The microservice uses Cumulocity's deployment environment and request authentication model.
-
-### Example: production-safe read-only microservice connection
-
-You can expose broad API knowledge to the agent while allowing only safe read access at runtime.
-
-Example MCP endpoint configuration patterns:
+**Example: read-only production agent** (allow only safe GETs):
 
 ```txt
 /mcp?allow=GET:/inventory/**&allow=GET:/alarm/**&allow=GET:/measurement/**
 ```
 
-Or with headers:
+Or via headers:
 
 ```http
 POST /mcp HTTP/1.1
@@ -129,13 +61,29 @@ mc8yp-allow: GET:/alarm/**
 mc8yp-allow: GET:/measurement/**
 ```
 
-## Quick Start: Local CLI
+See [Access policy](#access-policy) for the full rule syntax.
+
+---
+
+## Quick start — Local CLI
+
+### Platform support
+
+| Platform | Supported | Notes                                                                                                                                            |
+| -------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| macOS    | ✅ native | Keychain is used for credentials                                                                                                                 |
+| Linux    | ✅ native | Secret Service (libsecret) is used for credentials                                                                                               |
+| Windows  | ❌        | Use [WSL 2](https://learn.microsoft.com/windows/wsl/) (see [WSL 2 one-time setup](#wsl-2-one-time-setup) below) or the microservice mode instead |
+
+The sandboxed V8 runtime ([`@iso4/sandbox`](https://www.npmjs.com/package/@iso4/sandbox)) communicates with a Rust subprocess over Unix domain sockets, which is why native Windows is not supported.
+
+### Install and run
 
 ```sh
 # Run directly (recommended)
 pnpm dlx mc8yp
 
-# Pick a specific bundled OpenAPI build for query
+# Pick a specific bundled core OpenAPI build for `query`
 pnpm dlx mc8yp --spec 2025
 
 # Or install globally
@@ -143,44 +91,109 @@ npm install -g mc8yp
 mc8yp
 ```
 
-### Credential Storage
+### Add credentials
 
-The interactive `mc8yp creds add` flow uses masked password input and stores credentials in your operating system's secure credential manager.
-
-- **macOS**: Keychain
-- **Windows**: Credential Vault
-- **Linux**: Secret Service API (libsecret)
-
-### Managing Credentials
+`mc8yp creds add` prompts for tenant URL, username, and a masked password, and writes them to the OS keyring.
 
 ```sh
-# Add credentials (prompts for tenant URL, username, and a masked password)
-pnpm dlx mc8yp creds add
-
-# List stored credentials
-pnpm dlx mc8yp creds list
-
-# Remove stored credentials
-pnpm dlx mc8yp creds remove
+pnpm dlx mc8yp creds add     # add credentials (interactive, masked password)
+pnpm dlx mc8yp creds list    # list stored credentials
+pnpm dlx mc8yp creds remove  # remove stored credentials
 ```
 
-### Active Tenant Flow
+On macOS and standard desktop Linux this works out of the box. On **WSL 2** the keyring stack is not wired up by default and needs a one-time bootstrap:
 
-Adding credentials does not automatically activate a tenant. CLI sessions only run `query` against live tenant data and `execute` against the live API once a tenant has been selected via the `set-active-tenant` MCP tool.
+<details>
+<summary><strong>WSL 2 one-time setup</strong> — required before <code>mc8yp creds add</code> works on WSL</summary>
 
-First-time setup an agent will perform once the MCP client is connected:
+A fresh WSL 2 distro has no Secret Service provider, no session D-Bus, and no `login` keyring collection, so `@napi-rs/keyring` (used by `mc8yp creds add`) has nothing to talk to. On a normal desktop Linux all of this is wired up automatically by the display manager and PAM; on WSL you have to do it once manually.
 
-1. Call `cli-status` to see stored credentials and the current active tenant.
-2. Call `set-active-tenant` with one of the tenant URLs from `cli-status`. The selection is written to `~/.config/mc8yp/active-tenant.json` and re-applied automatically on every subsequent CLI start.
-3. Call `query` and `execute` as needed. The query footer and execute marker keep the active tenant visible on every result.
+**1. Inside WSL, install the keyring stack:**
 
-To switch tenants mid-session, call `set-active-tenant` again with the new URL. To deliberately stop working against any tenant and just browse the bundled OpenAPI snapshots, call `set-active-tenant` with `tenantUrl: null`. In that state `query` continues to work against every bundled spec and `execute` returns a missing-auth error — so an agent cannot accidentally hit a tenant it has not selected.
+```sh
+sudo apt install -y libsecret-tools dbus-x11
+sudo apt install -y libpam-gnome-keyring
+```
 
-If the stored credentials for the active tenant are removed (for example by `mc8yp creds remove`), the next `cli-status` call — or the next CLI restart — detects the drift and automatically resets the active tenant to `(none)`, preventing stale auth headers from going on the wire.
+- `libsecret-tools` provides `secret-tool` and pulls in `libsecret` (the client library `@napi-rs/keyring` uses).
+- `dbus-x11` provides `dbus-launch` so a session D-Bus can be started in a headless shell.
+- `libpam-gnome-keyring` installs `gnome-keyring-daemon` (the actual Secret Service provider) and its PAM module.
 
-### Connecting a Local MCP Client
+**2. Force the keyring database to initialize:**
 
-For Claude Desktop or any MCP client, add:
+```sh
+secret-tool store --label="init" init init
+```
+
+A throwaway write so `gnome-keyring-daemon` creates its on-disk store.
+
+**3. Wire up PAM so the keyring auto-unlocks at login:**
+
+```sh
+sudo bash -c 'cat >> /etc/pam.d/login <<EOF
+auth optional pam_gnome_keyring.so
+session optional pam_gnome_keyring.so auto_start
+EOF'
+```
+
+**4. From PowerShell, fully restart WSL so PAM picks up the new config:**
+
+```powershell
+wsl --shutdown
+```
+
+**5. Back in WSL, start a session D-Bus (WSL doesn't get one by default):**
+
+```sh
+echo $DBUS_SESSION_BUS_ADDRESS   # should be empty
+eval $(dbus-launch --sh-syntax)
+```
+
+**6. Create the `login` collection that libsecret writes into.** On a normal desktop this is created by the graphical login session; on WSL it does not exist and credential writes will fail without it:
+
+```sh
+gdbus call --session \
+  --dest org.freedesktop.secrets \
+  --object-path /org/freedesktop/secrets \
+  --method org.freedesktop.Secret.Service.OpenSession \
+  "plain" \
+  "<''>"
+
+gdbus call --session \
+  --dest org.freedesktop.secrets \
+  --object-path /org/freedesktop/secrets \
+  --method org.freedesktop.Secret.Service.CreateCollection \
+  "{'org.freedesktop.Secret.Collection.Label': <'login'>}" \
+  ""
+```
+
+**7. Trigger the keyring passphrase prompt once:**
+
+```sh
+secret-tool store --label="test" service myservice username myuser
+```
+
+This opens a prompt to set the keyring passphrase. You can leave it **empty** — the keyring will then auto-unlock without prompting later, which is what you want for headless WSL.
+
+After this, `mc8yp creds add` will work.
+
+</details>
+
+### Activate a tenant
+
+Adding credentials does **not** auto-activate a tenant. `execute` only runs against a live tenant once one has been selected, and the agent does that itself through MCP tools:
+
+1. The agent calls `cli-status` to see stored credentials and the current active tenant.
+2. The agent calls `set-active-tenant` with one of the tenant URLs. The selection is written to `~/.config/mc8yp/active-tenant.json` and reused across CLI restarts.
+3. The agent runs `query` and `execute` as needed. Each result includes a footer or marker line showing which tenant it ran against.
+
+To switch tenants, call `set-active-tenant` again. To stop targeting any tenant (browse bundled specs only), call it with `tenantUrl: null` — `query` keeps working, `execute` returns a missing-auth error so the agent cannot accidentally hit a tenant.
+
+If the active tenant's credentials are removed via `mc8yp creds remove`, the next `cli-status` call clears the active tenant automatically.
+
+### Connect a local MCP client
+
+For Claude Desktop or any stdio MCP client:
 
 ```json
 {
@@ -194,7 +207,7 @@ For Claude Desktop or any MCP client, add:
 }
 ```
 
-Example with read-only access rules:
+With read-only access rules:
 
 ```json
 {
@@ -205,67 +218,33 @@ Example with read-only access rules:
       "args": [
         "dlx",
         "mc8yp",
-        "-a",
-        "GET:/inventory/**",
-        "-a",
-        "GET:/alarm/**",
-        "-a",
-        "GET:/measurement/**"
+        "-a", "GET:/inventory/**",
+        "-a", "GET:/alarm/**",
+        "-a", "GET:/measurement/**"
       ]
     }
   }
 }
 ```
 
-## Bundled OpenAPI Coverage
+---
 
-The `query` tool exposes the bundled OpenAPI snapshots included by this project:
+## Tools and prompts
 
-- **Core** snapshots: `release`, `2026`, `2025`, and `2024`
-- **DTM** snapshot: bundled alongside each supported core build
+| Tool                | Description                                                                                                                                                                                                                |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `query`             | Inspect the bundled and discovered OpenAPI specs by running a JavaScript function expression in a sandbox. Exposes `coreSpec` and `serviceSpecs` (keyed by `contextPath`). Returns JSON text.                              |
+| `execute`           | Run an async JavaScript function expression that calls the live Cumulocity API via `cumulocity.request({ method, path, body?, headers? })`. Returns the function result in [Toon format](https://github.com/nicepkg/toon). |
+| `cli-status`        | _(CLI only)_ Show the active tenant and stored credentials. Auto-clears the active tenant if its credentials are gone.                                                                                                     |
+| `set-active-tenant` | _(CLI only)_ Select the tenant `query` and `execute` operate against. Pass `tenantUrl: null` to clear.                                                                                                                     |
 
-In CLI mode, use `--spec` or `-s` to choose which bundled **core** OpenAPI snapshot `query` exposes:
+Both code-mode tools run in a sandboxed V8 runtime ([`@iso4/sandbox`](https://github.com/schplitt/iso4)) hosted in a separate Rust subprocess. The sandbox has no `fetch` global — the only path to the tenant is the host-bridged `cumulocity.request` helper, which is DNS-pinned and SSRF-hardened via [`@iso4/fetch`](https://www.npmjs.com/package/@iso4/fetch).
 
-```sh
-# Default: latest bundled release build
-mc8yp
+The **`code-mode-guide`** prompt contains the full reference for `query` and `execute`, including types, examples, and the active access policy for the current connection.
 
-# Explicitly use the 2025 bundled build
-mc8yp --spec 2025
+### `execute` input shape
 
-# Short form
-mc8yp -s 2024
-```
-
-This only changes the bundled OpenAPI data that `query` sees. The `execute` tool still calls the live Cumulocity API of the selected tenant or deployed service environment.
-
-## Tools & Prompts
-
-### Tools
-
-| Tool                | Description                                                                                                                                                                                                                                                                       |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `query`             | Search and inspect the bundled and discovered OpenAPI specs by running a JavaScript function expression. The sandbox exposes `coreSpec` and `serviceSpecs` (microservice APIs keyed by `contextPath`).                                                                            |
-| `execute`           | Execute JavaScript against the live Cumulocity API. Provide an async JavaScript function expression. A top-level `cumulocity` binding provides `cumulocity.request({ method, path, body?, headers? })`. Return the final value from that function.                                |
-| `cli-status`        | _(CLI mode only)_ Read the active tenant (or note that none is set) and the list of stored credentials from your system keyring. Auto-clears the active tenant if its credentials have been removed. Call this before `query` / `execute` so you know which tenant they will hit. |
-| `set-active-tenant` | _(CLI mode only)_ Select the tenant `query` and `execute` operate against, persisted to `~/.config/mc8yp/active-tenant.json` across CLI restarts. Pass `tenantUrl: null` to clear the selection and fall back to browsing the bundled OpenAPI snapshots.                          |
-
-Both code-mode tools run in a sandboxed V8 runtime ([@iso4/sandbox](https://github.com/schplitt/iso4)) hosted in a separate Rust subprocess.
-
-- `query` returns JSON text for easier inspection of OpenAPI data. Every result ends with a footer line naming the active tenant (or noting there is none) so the agent can verify which tenant the visible specs reflect.
-- `execute` returns the successful function result in [Toon format](https://github.com/nicepkg/toon). If execution is blocked or fails, it returns a plain text message instead. In CLI mode every `execute` result is prefixed with an `Executed against tenant: <url>` marker line so the active tenant is always visible — the active tenant is global to a CLI session and can be flipped between calls by `set-active-tenant`.
-
-### Prompts
-
-| Prompt            | Description                                                                                                                                 |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `code-mode-guide` | Full reference for the `query` and `execute` tools, including available types, examples, and access-policy info for the current connection. |
-
-## Execute Input Shape
-
-The `execute` tool expects an async function expression, not module source with `export default`.
-
-Recommended shape:
+`execute` expects an async function expression:
 
 ```js
 async () => {
@@ -276,7 +255,7 @@ async () => {
 }
 ```
 
-You can also perform intermediate processing before returning the final value:
+You can do intermediate work before returning:
 
 ```js
 async () => {
@@ -285,63 +264,35 @@ async () => {
     path: '/inventory/managedObjects?pageSize=20&withTotalPages=true',
   })
 
-  return devices.managedObjects?.map((device) => ({ id: device.id, name: device.name }))
+  return devices.managedObjects?.map((d) => ({ id: d.id, name: d.name }))
 }
 ```
 
-## API Access Policy
+---
+
+## Access policy
 
 mc8yp supports two per-connection rule types:
 
-- **Restrictions** — deny rules that block matching API operations
-- **Allow rules** — allow-list rules that permit matching API operations and block everything else when at least one allow rule is configured
+- **Restrictions** — deny rules that block matching API operations.
+- **Allow rules** — allow-list rules. When at least one allow rule is set, anything not matching is blocked.
 
-If both apply to the same operation, **restrictions take priority**.
+If both apply to the same operation, **restrictions win**. This is how you expose broad API knowledge while still running an agent in a read-only or otherwise constrained mode.
 
-This is what makes it possible to expose broad API capability while still keeping an agent in a **read-only** or otherwise **non-destructive** operating mode.
-
-Example: allowing `/inventory/**` but restricting `/inventory/managedObjects` still blocks `/inventory/managedObjects`.
-
-Both rule types use the same syntax.
-
-### Restrictions
-
-Restrictions are deny rules that block specific API operations.
-
-### Allow Rules
-
-Allow rules are the inverse of restrictions. They define what is permitted. When one or more allow rules are configured, any operation that does not match at least one allow rule is blocked.
-
-### Rule Format
-
-A restriction or allow rule can be written in either of these forms:
+### Rule format
 
 ```txt
 <path-pattern>
 <method>:<path-pattern>
 ```
 
-- **Without a method prefix** — matches all HTTP methods for matching paths
-- **With a method prefix** — matches only that method (for example `GET:`, `DELETE:`, `POST:`)
-- **The `:` separator is only present when a method prefix is provided**
-- **Supported methods** — `DELETE`, `GET`, `HEAD`, `OPTIONS`, `PATCH`, `POST`, `PUT`, `TRACE`, or `*`
-- Method names are case-insensitive when parsed (`get:/inventory/**` becomes `GET:/inventory/**`)
+- No method prefix → matches all HTTP methods.
+- With a method prefix → only that method. Supported: `DELETE`, `GET`, `HEAD`, `OPTIONS`, `PATCH`, `POST`, `PUT`, `TRACE`, or `*`. Case-insensitive.
+- Patterns must start with `/`. Query strings and fragments are not allowed in patterns.
+- Wildcards: `*` matches within a single path segment; `**` matches zero or more whole segments and must be its own segment.
 
-### Path Pattern Syntax
-
-Patterns are matched against the request **pathname**.
-
-- Query strings and fragments are **not allowed in rule patterns**
-- Incoming request query strings are ignored for matching, so `/inventory/**` also matches requests such as `/inventory?pageSize=5`
-- Patterns must start with `/`
-- Matching is path-segment aware: `/` separates segments
-
-Supported wildcards:
-
-- `*` — wildcard **inside a single path segment**. It matches any characters except `/`
-- `**` — recursive wildcard across **zero or more whole path segments**. `**` must be its own complete segment
-
-### Path Pattern Examples
+<details>
+<summary><strong>Path pattern examples</strong></summary>
 
 | Pattern               | Matches                                                     | Does Not Match                             |
 | --------------------- | ----------------------------------------------------------- | ------------------------------------------ |
@@ -353,160 +304,103 @@ Supported wildcards:
 | `/inventory/*/child`  | `/inventory/device-1/child`, `/inventory/x/child`           | `/inventory/child`, `/inventory/a/b/child` |
 | `/inventory/**/child` | `/inventory/child`, `/inventory/a/b/child`                  | `/inventory/a/b/sibling`                   |
 
-### Common Rule Examples
+Notes:
+
+- `/inventory/**` already matches `/inventory` itself.
+- `/i**` is invalid — `**` must be its own segment. Use `/i*/**` instead.
+- Rule patterns may not contain `//`, `.`, `..`, query strings, or fragments.
+
+</details>
+
+<details>
+<summary><strong>Common rule examples</strong></summary>
 
 | Rule                             | Restriction Effect                                           | Allow-list Effect                                             |
 | -------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------- |
-| `/inventory/**`                  | Block all methods on `/inventory` and everything below it    | Permit all methods on `/inventory` and everything below it    |
-| `DELETE:/inventory/**`           | Block only DELETE on `/inventory` and everything below it    | Permit only DELETE on `/inventory` and everything below it    |
+| `/inventory/**`                  | Block all methods on `/inventory` and below                  | Permit all methods on `/inventory` and below                  |
+| `DELETE:/inventory/**`           | Block only DELETE on `/inventory` and below                  | Permit only DELETE on `/inventory` and below                  |
 | `/alarm/alarms`                  | Block all methods on the exact path `/alarm/alarms`          | Permit all methods on the exact path `/alarm/alarms`          |
 | `GET:/measurement/measurements`  | Block only GET on the exact path `/measurement/measurements` | Permit only GET on the exact path `/measurement/measurements` |
 | `POST:/inventory/managedObjects` | Block creating new managed objects                           | Permit creating new managed objects                           |
-| `/i*/**`                         | Block all routes whose first path segment starts with `i`    | Permit all routes whose first path segment starts with `i`    |
 | `/user/**`                       | Block all user management paths                              | Permit all user management paths                              |
 
-### Important Notes
+</details>
 
-- `/inventory/**` already matches `/inventory` itself, so you do **not** need both `/inventory` and `/inventory/**`
-- `/i**` is **not valid** because `**` must be its own segment. Use `/i*/**` if you want to match a first segment starting with `i` and everything below it
-- `*:/inventory/**` is allowed and means the same thing as `/inventory/**`
-- Root paths across the bundled Core and DTM specs are intentionally treated as disjoint, so path-based restriction and allow rules are enough for request enforcement
-- Rule patterns may not contain empty segments (`//`), `.` or `..` segments, query strings, or fragments
+### CLI usage
 
-### CLI Mode
-
-Pass restrictions and allow rules as CLI arguments.
-
-Repeat `-r`, `--restrict`, or `--restriction` for deny rules:
+Repeat `-r`, `--restrict`, or `--restriction` for deny rules; `-a`, `--allow`, or `--allowed` for allow rules:
 
 ```sh
-# Block all inventory access
-mc8yp -r "/inventory/**"
-
-# Block deletes on inventory and all alarm access
+# Block all inventory writes and all alarm access
 mc8yp -r "DELETE:/inventory/**" -r "/alarm/**"
 
-# Same thing using the long alias
-mc8yp --restrict "/user/**"
-```
-
-Repeat `-a`, `--allow`, or `--allowed` for allow rules:
-
-```sh
-# Only permit inventory access
-mc8yp -a "/inventory/**"
-
-# Permit GET inventory access and POST alarms
+# Only permit GET inventory + POST alarms
 mc8yp --allow "GET:/inventory/**" --allowed "POST:/alarm/**"
 
-# Allow inventory broadly, but still block one path with a restriction
+# Allow inventory broadly, but still block one path
 mc8yp -a "/inventory/**" -r "/inventory/managedObjects"
 ```
 
-### Microservice Mode (HTTP)
+### Microservice usage (HTTP)
 
-Pass restrictions as `restriction`, `restrict`, or `r` query parameters on the MCP endpoint URL.
-Pass allow rules as `allowed`, `allow`, or `a` query parameters.
-You can also send project-scoped HTTP headers to avoid conflicts with well-known headers:
+Use query parameters or project-scoped headers on the `/mcp` endpoint:
 
-- `mc8yp-restriction` for deny rules
-- `mc8yp-allow` for allow-list rules
+- Deny rules: `restriction`, `restrict`, or `r` query params, or `mc8yp-restriction` header.
+- Allow rules: `allowed`, `allow`, or `a` query params, or `mc8yp-allow` header.
 
-Both headers accept either repeated header instances or a comma-separated list of values. Query parameters and headers can be combined on the same connection.
+Both headers accept either repeated header instances or a comma-separated list. Query parameters and headers can be combined.
 
 ```txt
-/mcp?restriction=/inventory/**&restrict=DELETE:/alarm/**
-/mcp?r=/inventory/**&r=DELETE:/alarm/**
-/mcp?allow=/inventory/**&allowed=POST:/alarm/**
+/mcp?r=/inventory/**&r=DELETE:/alarm/**&allow=GET:/measurement/**
 ```
 
 ```http
 POST /mcp HTTP/1.1
 Authorization: Bearer <token>
 mc8yp-restriction: /inventory/**
-mc8yp-restriction: DELETE:/alarm/**
 mc8yp-allow: GET:/measurement/**
 ```
 
-### How Access Policy Works
+When `execute` is blocked by connection policy, the tool returns explanatory text, no request is sent to Cumulocity, and retrying through the same connection will not help.
 
-1. **Query visibility**: The `query` tool exposes resolved OpenAPI specs through `coreSpec` and `serviceSpecs`. With an active tenant, services not installed on that tenant are dropped from the sandbox surface so the agent only sees what is actually reachable. In CLI mode with no active tenant, every bundled snapshot is exposed for reference browsing only — `execute` is unavailable in that state.
+---
 
-2. **Request enforcement**: The host-side bridge that backs `cumulocity.request` evaluates restrictions and allow rules before any HTTP request leaves the host. Matching deny rules block first. If any allow rules are configured, requests must also match at least one allow rule. Blocked requests never reach Cumulocity.
+## OpenAPI coverage
 
-3. **Network boundary**: The sandbox itself has no `fetch` global. Sandbox code reaches the tenant only through the host-bridged `cumulocity.request` helper, which injects auth, evaluates restriction and allow rules, and issues the live HTTP call via [@iso4/fetch](https://www.npmjs.com/package/@iso4/fetch) (DNS-pinned, SSRF-hardened). Every other network egress is unavailable to the agent.
+What the agent sees through `query` comes from two layers:
 
-When an `execute` request is blocked by MCP connection policy, the tool returns explanatory text stating whether the operation was denied by a restriction or blocked because it is outside the configured allow list, no request was sent to Cumulocity, and retrying through the same connection will not help.
+1. **Live-discovered specs** — every microservice subscribed on the active tenant whose manifest declares an `openApiSpec`. Discovered at runtime, cached for 30 minutes per tenant, exposed as `serviceSpecs[contextPath]`. This works for any service, not just the ones bundled here.
+2. **Bundled snapshots** — shipped with the build so Core and DTM are always available even when discovery hasn't run yet:
+   - **Core** snapshots: `release`, `2026`, `2025`, `2024`
+   - **DTM** snapshot bundled alongside each supported core build
 
-## Build And Packaging
+With an active tenant, services not installed on that tenant are dropped from the sandbox so the agent only sees what is actually reachable.
 
-The repository bundles multiple OpenAPI specs for CLI use and builds one microservice server bundle per configured build version.
-
-### Build Outputs
-
-`pnpm build` produces:
-
-- CLI bundle in `dist/`
-- Versioned server bundles in `.output/release/`, `.output/2026/`, `.output/2025/`, and `.output/2024/`
-
-The build matrix is driven by [`openapi-builds.json`](openapi-builds.json). Core snapshots live under `openapi/core/`, DTM snapshots live under `openapi/dtm/`, and each server bundle contains the configured combination for that build.
-
-### Release Packaging
-
-Use the dedicated packaging command after `pnpm build` to create Docker-based Cumulocity release zips:
-
-The packaging step writes a temporary generated Dockerfile under `.c8y/`, copies the selected versioned server bundle into `/app/server/`, and installs production dependencies inside the Linux image with pnpm before copying them into the runtime stage. This avoids cross-platform native optional dependency issues when release artifacts are built on macOS but deployed as `linux/amd64` microservices.
-
-The deployed HTTP transport uses POST-only streamable HTTP (`GET /mcp` intentionally returns `405`) because some reverse proxies and microservice ingress layers do not keep the optional long-lived SSE notification channel stable enough for reliable MCP tool calls.
+In CLI mode, pick which **core** snapshot `query` exposes:
 
 ```sh
-pnpm package:microservices
+mc8yp              # default: latest bundled release
+mc8yp --spec 2025  # use the 2025 snapshot
+mc8yp -s 2024      # short form
 ```
 
-That command creates one zip per bundled server variant in the repository root, for example:
+This only affects the bundled core view. `execute` always hits the live Cumulocity API of the selected tenant or deployed service environment.
 
-- `mc8yp-core-release-dtm-v1.2.3.zip`
-- `mc8yp-core-2026-dtm-v1.2.3.zip`
-- `mc8yp-core-2025-dtm-v1.2.3.zip`
-- `mc8yp-core-2024-dtm-v1.2.3.zip`
-
-The GitHub release workflow uses that packaging command when building tagged releases.
+---
 
 ## Development
 
-### Prerequisites
-
-- Node.js ≥24.0.0
-- pnpm
-
-### Setup
+Requires Node.js ≥ 24 and pnpm.
 
 ```sh
 pnpm install
-pnpm lint
-pnpm typecheck
-pnpm build
+pnpm test:run     # tests
+pnpm lint:fix     # lint with autofix
+pnpm typecheck    # tsc --noEmit
+pnpm build        # CLI bundle in dist/, server bundles in .output/<version>/
 ```
 
-### Testing
-
-```sh
-# Run tests
-pnpm test:run
-
-# Run benchmarks
-pnpm test:bench
-```
-
-### Run Locally From Source
-
-Build first, then point your MCP client at the compiled CLI:
-
-```sh
-pnpm build
-```
-
-Then add to your local MCP client configuration:
+Run locally from source by pointing your MCP client at the built CLI:
 
 ```json
 {
@@ -519,6 +413,26 @@ Then add to your local MCP client configuration:
   }
 }
 ```
+
+<details>
+<summary><strong>Release packaging</strong></summary>
+
+```sh
+pnpm package:microservices
+```
+
+Produces one Docker-based Cumulocity zip per bundled server variant in the repository root, e.g.:
+
+- `mc8yp-core-release-dtm-v1.2.3.zip`
+- `mc8yp-core-2026-dtm-v1.2.3.zip`
+- `mc8yp-core-2025-dtm-v1.2.3.zip`
+- `mc8yp-core-2024-dtm-v1.2.3.zip`
+
+The packaging step writes a temporary generated Dockerfile under `.c8y/`, copies the selected versioned server bundle into `/app/server/`, and installs production dependencies inside a `linux/amd64` Docker image so the per-platform native binaries of `@iso4/sandbox` resolve correctly. The deployed HTTP transport is POST-only (`GET /mcp` returns `405`) because some reverse proxies and Cumulocity ingress layers do not keep a long-lived SSE channel stable enough for reliable MCP tool calls.
+
+The build matrix is driven by [`openapi-builds.json`](openapi-builds.json). Core snapshots live under `openapi/core/`, DTM snapshots under `openapi/dtm/`.
+
+</details>
 
 ## License
 
