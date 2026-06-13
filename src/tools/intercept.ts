@@ -2,6 +2,7 @@ import * as v from 'valibot'
 import { dryRun } from '../codemode/execute'
 import type { InterceptedOp } from '../codemode/execute'
 import { c8yMcpServer } from '../server-instance'
+import { buildOpaTransactionPlan, evaluatePolicy } from '../policy'
 
 // ─────────────────────────────────────────────────────────────────────────
 // Mutating-operation summary for elicitation
@@ -108,81 +109,23 @@ function formatMutatingOpsSummary(ops: InterceptedOp[]): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// OPA transaction plan (informational — not yet evaluated against a policy)
-// ─────────────────────────────────────────────────────────────────────────
-
-interface OpaTransaction {
-  id: string
-  method: string
-  /**
-   * Exact path from the request, without query string.
-   */
-  path: string
-  /**
-   * Path with numeric/UUID segments replaced by {id}.
-   */
-  pathTemplate: string
-  /**
-   * Extracted resource ID, or null when path has no trailing ID segment.
-   */
-  resourceId: string | null
-  /**
-   * Parsed query parameters, or null when none present.
-   */
-  queryParams: Record<string, string> | null
-  /**
-   * Parsed request body, or null for bodyless methods.
-   */
-  body: unknown
-}
-
-export interface OpaTransactionPlan {
-  input: {
-    principal: { tenant: string }
-    transactions: OpaTransaction[]
-    context: { tool: 'mc8yp-execute' }
-  }
-}
-
-function buildOpaTransactionPlan(ops: InterceptedOp[], tenantUrl: string): OpaTransactionPlan {
-  return {
-    input: {
-      principal: { tenant: tenantUrl },
-      transactions: ops.map((op, i) => {
-        const [pathPart, qs] = op.path.split('?', 2) as [string, string | undefined]
-        const { base, id: resourceId } = canonicalize(op.path)
-        const pathTemplate = base.split('?')[0] as string
-        const queryParams = qs
-          ? Object.fromEntries(new URLSearchParams(qs))
-          : null
-        return {
-          id: `op-${i}`,
-          method: op.method,
-          path: pathPart,
-          pathTemplate,
-          resourceId,
-          queryParams,
-          body: op.body,
-        }
-      }),
-      context: { tool: 'mc8yp-execute' },
-    },
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────
 // Elicitation workflow
 // ─────────────────────────────────────────────────────────────────────────
 
 /**
  * Runs a dry-run of the given code and, if POST/PUT/DELETE operations are
- * detected, asks the user for approval via MCP elicitation.
+ * detected, applies the OPA policy (when `--policy-data` was supplied) or
+ * falls back to MCP elicitation.
+ *
+ * OPA decisions:
+ *   allow  — proceed silently, no prompt
+ *   elicit — show the approval prompt (same as the no-policy fallback)
+ *   deny   — auto-reject without prompting
  *
  * Returns null if execution should proceed, or an error string if blocked.
  * @param code The JavaScript code to analyze, as a zero-parameter function expression.
- * @param opa Whether to include the OPA transaction plan in the approval prompt (informational only, not yet evaluated against a real policy).
  */
-export async function requireMutatingApproval(code: string, opa: boolean = false): Promise<string | null> {
+export async function evaluatePolicies(code: string): Promise<string | null> {
   const ops = await dryRun(code)
   const mutating = ops.filter((o) => o.method === 'POST' || o.method === 'PUT' || o.method === 'DELETE')
 
@@ -190,17 +133,33 @@ export async function requireMutatingApproval(code: string, opa: boolean = false
     return null
 
   const tenantUrl = c8yMcpServer.ctx.custom?.auth?.tenantUrl ?? '(unknown)'
-  const plan = buildOpaTransactionPlan(mutating, tenantUrl)
+  const policyDataPath = c8yMcpServer.ctx.custom?.policyDataPath
 
+  // ── OPA policy evaluation ──────────────────────────────────────────────
+  if (policyDataPath) {
+    const plan = buildOpaTransactionPlan(mutating, tenantUrl)
+    let decision
+    try {
+      decision = await evaluatePolicy(plan, policyDataPath)
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err)
+      return `Execution blocked: OPA policy evaluation failed — ${reason}`
+    }
+
+    if (decision.action === 'allow')
+      return null
+    if (decision.action === 'deny') {
+      const reasons = decision.denyReasons.length > 0
+        ? `\n${decision.denyReasons.map((r) => `- ${r}`).join('\n')}`
+        : ''
+      return `Execution blocked by policy.${reasons}`
+    }
+    // action === 'elicit' → fall through to the elicitation prompt below
+  }
+
+  // ── Elicitation (no policy data, or policy says "elicit") ─────────────
   const message = [
     formatMutatingOpsSummary(mutating),
-    ...(opa
-      ? [
-          '',
-          '── OPA Transaction Plan (informational) ──',
-          JSON.stringify(plan, null, 2),
-        ]
-      : []),
   ].join('\n')
 
   // v.optional allows undefined content when action is 'decline' or 'cancel',

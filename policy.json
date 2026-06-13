@@ -1,0 +1,21 @@
+{
+  "allowed_tenants": [
+    "https://dtm-sb5.preprod.c8y.io"
+  ],
+  "path_policies": [
+    { "action": "allow",  "method": "GET",    "path_glob": "/**" },
+    { "action": "allow",  "method": "POST",   "path_glob": "/**" },
+    { "action": "elicit", "method": "PUT",    "path_glob": "/**" },
+    { "action": "elicit", "method": "DELETE", "path_glob": "/**" }
+  ],
+  "limits": {
+    "max_deletes_per_transaction": 10
+  },
+  "restricted_body_fields": [
+    "id",
+    "self",
+    "owner",
+    "lastUpdated",
+    "creationTime"
+  ]
+}
