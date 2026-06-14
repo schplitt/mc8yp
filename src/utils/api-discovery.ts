@@ -13,6 +13,7 @@
 import consola from 'consola'
 import type { Client, IApplication } from '@c8y/client'
 import { c8yErrorSummary } from './client'
+import { resolveCodeModeExtension } from './resolve-xcodemode'
 import type { PathItem, Spec } from './spec-resolution'
 
 // ---------------------------------------------------------------------------
@@ -251,12 +252,16 @@ export async function discoverApiSpecs(client: Client, tenantId: string): Promis
         const specRes = await client.core.fetch(`${servicePrefix}/${entry.path.replace(/^\//, '')}`)
         if (!specRes.ok)
           continue
+
+        const resolvedSpec = await specRes.json() as Spec
+        resolveCodeModeExtension(resolvedSpec, servicePrefix)
+
         specs.push({
           contextPath: app.contextPath,
           appLabel: app.name,
           specLabel: entry.label,
           servicePrefix,
-          spec: rewriteDiscoveredSpecPaths(await specRes.json() as Spec, servicePrefix),
+          spec: rewriteDiscoveredSpecPaths(resolvedSpec, servicePrefix),
         })
       } catch { /* skip individual spec failures */ }
     }

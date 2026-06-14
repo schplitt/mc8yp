@@ -48,6 +48,15 @@ ${getOpenApiNote()}
 Available bindings (all zero-parameter — do NOT declare these as function parameters):
 
 \`\`\`ts
+type XCodemodeItem = {
+  instruction: string      // always present — standalone guidance or LLM-only context
+  // include-mode: prerequisite spec embedded inline — follow before executing
+  includedPath?: string    // service-prefixed path to use in cumulocity.request()
+  includedSpec?: PathItem  // full operations & schemas for the prerequisite endpoint
+  // query-mode: advisory hint — query only if the user's request requires it
+  queryPath?: string       // service-prefixed path to query if the dependency applies
+}
+
 type OperationInfo = {
   summary?: string
   description?: string
@@ -55,6 +64,7 @@ type OperationInfo = {
   parameters?: Array<{ name: string, in: string, required?: boolean, schema?: unknown, description?: string }>
   requestBody?: { required?: boolean, content?: Record<string, { schema?: unknown }> }
   responses?: Record<string, { description?: string, content?: Record<string, { schema?: unknown }> }>
+  'x-codemode'?: XCodemodeItem[]
 }
 
 type PathItem = {

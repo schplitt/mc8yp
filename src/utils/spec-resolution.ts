@@ -2,6 +2,15 @@ import { BUNDLED_SERVICE_SPECS } from '#bundled-services'
 import { getCoreOpenApiSpec } from '#core-openapi'
 import type { DiscoveredApiSpec } from './api-discovery'
 
+interface XCodemodeItem {
+  instruction: string
+  include?: string
+  includedPath?: string
+  includedSpec?: PathItem
+  query?: string
+  queryPath?: string
+}
+
 interface OperationInfo {
   summary?: string
   description?: string
@@ -9,6 +18,7 @@ interface OperationInfo {
   parameters?: Array<{ name: string, in: string, required?: boolean, schema?: unknown, description?: string }>
   requestBody?: { required?: boolean, content?: Record<string, { schema?: unknown }> }
   responses?: Record<string, { description?: string, content?: Record<string, { schema?: unknown }> }>
+  'x-codemode'?: XCodemodeItem[]
 }
 
 export interface PathItem {

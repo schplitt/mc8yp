@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'tsdown'
+import { resolveCodeModeExtension } from './src/utils/resolve-xcodemode.ts'
+import type { Spec } from './src/utils/spec-resolution.ts'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
@@ -57,6 +59,7 @@ function rewriteSpecPaths(specJson: string, servicePrefix: string): string {
     paths?: Record<string, unknown>
     servers?: Array<{ url: string, description?: string }>
   }
+  resolveCodeModeExtension(spec as unknown as Spec, servicePrefix)
   if (spec.paths) {
     const rewritten: Record<string, unknown> = {}
     for (const [p, item] of Object.entries(spec.paths)) {
