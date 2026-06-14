@@ -13,6 +13,7 @@ trustPolicyExclude:
   - tinyexec@1.2.2
 
 catalog:
+  '@apidevtools/json-schema-ref-parser': ^15.3.6
   '@c8y/client': ^1023.83.4
   '@clack/prompts': ^1.5.1
   '@iso4/fetch': ^0.0.1
