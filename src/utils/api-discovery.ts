@@ -14,6 +14,7 @@ import consola from 'consola'
 import type { Client, IApplication } from '@c8y/client'
 import { c8yErrorSummary } from './client'
 import { resolveCodeModeExtension } from './resolve-xcodemode'
+import { resolveInternalRefs } from './resolve-refs'
 import type { PathItem, Spec } from './spec-resolution'
 
 // ---------------------------------------------------------------------------
@@ -253,9 +254,8 @@ export async function discoverApiSpecs(client: Client, tenantId: string): Promis
         if (!specRes.ok)
           continue
 
-        const resolvedSpec = await specRes.json() as Spec
+        const resolvedSpec = await resolveInternalRefs(await specRes.json() as Spec)
         resolveCodeModeExtension(resolvedSpec, servicePrefix)
-
         specs.push({
           contextPath: app.contextPath,
           appLabel: app.name,

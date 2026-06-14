@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'tsdown'
 import { resolveCodeModeExtension } from './src/utils/resolve-xcodemode.ts'
 import type { Spec } from './src/utils/spec-resolution.ts'
+import { resolveInternalRefs } from './src/utils/resolve-refs.ts'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
@@ -54,47 +55,61 @@ function getSourceConfig(api: OpenApiModuleName, version: string): OpenApiSource
   return entry
 }
 
-function rewriteSpecPaths(specJson: string, servicePrefix: string): string {
-  const spec = JSON.parse(specJson) as {
+/**
+ * Parse a raw spec JSON string, dereference its internal $ref pointers, then
+ * (optionally) rewrite paths/servers with the service prefix. Returns a JSON
+ * string ready to inline into a generated module.
+ *
+ * $ref resolution happens here so the bundled specs that ship in the build
+ * carry fully inlined schemas, matching the resolution applied to live
+ * discovered specs at runtime (see src/utils/resolve-refs.ts).
+ * @param specJson Raw spec contents read from disk.
+ * @param servicePrefix Optional prefix to prepend to paths/servers (service specs only).
+ */
+async function prepareSpecJson(specJson: string, servicePrefix?: string): Promise<string> {
+  const spec = await resolveInternalRefs(JSON.parse(specJson) as {
     paths?: Record<string, unknown>
     servers?: Array<{ url: string, description?: string }>
-  }
+  })
   resolveCodeModeExtension(spec as unknown as Spec, servicePrefix)
-  if (spec.paths) {
-    const rewritten: Record<string, unknown> = {}
-    for (const [p, item] of Object.entries(spec.paths)) {
-      rewritten[`${servicePrefix}${p}`] = item
+  if (servicePrefix) {
+    if (spec.paths) {
+      const rewritten: Record<string, unknown> = {}
+      for (const [p, item] of Object.entries(spec.paths)) {
+        rewritten[`${servicePrefix}${p}`] = item
+      }
+      spec.paths = rewritten
     }
-    spec.paths = rewritten
-  }
-  if (spec.servers) {
-    spec.servers = spec.servers.map((server) => ({
-      ...server,
-      url: server.url.replace('<TENANT_DOMAIN>', `<TENANT_DOMAIN>${servicePrefix}`),
-    }))
+    if (spec.servers) {
+      spec.servers = spec.servers.map((server) => ({
+        ...server,
+        url: server.url.replace('<TENANT_DOMAIN>', `<TENANT_DOMAIN>${servicePrefix}`),
+      }))
+    }
   }
   return JSON.stringify(spec)
 }
 
-function readSpecJson(api: OpenApiModuleName, version: string): string {
+async function readSpecJson(api: OpenApiModuleName, version: string): Promise<string> {
   const raw = readFileSync(path.join(rootDir, 'openapi', api, `${version}.json`), 'utf8').trim()
   const source = getSourceConfig(api, version)
-  return source.servicePrefix ? rewriteSpecPaths(raw, source.servicePrefix) : raw
+  return prepareSpecJson(raw, source.servicePrefix)
 }
 
-function generateEntries(api: OpenApiModuleName, versions: readonly string[]): string {
-  return versions.map((version) => {
+async function generateEntries(api: OpenApiModuleName, versions: readonly string[]): Promise<string> {
+  const lines = await Promise.all(versions.map(async (version) => {
     const source = getSourceConfig(api, version)
-    return `  { version: ${JSON.stringify(version)}, label: ${JSON.stringify(source.label)}, spec: ${readSpecJson(api, version)} },`
-  }).join('\n')
+    return `  { version: ${JSON.stringify(version)}, label: ${JSON.stringify(source.label)}, spec: ${await readSpecJson(api, version)} },`
+  }))
+  return lines.join('\n')
 }
 
-function generateCliModule(api: OpenApiModuleName): string {
+async function generateCliModule(api: OpenApiModuleName): Promise<string> {
   const moduleInfo = OPENAPI_MODULES[api]
   const versions = OPENAPI_CONFIG.sources[api].map((entry) => entry.version)
   const defaultVersion = OPENAPI_CONFIG.sources[api].find((entry) => entry.default)?.version ?? versions[0] ?? 'release'
 
-  return `export const ${moduleInfo.entryConst} = Object.freeze([\n${generateEntries(api, versions)}\n]);
+  return `export const ${moduleInfo.entryConst} = Object.freeze([\n${await generateEntries(api, versions)}\n]);
 let activeVersion = ${JSON.stringify(defaultVersion)};
 export function ${moduleInfo.getSpec}() {
   return ${moduleInfo.entryConst}.find((entry) => entry.version === activeVersion)?.spec ?? ${moduleInfo.entryConst}[0]?.spec;
@@ -114,12 +129,12 @@ export function ${moduleInfo.getLabel}() {
 `
 }
 
-function generateServerModule(api: OpenApiModuleName, build: OpenApiBuildEntry): string {
+async function generateServerModule(api: OpenApiModuleName, build: OpenApiBuildEntry): Promise<string> {
   const moduleInfo = OPENAPI_MODULES[api]
   const version = build.apis[api]
   const label = getSourceConfig(api, version).label
 
-  return `export const ${moduleInfo.entryConst} = Object.freeze([\n${generateEntries(api, [version])}\n]);
+  return `export const ${moduleInfo.entryConst} = Object.freeze([\n${await generateEntries(api, [version])}\n]);
 export function ${moduleInfo.getSpec}() {
   return ${moduleInfo.entryConst}[0]?.spec;
 }
@@ -183,7 +198,7 @@ export function bundledServicesPlugin(options: { mode: 'cli' } | { mode: 'server
         return RESOLVED_ID
       return null
     },
-    load(id: string) {
+    async load(id: string) {
       if (id !== RESOLVED_ID)
         return null
 
@@ -208,7 +223,7 @@ export function bundledServicesPlugin(options: { mode: 'cli' } | { mode: 'server
           continue
 
         const rawJson = readFileSync(path.join(rootDir, 'openapi', key, `${version}.json`), 'utf8').trim()
-        const rewrittenJson = rewriteSpecPaths(rawJson, entry.servicePrefix)
+        const rewrittenJson = await prepareSpecJson(rawJson, entry.servicePrefix)
         const contextPath = entry.servicePrefix.replace(/^\/service\//, '')
 
         entryLines.push(

@@ -51,6 +51,7 @@
     "@napi-rs/keyring": "catalog:"
   },
   "devDependencies": {
+    "@apidevtools/json-schema-ref-parser": "catalog:",
     "@c8y/client": "catalog:",
     "@clack/prompts": "catalog:",
     "@iso4/fetch": "catalog:",
