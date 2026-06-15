@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -251,7 +251,7 @@ describe('preprocessOpenApi — opt-in rules', () => {
                       readOnly: false,
                       nullable: false,
                       deprecated: false,
-                      required: ['id'],  // array form — must NOT be removed
+                      required: ['id'], // array form — must NOT be removed
                       properties: { id: { type: 'string', readOnly: false } },
                     },
                   },
@@ -269,10 +269,10 @@ describe('preprocessOpenApi — opt-in rules', () => {
     expect(schema.readOnly).toBeUndefined()
     expect(schema.nullable).toBeUndefined()
     expect(schema.deprecated).toBeUndefined()
-    expect(schema.required).toEqual(['id'])  // array form preserved
+    expect(schema.required).toEqual(['id']) // array form preserved
     expect(schema.properties.id.readOnly).toBeUndefined()
-    expect(out.paths['/x'].get.parameters[0].required).toBeUndefined()  // boolean false removed
-    expect(out.paths['/x'].get.parameters[0].name).toBe('q')  // rest intact
+    expect(out.paths['/x'].get.parameters[0].required).toBeUndefined() // boolean false removed
+    expect(out.paths['/x'].get.parameters[0].name).toBe('q') // rest intact
   })
 
   it('dropSchemaDefaults is on by default', async () => {
@@ -383,7 +383,7 @@ describe('preprocessOpenApi — real DTM spec', () => {
     const minifiedSize = minifiedStr.length
 
     // write minifiedStr to file
-    writeFileSync(path.join(rootDir, 'openapi', 'dtm', 'release.min.json'), JSON.stringify(minified, null, 2), 'utf8')
+    // writeFileSync(path.join(rootDir, 'openapi', 'dtm', 'release.min.json'), JSON.stringify(minified, null, 2), 'utf8')
 
     // Round-trips cleanly (JSON-serialisable invariant for the sandbox).
     expect(() => JSON.parse(JSON.stringify(minified))).not.toThrow()
