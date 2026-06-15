@@ -255,7 +255,7 @@ const SCHEMA_DEFAULTS: Record<string, unknown> = {
   deprecated: false,
   exclusiveMinimum: false, // JSON Schema draft 4 boolean form only
   exclusiveMaximum: false, // JSON Schema draft 4 boolean form only
-  required: false,          // OpenAPI parameter field (not the schema array form)
+  required: false, // OpenAPI parameter field (not the schema array form)
 }
 
 function dropSchemaDefaults(node: unknown): void {
@@ -263,7 +263,8 @@ function dropSchemaDefaults(node: unknown): void {
     for (const item of node) dropSchemaDefaults(item)
     return
   }
-  if (!isRecord(node)) return
+  if (!isRecord(node))
+    return
   for (const key of Object.keys(node)) {
     if (Object.hasOwn(SCHEMA_DEFAULTS, key) && node[key] === SCHEMA_DEFAULTS[key])
       delete node[key]
