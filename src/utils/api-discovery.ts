@@ -13,7 +13,7 @@
 import consola from 'consola'
 import type { Client, IApplication } from '@c8y/client'
 import { c8yErrorSummary } from './client'
-import { resolveInternalRefs } from './resolve-refs'
+import { DEFAULT_PREPROCESS_OPTIONS, preprocessOpenApi } from './openapi-preprocessor'
 import type { PathItem, Spec } from './spec-resolution'
 
 // ---------------------------------------------------------------------------
@@ -252,7 +252,7 @@ export async function discoverApiSpecs(client: Client, tenantId: string): Promis
         const specRes = await client.core.fetch(`${servicePrefix}/${entry.path.replace(/^\//, '')}`)
         if (!specRes.ok)
           continue
-        const resolvedSpec = await resolveInternalRefs(await specRes.json() as Spec)
+        const resolvedSpec = await preprocessOpenApi(await specRes.json() as Spec, DEFAULT_PREPROCESS_OPTIONS)
         specs.push({
           contextPath: app.contextPath,
           appLabel: app.name,
