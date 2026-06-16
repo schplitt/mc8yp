@@ -29,7 +29,8 @@
       {
         "version": "2024",
         "label": "2024",
-        "url": "https://cumulocity.com/api/core/2024/dist/c8y-oas.json"
+        "url": "https://cumulocity.com/api/core/2024/dist/c8y-oas.json",
+        "frozen": true
       }
     ]
   },

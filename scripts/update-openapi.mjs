@@ -11,15 +11,21 @@ const outputDir = path.join(rootDir, 'openapi')
 
 const config = JSON.parse(fs.readFileSync(openApiConfigPath, 'utf8'))
 
-/** @type {Array<{ api: string, version: string, status: 'unchanged' | 'updated' | 'created' | 'error', detail?: string }>} */
+/** @type {Array<{ api: string, version: string, status: 'unchanged' | 'updated' | 'created' | 'error' | 'skipped', detail?: string }>} */
 const results = []
 let hasErrors = false
 
 for (const [api, entries] of Object.entries(config.sources)) {
   for (const entry of entries) {
-    const { version, label, url } = entry
+    const { version, label, url, frozen } = entry
     const apiOutputDir = path.join(outputDir, api)
     const outputPath = path.join(apiOutputDir, `${version}.json`)
+
+    if (frozen) {
+      console.log(`Skipping ${api} ${label} (${version}) — frozen`)
+      results.push({ api, version, status: 'skipped', detail: 'frozen' })
+      continue
+    }
 
     process.stdout.write(`Fetching ${api} ${label} (${version}) ... `)
 
@@ -74,7 +80,7 @@ for (const [api, entries] of Object.entries(config.sources)) {
 
 console.log('\nSummary:')
 for (const result of results) {
-  const icon = result.status === 'error' ? '✗' : result.status === 'unchanged' ? '·' : '✓'
+  const icon = result.status === 'error' ? '✗' : result.status === 'skipped' ? '⏭' : result.status === 'unchanged' ? '·' : '✓'
   const detail = result.detail ? ` — ${result.detail}` : ''
   console.log(`  ${icon} ${result.api}@${result.version}: ${result.status}${detail}`)
 }
