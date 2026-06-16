@@ -2706,7 +2706,16 @@
             "Basic": []
           }
         ],
-        "x-c8y-client-semantic": "create"
+        "x-c8y-client-semantic": "create",
+        "x-codemode": [
+          {
+            "instruction": "When creating an Asset Definition, you might want to link it to an existing Property Definition. Before creating the Asset Definition, ensure Property Definitions are in place by checking existing Definitions or creating new ones for the required properties (fragments). Once you have the necessary Property Definitions, reference them in the Asset Definition.",
+            "include": "/definitions/properties"
+          },
+          {
+            "instruction": "Create Asset Definitions for hierarchies in dependency order. When creating multiple Asset Definitions that reference each other in a parent-child hierarchy, ensure to create the child Asset Definitions before the parent ones. This way, when you can create the parent Asset Definition, all referenced child Asset Definitions will already exist, preventing any reference errors during creation."
+          }
+        ]
       }
     },
     "/definitions/alarms": {

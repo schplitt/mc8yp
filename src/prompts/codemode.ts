@@ -55,6 +55,15 @@ Use \`query\` to inspect OpenAPI specs (bundled core or discovered microservices
 The function must accept **no parameters**. The bindings below are scope-level constants, not function arguments.
 
 \`\`\`ts
+type XCodemodeItem = {
+  instruction: string      // always present — standalone guidance or LLM-only context
+  // include-mode: prerequisite spec embedded inline — follow before executing
+  includedPath?: string    // service-prefixed path to use in cumulocity.request()
+  includedSpec?: PathItem  // full operations & schemas for the prerequisite endpoint
+  // query-mode: advisory hint — query only if the user's request requires it
+  queryPath?: string       // service-prefixed path to query if the dependency applies
+}
+
 type OperationInfo = {
   summary?: string
   description?: string
@@ -62,6 +71,7 @@ type OperationInfo = {
   parameters?: Array<{ name: string, in: string, required?: boolean, schema?: unknown, description?: string }>
   requestBody?: { required?: boolean, content?: Record<string, { schema?: unknown }> }
   responses?: Record<string, { description?: string, content?: Record<string, { schema?: unknown }> }>
+  'x-codemode'?: XCodemodeItem[]
 }
 
 type PathItem = {
@@ -155,8 +165,12 @@ ${getOpenApiSection()}
 
 ## Working Pattern
 1. Use \`query\` to find the right endpoint, parameters, and response shape.
-2. Use \`execute\` with a small async function expression that calls that endpoint and returns only the needed result.
-3. Keep functions small and return only the data needed for the next reasoning step.
+2. Check the operation for \`x-codemode\` hints and act on every item in the array before executing:
+   - **Instruction only** (no path fields): follow the instruction — it describes idempotency behavior, required headers, or other LLM-only context not surfaced in standard API docs.
+   - **\`includedPath\` + \`includedSpec\` present**: mandatory prerequisite — fulfill the instruction completely before executing the target operation. The embedded spec contains everything needed (schemas, parameters) to complete the prerequisite step without an additional query.
+   - **\`queryPath\` present** (no \`includedSpec\`): optional dependency — query that path only if the user's actual request requires it. Skip if the dependency does not apply to the specific request.
+3. Use \`execute\` with a small async function expression that calls that endpoint and returns only the needed result.
+4. Keep functions small and return only the data needed for the next reasoning step.
 ${restrictionSection}
 `,
     )
