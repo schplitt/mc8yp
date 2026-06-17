@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'tsdown'
-import { preprocessOpenApi } from './src/utils/openapi-preprocessor'
+import { preprocessOpenApi } from './src/utils/openapi-preprocessor.ts'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 

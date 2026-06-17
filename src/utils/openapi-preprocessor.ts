@@ -1,4 +1,4 @@
-import { resolveInternalRefs } from './resolve-refs'
+import { resolveInternalRefs } from './resolve-refs.ts'
 
 const PRESERVED_EXTENSION = 'x-codemode'
 
