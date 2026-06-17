@@ -1,36 +1,12 @@
-/**
- * Internal $ref resolution for OpenAPI documents.
- *
- * Both the build-time bundled specs (tsdown.config.ts) and the live-discovered
- * specs (api-discovery.ts) are run through this before use so consumers — the
- * code-mode query sandbox, prompt builders, tool generation — see fully inlined
- * schemas instead of `$ref` pointers.
- */
-
 import $RefParser from '@apidevtools/json-schema-ref-parser'
 
-/**
- * Dereference same-document ($ref: "#/...") pointers in place and return the
- * spec with refs inlined.
- *
- * - External file/URL resolution is disabled (`resolve.external = false`), so
- *   the operation is purely in-memory: no disk or network access, and only
- *   internal references are touched.
- * - Circular references are left untouched (`circular: 'ignore'`) so the result
- *   stays JSON-serialisable. The specs are later `JSON.stringify`'d into the
- *   sandbox entry script and inlined into the build output; a dereferenced
- *   circular structure would throw "Converting circular structure to JSON".
- * - After `$RefParser` runs, a second pass ({@link resolveRemainingRefs})
- *   expands any `$ref` pointers the parser left unresolved due to its
- *   conservative circular-reference detection. `$RefParser` leaves the entire
- *   reference chain to a circular schema unexpanded even when only one link in
- *   that chain is actually circular. The second pass inlines each remaining ref
- *   and stops only at the exact re-entry that would form a cycle.
- *
- * On any parser error the original spec is returned unchanged so a malformed
- * or unusual document never breaks spec loading.
- * @param spec OpenAPI document to dereference. Mutated in place on success.
- */
+// Dereference same-document `$ref`s. `circular: 'ignore'` keeps the result
+// JSON-serialisable — the spec is later `JSON.stringify`'d into the sandbox
+// script. On parser error, return the input untouched.
+//
+// $RefParser is conservative about cycles: any `$ref` chain that touches a
+// recursive schema is left entirely unresolved. `resolveRemainingRefs` below
+// expands those, stopping only at the exact re-entry that would close a cycle.
 export async function resolveInternalRefs<T extends object>(spec: T): Promise<T> {
   let result: T
   try {
@@ -45,27 +21,12 @@ export async function resolveInternalRefs<T extends object>(spec: T): Promise<T>
   return result
 }
 
-/**
- * Expand `$ref` pointers left unresolved by `$RefParser` due to conservative
- * circular-reference detection. Runs on all top-level spec sections except
- * `components`/`definitions` — expanding within those containers would cause
- * unbounded self-inlining of recursive schemas.
- *
- * Uses a per-path expanding set: a `$ref` to schema X is left as-is only when
- * X is already open in the current traversal path (i.e. the exact occurrence
- * that closes a cycle), not globally. This allows `PaginatedList → Item ↺`
- * to inline `Item` into `PaginatedList` while leaving `Item`'s self-ref intact.
- *
- * The result is always JSON-serialisable: schemas are deep-cloned before
- * inlining, so no JS circular object references are created.
- *
- * @param spec The dereferenced OpenAPI document to process. Mutated in place.
- */
+// Skip components/definitions: expanding inside them would unfold recursive
+// schemas without bound. Their refs are reached via the path-level uses.
 function resolveRemainingRefs(spec: Record<string, unknown>): void {
   const schemaMap = buildSchemaMap(spec)
   if (schemaMap.size === 0)
     return
-
   for (const key of Object.keys(spec)) {
     if (key === 'components' || key === 'definitions')
       continue
@@ -91,6 +52,9 @@ function buildSchemaMap(spec: Record<string, unknown>): Map<string, unknown> {
   return map
 }
 
+// `expanding` is per-path: a `$ref` to X is kept only when X is already open
+// in this branch (the occurrence that closes a cycle). Deep-clone before
+// inlining so the result holds no JS circular references.
 function expandRefs(node: unknown, schemaMap: Map<string, unknown>, expanding: ReadonlySet<string>): unknown {
   if (Array.isArray(node)) {
     let changed = false
@@ -112,8 +76,6 @@ function expandRefs(node: unknown, schemaMap: Map<string, unknown>, expanding: R
       if (target !== undefined) {
         const newExpanding = new Set(expanding)
         newExpanding.add(ref)
-        // Deep-clone so mutations during expansion don't corrupt the source
-        // entry and so the result has no JS circular object references.
         const cloned = JSON.parse(JSON.stringify(target)) as unknown
         return expandRefs(cloned, schemaMap, newExpanding)
       }

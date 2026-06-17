@@ -2,8 +2,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'tsdown'
-import { minifySpec, PRODUCTION_MINIFY_RULES } from './src/utils/openapi-minify.ts'
-import { resolveInternalRefs } from './src/utils/resolve-refs.ts'
+import { preprocessOpenApi } from './src/utils/openapi-preprocessor'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
@@ -54,23 +53,11 @@ function getSourceConfig(api: OpenApiModuleName, version: string): OpenApiSource
   return entry
 }
 
-/**
- * Parse a raw spec JSON string, run it through the OpenAPI preprocessor
- * (dereference + minify), then (optionally) rewrite paths/servers with the
- * service prefix. Returns a JSON string ready to inline into a generated module.
- *
- * Preprocessing happens here so the bundled specs that ship in the build carry
- * fully inlined, minified schemas, matching the preprocessing applied to live
- * discovered specs at runtime (see src/utils/openapi-preprocessor.ts).
- * @param specJson Raw spec contents read from disk.
- * @param servicePrefix Optional prefix to prepend to paths/servers (service specs only).
- */
 async function prepareSpecJson(specJson: string, servicePrefix?: string): Promise<string> {
-  const spec = await resolveInternalRefs(JSON.parse(specJson) as {
+  const spec = await preprocessOpenApi(JSON.parse(specJson) as {
     paths?: Record<string, unknown>
     servers?: Array<{ url: string, description?: string }>
   })
-  minifySpec(spec as Record<string, unknown>, PRODUCTION_MINIFY_RULES)
   if (servicePrefix) {
     if (spec.paths) {
       const rewritten: Record<string, unknown> = {}
