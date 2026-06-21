@@ -182,6 +182,23 @@ export function createCumulocitySafeFetch(
 // Code generation
 // ─────────────────────────────────────────────────────────────────────────
 
+const QUERY_BUILDER_SOURCE = `\
+/**
+ * Builds a Cumulocity query string for parameters of name "query" or with schema.format "c8y:query".
+ * Use to filter server-side. This is always the preferred method if query parameters are present (max pageSize 2000).
+ * No like/in operators — use eq with * wildcards (name eq '*pat*') or or-chains for multi-value.
+ * To get query syntax documentation run query tool → () => coreSpec.tags.find(t => t.name === 'Query language')?.description
+ * Use the path exactly as it appears in serviceSpecs — never prepend /service/<key>.
+ * @example /inventory/managedObjects?\${queryBuilder({ filter: "type eq 'c8y_Firmware'" })}
+ * @example <path>?\${queryBuilder({ filter: "name eq '*Ctrl*'", orderby: "name asc" })}
+ */
+function queryBuilder({ filter, orderby, pageSize = 2000 } = {}) {
+  const parts = []
+  if (filter) parts.push('$filter=' + filter)
+  if (orderby) parts.push('$orderby=' + orderby)
+  return (parts.length ? 'query=' + parts.join(' ') + '&' : '') + 'pageSize=' + pageSize
+}`
+
 function normalizeCode(functionCode: string): string {
   return functionCode
     .trim()
@@ -316,6 +333,7 @@ export async function execute(functionCode: string): Promise<string> {
 
   const functionExpression = normalizeCode(functionCode)
   const code = [
+    QUERY_BUILDER_SOURCE,
     `const __mc8ypExecute = (${functionExpression});`,
     'if (typeof __mc8ypExecute !== "function") { throw new TypeError("Execute code must evaluate to a function.") }',
     'export default await __mc8ypExecute();',

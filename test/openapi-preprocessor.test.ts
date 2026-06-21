@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -292,6 +292,7 @@ describe('preprocessOpenApi — options', () => {
       dropTags: false,
       dropEmptySecurity: true,
       dropSchemaDefaults: true,
+      annotateQueryParams: true,
       servicePrefix: '',
     })
   })
@@ -356,18 +357,104 @@ describe('preprocessOpenApi — servicePrefix', () => {
   })
 })
 
+describe('preprocessOpenApi — annotateQueryParams', () => {
+  it('stamps format on a query param whose description references $filter', async () => {
+    const spec = clone({
+      paths: {
+        '/foo': {
+          get: {
+            parameters: [{ name: 'query', in: 'query', description: 'Use the $filter keyword to filter results.', schema: { type: 'string' } }],
+            responses: { 200: {} },
+          },
+        },
+      },
+    })
+    const out = await preprocessOpenApi(spec) as any
+    expect(out.paths['/foo'].get.parameters[0].schema.format).toBe('c8y:query')
+  })
+
+  it('does not stamp unrelated query params', async () => {
+    const spec = clone({
+      paths: {
+        '/foo': {
+          get: {
+            parameters: [{ name: 'query', in: 'query', description: 'Free text search term.', schema: { type: 'string' } }],
+            responses: { 200: {} },
+          },
+        },
+      },
+    })
+    const out = await preprocessOpenApi(spec) as any
+    expect(out.paths['/foo'].get.parameters[0].schema?.format).toBeUndefined()
+  })
+
+  it('does not stamp non-query-position params', async () => {
+    const spec = clone({
+      paths: {
+        '/foo/{query}': {
+          get: {
+            parameters: [{ name: 'query', in: 'path', description: 'Use the $filter keyword.', schema: { type: 'string' } }],
+            responses: { 200: {} },
+          },
+        },
+      },
+    })
+    const out = await preprocessOpenApi(spec) as any
+    expect(out.paths['/foo/{query}'].get.parameters[0].schema?.format).toBeUndefined()
+  })
+
+  it('can be disabled via annotateQueryParams: false', async () => {
+    const spec = clone({
+      paths: {
+        '/foo': {
+          get: {
+            parameters: [{ name: 'query', in: 'query', description: 'Use the $filter keyword.', schema: { type: 'string' } }],
+            responses: { 200: {} },
+          },
+        },
+      },
+    })
+    const out = await preprocessOpenApi(spec, { annotateQueryParams: false }) as any
+    expect(out.paths['/foo'].get.parameters[0].schema?.format).toBeUndefined()
+  })
+
+  it('annotates all DTM query-language params in the real spec', async () => {
+    const raw = readFileSync(path.join(rootDir, 'openapi', 'dtm', 'release.json'), 'utf8')
+    const out = await preprocessOpenApi(JSON.parse(raw)) as any
+    const queryParams: any[] = []
+    for (const pathItem of Object.values(out.paths) as any[]) {
+      for (const op of Object.values(pathItem) as any[]) {
+        if (!op?.parameters)
+          continue
+        for (const p of op.parameters) {
+          if (p.name === 'query' && p.in === 'query')
+            queryParams.push(p)
+        }
+      }
+    }
+    expect(queryParams.length).toBeGreaterThan(0)
+    expect(queryParams.every((p: any) => p.schema?.format === 'c8y:query')).toBe(true)
+  })
+})
 
 describe('preprocessOpenApi — real DTM spec', () => {
   const raw = readFileSync(path.join(rootDir, 'openapi', 'dtm', 'release.json'), 'utf8')
 
   it('minified output is smaller than the untouched input and stays valid JSON', async () => {
     const untouched = JSON.parse(raw)
-    const minified = await preprocessOpenApi(JSON.parse(raw))
+    const minified = await preprocessOpenApi(JSON.parse(raw), { servicePrefix: '/service/dtm' }) as any
 
     const untouchedSize = JSON.stringify(untouched).length
     const minifiedSize = JSON.stringify(minified).length
 
     expect(() => JSON.parse(JSON.stringify(minified))).not.toThrow()
     expect(minifiedSize).toBeLessThan(untouchedSize * 0.95)
+  })
+
+  // use for generating a file for inspection and manual testing in the OpenAPI editor
+  it.skip('write minified DTM spec to file', async () => {
+    const minified = await preprocessOpenApi(JSON.parse(raw), { servicePrefix: '/service/dtm' }) as any
+    expect(() => JSON.parse(JSON.stringify(minified))).not.toThrow()
+    writeFileSync('dtm-preprocessed.json', JSON.stringify(minified, null, 2))
   })
 })

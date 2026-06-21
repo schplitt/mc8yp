@@ -149,6 +149,14 @@ async () => {
 }
 \`\`\`
 
+## Efficient Querying
+
+Parameters with \`schema.format === 'c8y:query'\` accept Cumulocity Query Language. Use \`queryBuilder()\` — injected into every execute sandbox — to construct the query string. Always prefer server-side filtering over fetching all pages: max \`pageSize\` is 2000 and tenants can have millions of objects.
+
+Key operators: \`eq\`, \`gt\`, \`ge\`, \`lt\`, \`le\`, \`and\`, \`or\`, \`not\`, \`has()\`, \`hasany()\`, \`bygroupid()\`, \`isinhierarchyof()\`. **There is no \`like\` or \`in\`** — use \`eq\` with \`*\` wildcards for substring matches (\`name eq '*pattern*'\`, case-insensitive), and \`or\` chains for multi-value ID matching. When the ID list is large, fetch all and join in memory instead.
+
+For the full syntax reference, run the query tool: \`() => coreSpec.tags.find(t => t.name === 'Query language')?.description\`
+
 ${getRuntimeSection()}
 
 ${getOpenApiSection()}

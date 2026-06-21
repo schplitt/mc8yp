@@ -33,6 +33,9 @@ export interface PreprocessOptions {
   dropEmptySecurity?: boolean
   // Drop properties explicitly set to their implicit JSON Schema / OpenAPI default.
   dropSchemaDefaults?: boolean
+  // Stamp `schema.format: "c8y:query"` on parameters named `query` whose description
+  // references `$filter` — the Cumulocity Query Language marker.
+  annotateQueryParams?: boolean
   // Prefix all paths with this service prefix (e.g. "/service/dtm"). Idempotent:
   // paths that already start with the prefix are left unchanged.
   servicePrefix?: string
@@ -46,6 +49,7 @@ export const DEFAULT_PREPROCESS_OPTIONS: Required<PreprocessOptions> = {
   dropTags: false,
   dropEmptySecurity: true,
   dropSchemaDefaults: true,
+  annotateQueryParams: true,
   servicePrefix: '',
 }
 
@@ -60,11 +64,13 @@ export async function preprocessOpenApi<T extends object>(spec: T, options: Prep
 }
 
 export function minifySpec(spec: Record<string, unknown>, options: PreprocessOptions = {}): void {
-  const opts = { ...DEFAULT_PREPROCESS_OPTIONS, ...options }
+  const opts: Required<PreprocessOptions> = { ...DEFAULT_PREPROCESS_OPTIONS, ...options }
   if (opts.dropVendorExtensions || opts.dropSchemaMeta || opts.dropSchemaDefaults)
     cleanValues(spec, opts)
   applyStructural(spec, opts)
   pruneOrphanSchemas(spec)
+  if (opts.annotateQueryParams)
+    annotateQueryParams(spec)
 }
 
 function cleanValues(node: unknown, opts: Required<PreprocessOptions>): void {
@@ -266,6 +272,32 @@ function rewriteServicePaths(spec: Record<string, unknown>, servicePrefix: strin
   }
 }
 
+function annotateQueryParams(spec: Record<string, unknown>): void {
+  const paths = spec.paths
+  if (!isObject(paths))
+    return
+  for (const pathItem of Object.values(paths)) {
+    if (!isObject(pathItem))
+      continue
+    for (const op of Object.values(pathItem)) {
+      if (!isObject(op) || !Array.isArray(op.parameters))
+        continue
+      for (const param of op.parameters) {
+        if (
+          isObject(param)
+          && param.name === 'query'
+          && param.in === 'query'
+          && typeof param.description === 'string'
+          && param.description.includes('$filter')
+        ) {
+          if (!isObject(param.schema))
+            param.schema = {}
+          ;(param.schema as Record<string, unknown>).format = 'c8y:query'
+        }
+      }
+    }
+  }
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
