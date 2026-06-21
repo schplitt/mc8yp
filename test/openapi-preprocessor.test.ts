@@ -292,9 +292,70 @@ describe('preprocessOpenApi — options', () => {
       dropTags: true,
       dropEmptySecurity: true,
       dropSchemaDefaults: true,
+      servicePrefix: '',
     })
   })
 })
+
+describe('preprocessOpenApi — servicePrefix', () => {
+  it('prefixes paths that do not yet have the prefix', async () => {
+    const spec = clone({ paths: { '/assets': {}, '/assets/{id}': {} } })
+    const out = await preprocessOpenApi(spec, { servicePrefix: '/service/dtm' }) as any
+    expect(Object.keys(out.paths).sort()).toEqual(['/service/dtm/assets', '/service/dtm/assets/{id}'])
+  })
+
+  it('leaves paths that already have the prefix unchanged (idempotent)', async () => {
+    const spec = clone({ paths: { '/service/dtm/assets': {}, '/service/dtm/types': {} } })
+    const out = await preprocessOpenApi(spec, { servicePrefix: '/service/dtm' }) as any
+    expect(Object.keys(out.paths).sort()).toEqual(['/service/dtm/assets', '/service/dtm/types'])
+  })
+
+  it('is a no-op when servicePrefix is not provided', async () => {
+    const spec = clone({ paths: { '/assets': {} } })
+    const out = await preprocessOpenApi(spec) as any
+    expect(Object.keys(out.paths)).toEqual(['/assets'])
+  })
+
+  it('is a no-op when servicePrefix is an empty string', async () => {
+    const spec = clone({ paths: { '/assets': {} } })
+    const out = await preprocessOpenApi(spec, { servicePrefix: '' }) as any
+    expect(Object.keys(out.paths)).toEqual(['/assets'])
+  })
+
+  it('handles a mixed spec where some paths already carry the prefix', async () => {
+    const spec = clone({ paths: { '/assets': {}, '/service/dtm/types': {} } })
+    const out = await preprocessOpenApi(spec, { servicePrefix: '/service/dtm' }) as any
+    expect(Object.keys(out.paths).sort()).toEqual(['/service/dtm/assets', '/service/dtm/types'])
+  })
+
+  it('strips servicePrefix from servers url when present', async () => {
+    const spec = clone({
+      paths: { '/assets': {} },
+      servers: [{ url: 'https://<TENANT_DOMAIN>/service/dtm', description: 'DTM' }],
+    })
+    const out = await preprocessOpenApi(spec, { servicePrefix: '/service/dtm' }) as any
+    expect(out.servers[0].url).toBe('https://<TENANT_DOMAIN>')
+  })
+
+  it('strips servicePrefix with trailing slash from servers url', async () => {
+    const spec = clone({
+      paths: { '/assets': {} },
+      servers: [{ url: 'https://<TENANT_DOMAIN>/service/dtm/' }],
+    })
+    const out = await preprocessOpenApi(spec, { servicePrefix: '/service/dtm' }) as any
+    expect(out.servers[0].url).toBe('https://<TENANT_DOMAIN>')
+  })
+
+  it('leaves servers url unchanged when it does not contain servicePrefix', async () => {
+    const spec = clone({
+      paths: { '/assets': {} },
+      servers: [{ url: 'https://<TENANT_DOMAIN>' }],
+    })
+    const out = await preprocessOpenApi(spec, { servicePrefix: '/service/dtm' }) as any
+    expect(out.servers[0].url).toBe('https://<TENANT_DOMAIN>')
+  })
+})
+
 
 describe('preprocessOpenApi — real DTM spec', () => {
   const raw = readFileSync(path.join(rootDir, 'openapi', 'dtm', 'release.json'), 'utf8')

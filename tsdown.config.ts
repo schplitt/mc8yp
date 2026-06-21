@@ -54,25 +54,7 @@ function getSourceConfig(api: OpenApiModuleName, version: string): OpenApiSource
 }
 
 async function prepareSpecJson(specJson: string, servicePrefix?: string): Promise<string> {
-  const spec = await preprocessOpenApi(JSON.parse(specJson) as {
-    paths?: Record<string, unknown>
-    servers?: Array<{ url: string, description?: string }>
-  })
-  if (servicePrefix) {
-    if (spec.paths) {
-      const rewritten: Record<string, unknown> = {}
-      for (const [p, item] of Object.entries(spec.paths)) {
-        rewritten[`${servicePrefix}${p}`] = item
-      }
-      spec.paths = rewritten
-    }
-    if (spec.servers) {
-      spec.servers = spec.servers.map((server) => ({
-        ...server,
-        url: server.url.replace('<TENANT_DOMAIN>', `<TENANT_DOMAIN>${servicePrefix}`),
-      }))
-    }
-  }
+  const spec = await preprocessOpenApi(JSON.parse(specJson), { servicePrefix })
   return JSON.stringify(spec)
 }
 

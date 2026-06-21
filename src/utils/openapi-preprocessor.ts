@@ -14,6 +14,7 @@ const SCHEMA_DEFAULTS: Record<string, unknown> = {
   exclusiveMinimum: false,
   exclusiveMaximum: false,
   required: false,
+  servicePrefix: '',
 }
 
 export interface PreprocessOptions {
@@ -32,6 +33,9 @@ export interface PreprocessOptions {
   dropEmptySecurity?: boolean
   // Drop properties explicitly set to their implicit JSON Schema / OpenAPI default.
   dropSchemaDefaults?: boolean
+  // Prefix all paths with this service prefix (e.g. "/service/dtm"). Idempotent:
+  // paths that already start with the prefix are left unchanged.
+  servicePrefix?: string
 }
 
 export const DEFAULT_PREPROCESS_OPTIONS: Required<PreprocessOptions> = {
@@ -42,12 +46,16 @@ export const DEFAULT_PREPROCESS_OPTIONS: Required<PreprocessOptions> = {
   dropTags: true,
   dropEmptySecurity: true,
   dropSchemaDefaults: true,
+  servicePrefix: '',
 }
 
 export async function preprocessOpenApi<T extends object>(spec: T, options: PreprocessOptions = {}): Promise<T> {
-  const opts = { ...DEFAULT_PREPROCESS_OPTIONS, ...options }
+  const { servicePrefix, ...minifyOptions } = options
+  const opts: Required<PreprocessOptions> = { ...DEFAULT_PREPROCESS_OPTIONS, ...minifyOptions }
   const result: T = opts.dereference ? await resolveInternalRefs(spec) : spec
-  minifySpec(result as Record<string, unknown>, opts)
+  minifySpec(result as Record<string, unknown>, minifyOptions)
+  if (servicePrefix)
+    rewriteServicePaths(result as Record<string, unknown>, servicePrefix)
   return result
 }
 
@@ -233,6 +241,31 @@ function isEffectivelyEmptySecurity(value: unknown): boolean {
     (req) => isObject(req) && Object.values(req).every((scopes) => Array.isArray(scopes) && scopes.length === 0),
   )
 }
+
+function rewriteServicePaths(spec: Record<string, unknown>, servicePrefix: string): void {
+  const paths = spec.paths
+  if (isObject(paths)) {
+    const rewritten: Record<string, unknown> = {}
+    for (const [p, item] of Object.entries(paths))
+      rewritten[p.startsWith(servicePrefix) ? p : `${servicePrefix}${p}`] = item
+    spec.paths = rewritten
+  }
+
+  if (Array.isArray(spec.servers)) {
+    spec.servers = spec.servers.map((server) => {
+      if (!isObject(server) || typeof server.url !== 'string')
+        return server
+      const url = server.url
+      const stripped = url.endsWith(`${servicePrefix}/`)
+        ? url.slice(0, -(servicePrefix.length + 1))
+        : url.endsWith(servicePrefix)
+          ? url.slice(0, -servicePrefix.length)
+          : url
+      return stripped === url ? server : { ...server, url: stripped || '/' }
+    })
+  }
+}
+
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

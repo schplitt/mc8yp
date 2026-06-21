@@ -14,7 +14,7 @@ import consola from 'consola'
 import type { Client, IApplication } from '@c8y/client'
 import { c8yErrorSummary } from './client'
 import { preprocessOpenApi } from './openapi-preprocessor'
-import type { PathItem, Spec } from './spec-resolution'
+import type { Spec } from './spec-resolution'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -161,20 +161,6 @@ export function setCachedApiSpecs(
 }
 
 // ---------------------------------------------------------------------------
-// Path rewriting — mirrors the build-time rewrite in tsdown.config.ts
-// ---------------------------------------------------------------------------
-
-function rewriteDiscoveredSpecPaths(spec: Spec, servicePrefix: string): Spec {
-  const paths = spec.paths
-  if (paths && typeof paths === 'object') {
-    const rewritten: Record<string, PathItem> = {}
-    for (const [p, item] of Object.entries(paths)) rewritten[`${servicePrefix}${p}`] = item
-    spec = { ...spec, paths: rewritten }
-  }
-  return spec
-}
-
-// ---------------------------------------------------------------------------
 // Core discovery logic
 // ---------------------------------------------------------------------------
 
@@ -252,13 +238,13 @@ export async function discoverApiSpecs(client: Client, tenantId: string): Promis
         const specRes = await client.core.fetch(`${servicePrefix}/${entry.path.replace(/^\//, '')}`)
         if (!specRes.ok)
           continue
-        const resolvedSpec = await preprocessOpenApi(await specRes.json() as Spec)
+        const resolvedSpec = await preprocessOpenApi(await specRes.json() as Spec, { servicePrefix })
         specs.push({
           contextPath: app.contextPath,
           appLabel: app.name,
           specLabel: entry.label,
           servicePrefix,
-          spec: rewriteDiscoveredSpecPaths(resolvedSpec, servicePrefix),
+          spec: resolvedSpec,
         })
       } catch { /* skip individual spec failures */ }
     }
