@@ -81,6 +81,31 @@ declare const coreSpec: Spec
 declare const serviceSpecs: ${serviceSpecsType}
 \`\`\`
 
+### Tag Documentation
+
+Both \`coreSpec\` and each \`serviceSpecs\` entry have a top-level \`tags\` array with domain documentation. 
+Each operation may reference one or more tags by name via its \`tags[]\` field. When you need deeper context 
+about an API area or resource, look up the matching tag entry by name and read its \`description\`.
+
+\`\`\`js
+// Get all tag names to find relevant documentation areas - use first when you know the domain but not the exact path
+() => serviceSpecs.dtm?.tags?.map(t => t.name)
+\`\`\`
+
+\`\`\`js
+// Find documentation for a known tag name
+() => serviceSpecs.dtm?.tags?.find(t => t.name === 'Assets')?.description
+\`\`\`
+
+\`\`\`js
+// Follow the tag reference from a specific operation
+() => {
+  const op = serviceSpecs.dtm?.paths['/service/dtm/assets/linkedSeries']?.get
+  const tagName = op?.tags?.[0]
+  return tagName ? serviceSpecs.dtm?.tags?.find(t => t.name === tagName)?.description : null
+}
+\`\`\`
+
 Examples (all zero-parameter — note no arguments in the arrow function signatures):
 \`\`\`js
 () => Object.keys(coreSpec.paths).filter((path) => path.includes('inventory'))
