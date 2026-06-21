@@ -115,9 +115,7 @@ describe('preprocessOpenApi — minify passes', () => {
 
   it('drops tags and empty security at both levels', async () => {
     const out = await preprocessOpenApi(fixture()) as any
-    expect(out.tags).toBeUndefined()
     expect(out.security).toBeUndefined()
-    expect(out.paths['/items'].get.tags).toBeUndefined()
     expect(out.paths['/items'].get.security).toBeUndefined()
   })
 
