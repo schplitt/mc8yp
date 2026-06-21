@@ -289,7 +289,7 @@ describe('preprocessOpenApi — options', () => {
       dropNon2xxResponses: true,
       dropVendorExtensions: true,
       dropSchemaMeta: true,
-      dropTags: true,
+      dropTags: false,
       dropEmptySecurity: true,
       dropSchemaDefaults: true,
       servicePrefix: '',
