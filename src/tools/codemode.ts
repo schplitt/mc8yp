@@ -77,6 +77,27 @@ declare const serviceSpecs: Record<string, Spec>
 - \`coreSpec\` — the main Cumulocity REST surface. Always present.
 - \`serviceSpecs\` — microservice APIs available on the active tenant, keyed by contextPath. An entry is **present iff** the service is reachable on this tenant. Paths are already prefixed (e.g. \`/service/myservice/items\`). Check with \`serviceSpecs.dtm\` (or \`'dtm' in serviceSpecs\`) before reaching in.
 
+Both \`coreSpec\` and each \`serviceSpecs\` entry have a top-level \`tags\` array with domain documentation. Each operation may reference one or more tags by name via its \`tags[]\` field. When you need deeper context about an API area or resource, look up the matching tag entry by name and read its \`description\`.
+
+\`\`\`js
+// Get all tag names to find relevant documentation areas — use first when you know the domain but not the exact path
+() => serviceSpecs.dtm?.tags?.map(t => t.name)
+\`\`\`
+
+\`\`\`js
+// Find documentation for a known tag name
+() => serviceSpecs.dtm?.tags?.find(t => t.name === 'Assets')?.description
+\`\`\`
+
+\`\`\`js
+// Follow the tag reference from a specific operation
+() => {
+  const op = serviceSpecs.dtm?.paths['/service/dtm/assets/linkedSeries']?.get
+  const tagName = op?.tags?.[0]
+  return tagName ? serviceSpecs.dtm?.tags?.find(t => t.name === tagName)?.description : null
+}
+\`\`\`
+
 ${getQueryResultDescription(env)}
 The current MCP connection may still block \`execute\` calls even when an operation is visible in a spec.
 
