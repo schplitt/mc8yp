@@ -49,6 +49,9 @@ Use \`query\` to inspect OpenAPI specs (bundled core or discovered microservices
 - Strings are returned as-is; other results are returned as JSON text
 - The \`query\` tool shows the raw bundled OpenAPI specs for the selected build
 - The current MCP connection may still block \`execute\` requests through deny rules and/or an allow list even when an operation exists in a visible spec
+- Prefer endpoint-native filters/expansions/selectors over manual traversal loops when they can express the same result
+- Inspect operation \`parameters\` first, then use referenced \`tags\` documentation to discover domain query-language features and constraints
+- Fall back to custom traversal/aggregation only when endpoint-native options cannot express the required output
 
 ### Available Shape
 
@@ -118,6 +121,18 @@ Examples (all zero-parameter — note no arguments in the arrow function signatu
 }
 \`\`\`
 
+\`\`\`js
+() => coreSpec.paths['/inventory/managedObjects']?.get
+\`\`\`
+
+\`\`\`js
+() => {
+  const op = coreSpec.paths['/inventory/managedObjects']?.get
+  const tagName = op?.tags?.[0]
+  return tagName ? coreSpec.tags?.find((t) => t.name === tagName)?.description : null
+}
+\`\`\`
+
 ## execute
 Use \`execute\` when you want to call the real Cumulocity API.
 
@@ -180,8 +195,10 @@ ${getOpenApiSection()}
 
 ## Working Pattern
 1. Use \`query\` to find the right endpoint, parameters, and response shape.
-2. Use \`execute\` with a small async function expression that calls that endpoint and returns only the needed result.
-3. Keep functions small and return only the data needed for the next reasoning step.
+2. Use operation tags and tag documentation to discover domain-specific query language/functions before implementing custom control flow.
+3. Prefer endpoint-native filters/expansions/selectors before manual traversal.
+4. Use \`execute\` with a small async function expression that calls that endpoint and returns only the needed result.
+5. Keep functions small and return only the data needed for the next reasoning step.
 ${restrictionSection}
 `,
     )

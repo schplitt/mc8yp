@@ -9,7 +9,7 @@ function createCodeSchema(description: string) {
 }
 
 function getOpenApiNote(): string {
-  return 'This MCP exposes a bundled Cumulocity core OpenAPI snapshot. Use `coreSpec` for inventory, alarms, events, measurements, users, tenants, and the broader Cumulocity REST surface. Bundled and discovered microservice APIs available on the current tenant are exposed via `serviceSpecs` (keyed by contextPath).'
+  return 'This MCP exposes a bundled Cumulocity core OpenAPI snapshot. Use `coreSpec` for inventory, alarms, events, measurements, users, tenants, and the broader Cumulocity REST surface. Bundled and discovered microservice APIs available on the current tenant are exposed via `serviceSpecs` (keyed by contextPath). Prefer endpoint-native parameters (filters, expansions, paging, sorting) over manual multi-call traversal when they can express the request.'
 }
 
 function getQuerySafetyPreface(env: Env): string {
@@ -76,6 +76,9 @@ declare const serviceSpecs: Record<string, Spec>
 
 - \`coreSpec\` — the main Cumulocity REST surface. Always present.
 - \`serviceSpecs\` — microservice APIs available on the active tenant, keyed by contextPath. An entry is **present iff** the service is reachable on this tenant. Paths are already prefixed (e.g. \`/service/myservice/items\`). Check with \`serviceSpecs.dtm\` (or \`'dtm' in serviceSpecs\`) before reaching in.
+- Prefer checking operation \`parameters\` before designing multi-step logic. If filters, expansions, or selectors exist, use them first.
+- When an operation has \`tags\`, read the matching tag descriptions to discover domain-specific query language/functions and recommended usage patterns.
+- Fall back to custom traversal/aggregation only when endpoint-native options cannot express the needed result shape.
 
 Both \`coreSpec\` and each \`serviceSpecs\` entry have a top-level \`tags\` array with domain documentation. Each operation may reference one or more tags by name via its \`tags[]\` field. When you need deeper context about an API area or resource, look up the matching tag entry by name and read its \`description\`.
 
@@ -154,12 +157,25 @@ declare const cumulocity: {
 
 Your code must evaluate to an async function. Return the final value you want.
 
+Execution strategy:
+- First inspect endpoint parameters with \`query\` and choose the lowest-call approach.
+- Read relevant tag documentation to discover domain query language/features before writing custom control flow.
+- Prefer native API filters/expansions/selectors over manual traversal loops when both satisfy the request.
+- Use manual traversal only when endpoint-native options cannot express the needed result shape.
+
 On success the result is returned in Toon format. On a blocked or failed execution a plain text message is returned. A blocked message means the operation was denied by connection policy — retrying through the same connection will not help.
 
 Examples:
 \`\`\`js
 async () => {
   return await cumulocity.request({ method: 'GET', path: '/inventory/managedObjects?pageSize=5' })
+}
+
+async () => {
+  return await cumulocity.request({
+    method: 'GET',
+    path: '/alarm/alarms?pageSize=10&type=myAlarmType',
+  })
 }
 \`\`\`
 `,
