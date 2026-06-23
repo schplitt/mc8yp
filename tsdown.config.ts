@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'tsdown'
-import { resolveInternalRefs } from './src/utils/resolve-refs.ts'
+import { preprocessOpenApi } from './src/utils/openapi-preprocessor.ts'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
@@ -53,37 +53,8 @@ function getSourceConfig(api: OpenApiModuleName, version: string): OpenApiSource
   return entry
 }
 
-/**
- * Parse a raw spec JSON string, dereference its internal $ref pointers, then
- * (optionally) rewrite paths/servers with the service prefix. Returns a JSON
- * string ready to inline into a generated module.
- *
- * $ref resolution happens here so the bundled specs that ship in the build
- * carry fully inlined schemas, matching the resolution applied to live
- * discovered specs at runtime (see src/utils/resolve-refs.ts).
- * @param specJson Raw spec contents read from disk.
- * @param servicePrefix Optional prefix to prepend to paths/servers (service specs only).
- */
 async function prepareSpecJson(specJson: string, servicePrefix?: string): Promise<string> {
-  const spec = await resolveInternalRefs(JSON.parse(specJson) as {
-    paths?: Record<string, unknown>
-    servers?: Array<{ url: string, description?: string }>
-  })
-  if (servicePrefix) {
-    if (spec.paths) {
-      const rewritten: Record<string, unknown> = {}
-      for (const [p, item] of Object.entries(spec.paths)) {
-        rewritten[`${servicePrefix}${p}`] = item
-      }
-      spec.paths = rewritten
-    }
-    if (spec.servers) {
-      spec.servers = spec.servers.map((server) => ({
-        ...server,
-        url: server.url.replace('<TENANT_DOMAIN>', `<TENANT_DOMAIN>${servicePrefix}`),
-      }))
-    }
-  }
+  const spec = await preprocessOpenApi(JSON.parse(specJson), { servicePrefix })
   return JSON.stringify(spec)
 }
 

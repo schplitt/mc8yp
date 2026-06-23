@@ -10,6 +10,7 @@
     "noUnusedParameters": true,
 
     "strict": true,
+    "allowImportingTsExtensions": true,
     "module": "esnext",
     "moduleResolution": "bundler",
     "noUncheckedSideEffectImports": true,

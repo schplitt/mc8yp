@@ -43,7 +43,7 @@ Use \`query\` to inspect OpenAPI specs (bundled core or discovered microservices
 - Input: a **zero-parameter** JavaScript function expression
 - Do NOT declare \`coreSpec\` or \`serviceSpecs\` as function parameters — they are already declared as top-level constants in the surrounding scope
 - \`coreSpec\` is for the main Cumulocity REST surface: inventory, alarms, events, measurements, identity, device control, users, tenants, audit
-- \`serviceSpecs\` contains microservice APIs available on the current tenant, keyed by contextPath (e.g. \`serviceSpecs.dtm\`). An entry is present iff the service is actually reachable on this tenant — use \`serviceSpecs.<key>\` or \`'<key>' in serviceSpecs\` to check availability. Paths are already prefixed for direct use with \`cumulocity.request()\`
+- \`serviceSpecs\` contains microservice APIs available on the current tenant, keyed by contextPath (e.g. \`serviceSpecs.dtm\`). An entry is present if the service is actually reachable on this tenant — use \`serviceSpecs.<key>\` or \`'<key>' in serviceSpecs\` to check availability. Paths are already prefixed for direct use with \`cumulocity.request()\`
 - Return the exact value you want back from that function
 - Sync and async functions are both supported
 - Strings are returned as-is; other results are returned as JSON text
@@ -148,6 +148,14 @@ async () => {
   })
 }
 \`\`\`
+
+## Efficient Querying
+
+Parameters with \`schema.format === 'c8y:query'\` accept Cumulocity Query Language. Use \`queryBuilder()\` — injected into every execute sandbox — to construct the query string. Always prefer server-side filtering over fetching all pages: max \`pageSize\` is 2000 and tenants can have millions of objects.
+
+Key operators: \`eq\`, \`gt\`, \`ge\`, \`lt\`, \`le\`, \`and\`, \`or\`, \`not\`, \`has()\`, \`hasany()\`, \`bygroupid()\`, \`isinhierarchyof()\`. **There is no \`like\` or \`in\`** — use \`eq\` with \`*\` wildcards for substring matches (\`name eq '*pattern*'\`, case-insensitive), and \`or\` chains for multi-value ID matching. When the ID list is large, fetch all and join in memory instead.
+
+For the full syntax reference, run the query tool: \`() => coreSpec.tags.find(t => t.name === 'Query language')?.description\`
 
 ${getRuntimeSection()}
 
