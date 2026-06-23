@@ -49,6 +49,9 @@ Use \`query\` to inspect OpenAPI specs (bundled core or discovered microservices
 - Strings are returned as-is; other results are returned as JSON text
 - The \`query\` tool shows the raw bundled OpenAPI specs for the selected build
 - The current MCP connection may still block \`execute\` requests through deny rules and/or an allow list even when an operation exists in a visible spec
+- Prefer endpoint-native filters/expansions/selectors over manual traversal loops when they can express the same result
+- Inspect operation \`parameters\` first, then use referenced \`tags\` documentation to discover domain query-language features and constraints
+- Fall back to custom traversal/aggregation only when endpoint-native options cannot express the required output
 
 ### Available Shape
 
@@ -81,6 +84,31 @@ declare const coreSpec: Spec
 declare const serviceSpecs: ${serviceSpecsType}
 \`\`\`
 
+### Tag Documentation
+
+Both \`coreSpec\` and each \`serviceSpecs\` entry have a top-level \`tags\` array with domain documentation. 
+Each operation may reference one or more tags by name via its \`tags[]\` field. When you need deeper context 
+about an API area or resource, look up the matching tag entry by name and read its \`description\`.
+
+\`\`\`js
+// Get all tag names to find relevant documentation areas - use first when you know the domain but not the exact path
+() => serviceSpecs.dtm?.tags?.map(t => t.name)
+\`\`\`
+
+\`\`\`js
+// Find documentation for a known tag name
+() => serviceSpecs.dtm?.tags?.find(t => t.name === 'Assets')?.description
+\`\`\`
+
+\`\`\`js
+// Follow the tag reference from a specific operation
+() => {
+  const op = serviceSpecs.dtm?.paths['/service/dtm/assets/linkedSeries']?.get
+  const tagName = op?.tags?.[0]
+  return tagName ? serviceSpecs.dtm?.tags?.find(t => t.name === tagName)?.description : null
+}
+\`\`\`
+
 Examples (all zero-parameter — note no arguments in the arrow function signatures):
 \`\`\`js
 () => Object.keys(coreSpec.paths).filter((path) => path.includes('inventory'))
@@ -90,6 +118,18 @@ Examples (all zero-parameter — note no arguments in the arrow function signatu
 () => {
   const op = serviceSpecs.dtm?.paths['/service/dtm/assets']?.get
   return op?.parameters
+}
+\`\`\`
+
+\`\`\`js
+() => coreSpec.paths['/inventory/managedObjects']?.get
+\`\`\`
+
+\`\`\`js
+() => {
+  const op = coreSpec.paths['/inventory/managedObjects']?.get
+  const tagName = op?.tags?.[0]
+  return tagName ? coreSpec.tags?.find((t) => t.name === tagName)?.description : null
 }
 \`\`\`
 
@@ -163,8 +203,10 @@ ${getOpenApiSection()}
 
 ## Working Pattern
 1. Use \`query\` to find the right endpoint, parameters, and response shape.
-2. Use \`execute\` with a small async function expression that calls that endpoint and returns only the needed result.
-3. Keep functions small and return only the data needed for the next reasoning step.
+2. Use operation tags and tag documentation to discover domain-specific query language/functions before implementing custom control flow.
+3. Prefer endpoint-native filters/expansions/selectors before manual traversal.
+4. Use \`execute\` with a small async function expression that calls that endpoint and returns only the needed result.
+5. Keep functions small and return only the data needed for the next reasoning step.
 ${restrictionSection}
 `,
     )
