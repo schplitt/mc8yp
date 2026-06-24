@@ -3,7 +3,11 @@ import { encode } from '@toon-format/toon'
 import { createSafeFetch } from '@iso4/fetch'
 import type { SafeFetchGlobal } from '@iso4/fetch'
 import { createSandbox } from '@iso4/sandbox'
-import type { HostGlobals, Sandbox } from '@iso4/sandbox'
+import type { HostGlobals, Imports, Sandbox } from '@iso4/sandbox'
+// Bundled (single-string ESM) source of minisearch, produced by the `?bundle`
+// tsdown plugin. Injected into the query sandbox as a source-string import so
+// query code can build a search index over the OpenAPI specs.
+import minisearchBundle from 'minisearch?bundle'
 import { createC8yAuthHeaders, resolveC8yAuth } from '../utils/client'
 import { c8yMcpServer } from '../server-instance'
 import { evaluateAccessPolicy } from '../utils/restriction-matcher'
@@ -202,6 +206,9 @@ function buildQueryScript(sourceCode: string): string {
     )
   }
   return [
+    // `minisearch` is provided as a source-string import (see QUERY_IMPORTS).
+    // Bound at module scope so the agent's query function can close over it.
+    'import MiniSearch from "minisearch";',
     `const coreSpec = ${JSON.stringify(resolved.core)};`,
     `const serviceSpecs = ${JSON.stringify(resolved.specs)};`,
     `const __mc8ypQuery = (${functionExpression});`,
@@ -273,6 +280,11 @@ function extractDefaultExport(exportsObject: unknown): unknown {
   throw new Error(NO_DEFAULT_EXPORT_MESSAGE)
 }
 
+// Source-string imports available to the query sandbox. minisearch lets query
+// code build a search index over coreSpec/serviceSpecs and look up docs (e.g.
+// the OData query language, documented only in core) across all specs at once.
+const QUERY_IMPORTS: Imports = { minisearch: minisearchBundle }
+
 export async function query(functionCode: string): Promise<string> {
   const sandbox = await getSandbox()
   const result = await sandbox.run({
@@ -280,6 +292,7 @@ export async function query(functionCode: string): Promise<string> {
     filename: QUERY_ENTRY_PATH,
     limits: SANDBOX_LIMITS,
     // No globals → no fetch surface; the query sandbox cannot reach the network.
+    imports: QUERY_IMPORTS,
   })
 
   if (!result.ok) {

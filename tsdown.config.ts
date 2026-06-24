@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { rolldown } from 'rolldown'
 import { defineConfig } from 'tsdown'
 import { preprocessOpenApi } from './src/utils/openapi-preprocessor.ts'
 
@@ -204,6 +205,58 @@ export function bundledServicesPlugin(options: { mode: 'cli' } | { mode: 'server
   }
 }
 
+/**
+ * Virtual `?bundle` plugin.
+ *
+ * `import source from '<specifier>?bundle'` resolves `<specifier>` with
+ * rolldown, bundles it (and any of its own deps) into a single ESM module,
+ * and exports the resulting source **as a string** (default export).
+ *
+ * The string is meant to be handed to `@iso4/sandbox` as a source-string
+ * import (`run({ imports: { '<name>': bundledSource } })`) so untrusted
+ * sandbox code can `import X from '<name>'` without the host ever exposing a
+ * real module loader. minisearch is the first consumer (search index over the
+ * OpenAPI specs inside the `query` sandbox).
+ *
+ * Generic by design: any future sandbox-side library uses the same suffix.
+ */
+export function bundleStringPlugin() {
+  const SUFFIX = '?bundle'
+  const RESOLVED_PREFIX = '\0bundle:'
+
+  return {
+    name: 'mc8yp:bundle-string',
+    // Run before Vite/rolldown's built-in node resolver, which would otherwise
+    // strip the `?bundle` query and resolve to the real module.
+    enforce: 'pre' as const,
+    resolveId(id: string) {
+      if (!id.endsWith(SUFFIX))
+        return null
+      return RESOLVED_PREFIX + id.slice(0, -SUFFIX.length)
+    },
+    async load(id: string) {
+      if (!id.startsWith(RESOLVED_PREFIX))
+        return null
+      const specifier = id.slice(RESOLVED_PREFIX.length)
+
+      const bundle = await rolldown({
+        input: specifier,
+        // Neutral platform: no Node built-in shims. Sandbox libs run in V8
+        // isolates with only the iso4-provided globals (setTimeout, etc.).
+        platform: 'neutral',
+        logLevel: 'silent',
+      })
+      try {
+        const { output } = await bundle.generate({ format: 'esm' })
+        const code = output.filter((c) => c.type === 'chunk').map((c) => c.code).join('\n')
+        return `export default ${JSON.stringify(code)};\n`
+      } finally {
+        await bundle.close()
+      }
+    },
+  }
+}
+
 const serverBuilds = OPENAPI_CONFIG.builds.map((build) => ({
   name: `mc8yp-server-build-${build.version}`,
   entry: { server: './src/index.ts' },
@@ -211,7 +264,7 @@ const serverBuilds = OPENAPI_CONFIG.builds.map((build) => ({
   clean: build.version === OPENAPI_CONFIG.builds[0]?.version,
   dts: false,
   format: 'module' as const,
-  plugins: [coreOpenApiPlugin({ mode: 'server', build }), bundledServicesPlugin({ mode: 'server', build })],
+  plugins: [coreOpenApiPlugin({ mode: 'server', build }), bundledServicesPlugin({ mode: 'server', build }), bundleStringPlugin()],
   // Bundle all non-native deps so the Docker image only needs @iso4/sandbox
   // (and its per-platform Rust binary) installed at runtime via pnpm install --prod.
   // @napi-rs/* is excluded defensively (not used in server mode anyway).
@@ -228,7 +281,7 @@ export default defineConfig([
     clean: true,
     dts: false,
     format: 'module',
-    plugins: [coreOpenApiPlugin({ mode: 'cli' }), bundledServicesPlugin({ mode: 'cli' })],
+    plugins: [coreOpenApiPlugin({ mode: 'cli' }), bundledServicesPlugin({ mode: 'cli' }), bundleStringPlugin()],
     // Bundle every non-native dep to reduce supply-chain risk for CLI users.
     // @iso4/sandbox must stay external: it resolves per-platform Rust binaries
     // (@iso4/v8-*) at runtime and cannot be statically inlined.

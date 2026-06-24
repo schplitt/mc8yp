@@ -63,6 +63,9 @@ catalogs:
     minisearch:
       specifier: ^7.2.0
       version: 7.2.0
+    rolldown:
+      specifier: ~1.1.0
+      version: 1.1.0
     tmcp:
       specifier: ^1.19.4
       version: 1.19.4
@@ -147,6 +150,9 @@ importers:
       minisearch:
         specifier: 'catalog:'
         version: 7.2.0
+      rolldown:
+        specifier: 'catalog:'
+        version: 1.1.0
       tmcp:
         specifier: 'catalog:'
         version: 1.19.4(typescript@6.0.3)

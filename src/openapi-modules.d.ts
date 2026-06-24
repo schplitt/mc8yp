@@ -11,6 +11,17 @@ declare module '#bundled-services' {
   export const BUNDLED_SERVICE_SPECS: ReadonlyArray<BundledServiceSpec>
 }
 
+/**
+ * `import source from '<specifier>?bundle'` — the `?bundle` tsdown plugin
+ * (see tsdown.config.ts) bundles `<specifier>` into a single ESM module and
+ * inlines its source as a string. Handed to `@iso4/sandbox` as a source-string
+ * import so sandbox code can `import X from '<name>'`.
+ */
+declare module '*?bundle' {
+  const source: string
+  export default source
+}
+
 declare module '#core-openapi' {
   import type { Spec } from './utils/spec-resolution'
 

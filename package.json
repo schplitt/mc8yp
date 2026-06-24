@@ -68,6 +68,7 @@
     "eslint": "catalog:",
     "h3": "catalog:",
     "minisearch": "catalog:",
+    "rolldown": "catalog:",
     "tmcp": "catalog:",
     "tsdown": "catalog:",
     "typescript": "catalog:",
