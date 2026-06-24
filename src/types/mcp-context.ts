@@ -42,4 +42,10 @@ export interface C8yMcpCustomContext extends Record<string, unknown> {
    * May be absent in CLI mode until set-active-tenant is called.
    */
   auth?: RequestAuth
+  /**
+   * Path to the OPA data.json file for policy-based approval decisions.
+   * CLI-only; set via --policy-data flag. When absent, all mutating ops
+   * require elicitation (legacy behaviour).
+   */
+  policyDataPath?: string
 }

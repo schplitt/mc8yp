@@ -48,7 +48,8 @@
   },
   "dependencies": {
     "@iso4/sandbox": "catalog:",
-    "@napi-rs/keyring": "catalog:"
+    "@napi-rs/keyring": "catalog:",
+    "@open-policy-agent/opa-wasm": "catalog:"
   },
   "devDependencies": {
     "@apidevtools/json-schema-ref-parser": "catalog:",

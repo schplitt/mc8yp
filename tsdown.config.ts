@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { copyFileSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'tsdown'
@@ -145,6 +145,21 @@ export function coreOpenApiPlugin(options: { mode: 'cli' } | { mode: 'server', b
 }
 
 /**
+ * Rollup plugin: copies src/policy/bundle.wasm → dist/bundle.wasm after the
+ * CLI build. The evaluate module resolves it via import.meta.url at runtime.
+ */
+function copyPolicyWasmPlugin() {
+  return {
+    name: 'mc8yp:copy-policy-wasm',
+    closeBundle() {
+      const src = path.join(rootDir, 'src/policy/bundle.wasm')
+      const dest = path.join(rootDir, 'dist/bundle.wasm')
+      copyFileSync(src, dest)
+    },
+  }
+}
+
+/**
  * Virtual module `#bundled-services` — exports BUNDLED_SERVICE_SPECS.
  *
  * Loops all entries in openapi-builds.json sources that carry a servicePrefix
@@ -228,7 +243,7 @@ export default defineConfig([
     clean: true,
     dts: false,
     format: 'module',
-    plugins: [coreOpenApiPlugin({ mode: 'cli' }), bundledServicesPlugin({ mode: 'cli' })],
+    plugins: [coreOpenApiPlugin({ mode: 'cli' }), bundledServicesPlugin({ mode: 'cli' }), copyPolicyWasmPlugin()],
     // Bundle every non-native dep to reduce supply-chain risk for CLI users.
     // @iso4/sandbox must stay external: it resolves per-platform Rust binaries
     // (@iso4/v8-*) at runtime and cannot be statically inlined.

@@ -12,6 +12,7 @@ import type { AllowRule, RestrictionRule } from '../utils/restrictions'
 
 const QUERY_ENTRY_PATH = '/codemode-query.mjs'
 const EXECUTE_ENTRY_PATH = '/codemode-execute.mjs'
+const DRY_RUN_ENTRY_PATH = '/codemode-dryrun.mjs'
 
 export const BLOCKED_REQUEST_PREFIX = 'Request blocked by MCP connection policy.'
 
@@ -254,6 +255,99 @@ function buildCumulocityPreamble(tenantUrl: string): string {
     },
   });
 })()`
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Dry-run interception
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface InterceptedOp {
+  method: string
+  path: string
+  body: unknown
+}
+
+// Methods intercepted in dry-run (mocked — no real HTTP call).
+// POST is included because upsert/action POSTs are common in Cumulocity (e.g.
+// X-Upsert-Mode) and must not fire twice. The mock echoes the request body so
+// compositions like `const r = await POST(...); use(r.id)` keep working.
+// PATCH is included to keep the dry-run fully side-effect-free even when code
+// mixes PATCH with other methods; approval is only required for POST/PUT/DELETE.
+const DRY_RUN_INTERCEPT = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+function createInterceptingFetch(
+  real: SafeFetchGlobal,
+  tenantUrl: string,
+  ops: InterceptedOp[],
+): SafeFetchGlobal {
+  const base = tenantUrl.endsWith('/') ? tenantUrl.slice(0, -1) : tenantUrl
+  return {
+    kind: 'bridge-with-shim' as const,
+    shim: real.shim,
+    handler: async (...args: unknown[]) => {
+      const url = String(args[0] ?? '')
+      const init = (args[1] as Record<string, unknown> | undefined) ?? {}
+      const method = String(init.method ?? 'GET').toUpperCase()
+
+      if (DRY_RUN_INTERCEPT.has(method)) {
+        const path = url.startsWith(base) ? url.slice(base.length) : url
+        let body: unknown = null
+        const rawBody = init.body
+        if (typeof rawBody === 'string' && rawBody.length > 0) {
+          try {
+            body = JSON.parse(rawBody)
+          } catch {
+            body = rawBody
+          }
+        }
+        ops.push({ method, path, body })
+        // Echo the request body so downstream composition code (e.g.
+        // `const r = await POST(...); r.description`) keeps working.
+        // DELETE → 204 No Content; POST → 201 Created; PUT/PATCH → 200 OK.
+        const mockBody = method === 'DELETE' ? null : (body ?? {})
+        return {
+          status: method === 'DELETE' ? 204 : method === 'POST' ? 201 : 200,
+          statusText: method === 'DELETE' ? 'No Content' : method === 'POST' ? 'Created' : 'OK',
+          headers: {} as Record<string, string>,
+          body: mockBody,
+        }
+      }
+      return real.handler(...args)
+    },
+  }
+}
+
+export async function dryRun(functionCode: string): Promise<InterceptedOp[]> {
+  const auth = await resolveC8yAuth()
+  const authHeaders = createC8yAuthHeaders(auth)
+  const restrictions = c8yMcpServer.ctx.custom?.restrictions ?? []
+  const allowRules = c8yMcpServer.ctx.custom?.allowRules ?? []
+
+  const ops: InterceptedOp[] = []
+  const realFetch = createCumulocitySafeFetch(auth.tenantUrl, authHeaders, restrictions, allowRules)
+
+  const functionExpression = normalizeCode(functionCode)
+  const code = [
+    `const __mc8ypExecute = (${functionExpression});`,
+    'if (typeof __mc8ypExecute !== "function") { throw new TypeError("Execute code must evaluate to a function.") }',
+    'export default await __mc8ypExecute();',
+  ].join('\n')
+
+  const globals: HostGlobals = {
+    __c8y_fetch: createInterceptingFetch(realFetch, auth.tenantUrl, ops),
+    cumulocity: buildCumulocityPreamble(auth.tenantUrl),
+  }
+
+  const sandbox = await getSandbox()
+  // Ignore sandbox errors — partial captures are still useful.
+  await sandbox.run({
+    code,
+    filename: DRY_RUN_ENTRY_PATH,
+    limits: SANDBOX_LIMITS,
+    globals,
+  }).catch(() => undefined)
+
+  return ops
 }
 
 // ─────────────────────────────────────────────────────────────────────────
