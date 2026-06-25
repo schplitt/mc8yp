@@ -42,8 +42,8 @@ Use \`query\` to inspect OpenAPI specs (bundled core or discovered microservices
 
 - Input: a **zero-parameter** JavaScript function expression
 - Do NOT declare \`coreSpec\`, \`serviceSpecs\`, or \`searchSpecs\` as function parameters — they are already available as top-level bindings in the surrounding scope
-- **Browse the specs directly first.** Inspect \`coreSpec.paths\` / \`serviceSpecs[...].paths\` and the operation you expect to use
-- \`searchSpecs(query, opts)\` is a secondary, keyword-based lookup over a prebuilt index of every visible spec (one document per endpoint, per tag, and per spec info block). Reach for it **after** browsing paths — when you need to know how a specific parameter is used or its expected format (e.g. the query language documented only under core), to understand request/response bodies, or as a fallback when you are not sure you found the correct endpoint. Read each hit's \`header\` (a JS accessor) to jump to the source in \`coreSpec\`/\`serviceSpecs\`
+- **Browse \`coreSpec.paths\` / \`serviceSpecs[...].paths\` to locate the endpoint** you expect to use
+- **\`searchSpecs(query, opts)\` is your primary tool for discovering capabilities the path listing does NOT show** — the query language, \`$filter\` operators, hierarchy operators (e.g. \`isinhierarchyof\`), parameter formats, and request/response bodies. They live in tag docs, not path names, so browsing paths alone never reveals them. It indexes every visible spec (one document per endpoint, per tag, and per spec info block). Each hit's \`text\` is a truncated preview; **paste the hit's \`header\` (a pasteable JS accessor) into a follow-up \`query\` to read the full, untruncated source**
 - \`coreSpec\` is for the main Cumulocity REST surface: inventory, alarms, events, measurements, identity, device control, users, tenants, audit
 - \`serviceSpecs\` contains microservice APIs available on the current tenant, keyed by contextPath (e.g. \`serviceSpecs.dtm\`). An entry is present if the service is actually reachable on this tenant — use \`serviceSpecs.<key>\` or \`'<key>' in serviceSpecs\` to check availability. Paths are already prefixed for direct use with \`cumulocity.request()\`
 - Return the exact value you want back from that function
@@ -51,9 +51,9 @@ Use \`query\` to inspect OpenAPI specs (bundled core or discovered microservices
 - Strings are returned as-is; other results are returned as JSON text
 - The \`query\` tool shows the raw bundled OpenAPI specs for the selected build
 - The current MCP connection may still block \`execute\` requests through deny rules and/or an allow list even when an operation exists in a visible spec
-- Prefer endpoint-native filters/expansions/selectors over manual traversal loops when they can express the same result
+- **Before writing any manual traversal, recursion, or client-side aggregation loop, \`searchSpecs\` for a server-side operator that does it in one request** (filters, expansions, hierarchy operators). A hand-written BFS over sub-resources is almost always the wrong answer.
 - Inspect operation \`parameters\` first; use \`searchSpecs(...)\` to discover domain query-language features and constraints
-- If you are going to send a request with a \`query=\` parameter, you MUST verify the query-language syntax first via \`searchSpecs(...)\`, and cite what you found in your reasoning before calling \`execute\`
+- **If you are going to send a request with a \`query=\` / \`$filter=\` parameter, you MUST \`searchSpecs\` the query language and confirm the exact operator and syntax first**, and cite what you found in your reasoning before calling \`execute\`. Known gotchas: \`eq\` supports wildcards (\`name eq 'Borkum*'\`), \`like\` is NOT supported, and "everything under X" is \`isinhierarchyof(<id>...)\`, not a recursive fetch
 - Avoid hardcoded ID arrays copied from prior responses. For open-ended tenant data, derive IDs via endpoint-native filters, hierarchy operators, or subresource endpoints at execution time.
 - Avoid N+1 per-ID fetch loops when the candidate set can grow. Use one bulk/list endpoint with server-side filtering first; fall back to per-ID requests only when no endpoint-native alternative exists.
 - Fall back to custom traversal/aggregation only when endpoint-native options cannot express the required output
@@ -107,7 +107,7 @@ declare function searchSpecs(
 
 ### Searching Across Specs
 
-\`searchSpecs\` indexes endpoints, tags, and spec info from every visible spec in one place. Use it **after** browsing the paths directly — to learn how a parameter or format works (e.g. the query language), to understand bodies, or to confirm you have the right endpoint when unsure. Hits come back best-first. Each hit's \`text\` is a **truncated preview** (long matches are cut and marked \`[TRUNCATED PREVIEW …]\`, with \`truncated: true\`) — it is **not** the full doc. Each \`header\` is a **pasteable accessor**: when a hit looks relevant, **paste its \`header\` into a follow-up \`query\` call to read the full, untruncated source** (the binding itself is never truncated). Cap with \`opts.limit\` (default 5), threshold with \`opts.minScore\`, resize the preview with \`opts.maxTextLength\`.
+\`searchSpecs\` indexes endpoints, tags, and spec info from every visible spec in one place. Browse paths to locate an endpoint, but **reach for \`searchSpecs\` to discover anything the path listing does not show** — query-language and \`$filter\` operators, hierarchy operators (e.g. \`isinhierarchyof\`), parameter formats, and request/response bodies (these live in tag docs, not path names). Always search it before writing a manual traversal loop or sending a \`query=\` request. Hits come back best-first. Each hit's \`text\` is a **truncated preview** (long matches are cut and marked \`[TRUNCATED PREVIEW …]\`, with \`truncated: true\`) — it is **not** the full doc. Each \`header\` is a **pasteable accessor**: when a hit looks relevant, **paste its \`header\` into a follow-up \`query\` call to read the full, untruncated source** (the binding itself is never truncated). Cap with \`opts.limit\` (default 5), threshold with \`opts.minScore\`, resize the preview with \`opts.maxTextLength\`.
 
 \`\`\`js
 // 1) Find the relevant doc — the query language is documented in core but
@@ -189,8 +189,8 @@ ${getRuntimeSection()}
 ${getOpenApiSection()}
 
 ## Working Pattern
-1. Use \`query\` to find the right endpoint, parameters, and response shape — browse \`coreSpec\`/\`serviceSpecs\` paths directly first, then use \`searchSpecs(...)\` when you need parameter/format/body insight or are unsure you found the right endpoint.
-2. If an operation uses \`query\` / \`c8y:query\`, verify syntax before execute: inspect operation \`parameters\`, then use \`searchSpecs(...)\` to confirm operators/functions and constraints.
+1. Use \`query\` to find the right endpoint, parameters, and response shape — browse \`coreSpec\`/\`serviceSpecs\` paths to locate the endpoint, and use \`searchSpecs(...)\` to discover query-language/\`$filter\`/hierarchy operators and parameter formats that the path listing does not show.
+2. If an operation uses \`query\` / \`c8y:query\`, or you are about to write a traversal/recursion/aggregation loop, verify syntax before execute: inspect operation \`parameters\`, then use \`searchSpecs(...)\` to confirm operators/functions (e.g. \`isinhierarchyof\`, wildcard \`eq\`) and constraints. Reach for a server-side operator before any manual loop.
 3. Cite that evidence in your response before the write/read execute call that depends on it.
 4. Plan for scale: assume tenant datasets can be large and unbounded.
 5. Do not hardcode ID lists from sample outputs unless the user explicitly provided a fixed ID set.
