@@ -38,14 +38,14 @@ describe('buildSpecDocs — document structure', () => {
       // ── core ──────────────────────────────────────────────────────────────
       {
         id: 'core::spec',
-        header: 'coreSpec.info — Cumulocity',
+        header: 'coreSpec.info',
         text: 'Cumulocity Core REST API',
         kind: 'spec',
         spec: 'core',
       },
       {
         id: 'core::tag::Query language',
-        header: 'coreSpec.tags — Query language',
+        header: 'coreSpec.tags.find((t) => t.name === "Query language")',
         text: 'Query language OData $filter eq operator',
         kind: 'tag',
         spec: 'core',
@@ -60,7 +60,7 @@ describe('buildSpecDocs — document structure', () => {
       // ── dtm (service) ─────────────────────────────────────────────────────
       {
         id: 'dtm::spec',
-        header: 'serviceSpecs["dtm"].info — Digital Twin Manager',
+        header: 'serviceSpecs["dtm"].info',
         text: 'Digital Twin Manager',
         kind: 'spec',
         spec: 'dtm',

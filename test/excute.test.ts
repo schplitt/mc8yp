@@ -554,24 +554,67 @@ describe('query', () => {
       expect(hits.length).toBeGreaterThan(0)
       // Top hit is the core "Query language" tag, identified by its header.
       expect(hits[0]).toMatchObject({ kind: 'tag', spec: 'core', hasText: true, hasScore: true })
-      expect(hits[0].header).toBe('coreSpec.tags — Query language')
+      expect(hits[0].header).toBe('coreSpec.tags.find((t) => t.name === "Query language")')
     } finally {
       restore()
     }
   })
 
-  it('searchSpecs can be scoped to specific specs and indexes service endpoints', async () => {
+  it('truncates long hit text to a preview that names the header to read in full', async () => {
+    const longDesc = `OData filter reference. ${'isinhierarchyof predicate. '.repeat(80)}`
+    const restore = withSpecs({
+      core: { tags: [{ name: 'Query language', description: longDesc }], paths: {} },
+      specs: {},
+    } as unknown as ResolvedSpecs)
+    try {
+      const result = await query(
+        '() => { const h = searchSpecs("isinhierarchyof", { limit: 1 })[0]; return { truncated: h.truncated, header: h.header, len: h.text.length, hasMarker: h.text.includes("TRUNCATED PREVIEW"), pointsToSource: h.text.includes(h.header) } }',
+      )
+      const hit = JSON.parse(stripQueryFooter(result)) as {
+        truncated: boolean
+        header: string
+        len: number
+        hasMarker: boolean
+        pointsToSource: boolean
+      }
+      expect(hit.truncated).toBe(true)
+      expect(hit.header).toBe('coreSpec.tags.find((t) => t.name === "Query language")')
+      expect(hit.hasMarker).toBe(true)
+      expect(hit.pointsToSource).toBe(true)
+      expect(hit.len).toBeLessThan(longDesc.length)
+    } finally {
+      restore()
+    }
+  })
+
+  it('leaves short hit text untruncated', async () => {
+    const restore = withSpecs({
+      core: { tags: [{ name: 'Query language', description: 'short eq operator note' }], paths: {} },
+      specs: {},
+    } as unknown as ResolvedSpecs)
+    try {
+      const result = await query(
+        '() => { const h = searchSpecs("eq operator", { limit: 1 })[0]; return { truncated: h.truncated, hasMarker: h.text.includes("TRUNCATED") } }',
+      )
+      const hit = JSON.parse(stripQueryFooter(result)) as { truncated: boolean, hasMarker: boolean }
+      expect(hit.truncated).toBe(false)
+      expect(hit.hasMarker).toBe(false)
+    } finally {
+      restore()
+    }
+  })
+
+  it('searchSpecs indexes service endpoints alongside core', async () => {
     const restore = withSpecs({
       core: { paths: { '/inventory/managedObjects': { get: { summary: 'Retrieve managed objects' } } } },
       specs: { dtm: { paths: { '/service/dtm/assets': { get: { summary: 'List managed assets' } } } } },
     } as unknown as ResolvedSpecs)
     try {
       const result = await query(
-        '() => searchSpecs("managed", { specs: ["dtm"] }).map(r => r.spec)',
+        '() => searchSpecs("managed assets").map(r => r.spec)',
       )
       const specs = JSON.parse(stripQueryFooter(result)) as string[]
-      expect(specs.length).toBeGreaterThan(0)
-      expect(specs.every((s) => s === 'dtm')).toBe(true)
+      expect(specs).toContain('dtm')
     } finally {
       restore()
     }
@@ -638,7 +681,7 @@ describe('query — searchSpecs end-to-end', () => {
     const hits = await runSearch<Hit[]>('() => searchSpecs("filter query language")')
     expect(hits.length).toBeGreaterThan(0)
     expect(hits[0]).toMatchObject({ kind: 'tag', spec: 'core' })
-    expect(hits[0].header).toBe('coreSpec.tags — Query language')
+    expect(hits[0].header).toBe('coreSpec.tags.find((t) => t.name === "Query language")')
   })
 
   it('returns hits sorted by descending score', async () => {
@@ -654,10 +697,10 @@ describe('query — searchSpecs end-to-end', () => {
     expect(endpoint?.header).toBe('coreSpec.paths["/inventory/managedObjects"].get')
   })
 
-  it('scopes results to a single service and points into serviceSpecs', async () => {
-    const hits = await runSearch<Hit[]>('() => searchSpecs("asset hierarchy", { specs: ["dtm"] })')
+  it('indexes service endpoints and points into serviceSpecs', async () => {
+    const hits = await runSearch<Hit[]>('() => searchSpecs("asset hierarchy")')
     expect(hits.length).toBeGreaterThan(0)
-    expect(hits.every((h) => h.spec === 'dtm')).toBe(true)
+    expect(hits.some((h) => h.spec === 'dtm')).toBe(true)
     expect(hits.some((h) => h.header.startsWith('serviceSpecs["dtm"]'))).toBe(true)
   })
 
@@ -672,7 +715,7 @@ describe('query — searchSpecs end-to-end', () => {
   it('supports the intended workflow: search, then read the node the header points to', async () => {
     // Returns an object (query() passes strings through raw, objects as JSON).
     const out = await runSearch<{ found: boolean, summary: string | null }>(`() => {
-      const hit = searchSpecs("managed objects", { specs: ["core"] }).find(h => h.kind === "endpoint")
+      const hit = searchSpecs("managed objects").find(h => h.kind === "endpoint" && h.spec === "core")
       return { found: !!hit, summary: hit ? coreSpec.paths["/inventory/managedObjects"].get.summary : null }
     }`)
     expect(out.found).toBe(true)

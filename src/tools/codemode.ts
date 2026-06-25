@@ -76,24 +76,28 @@ declare const serviceSpecs: Record<string, Spec>
 // Full-text search over a prebuilt index of EVERY visible spec at once:
 // one document per endpoint, per tag, and per spec info block.
 type SpecSearchHit = {
-  // A JS accessor pointing at the source of the hit, e.g.
-  //   "coreSpec.paths['/inventory/managedObjects'].get"
-  //   "coreSpec.tags — Query language"
-  //   "serviceSpecs['dtm'].info — Digital Twin Manager"
+  // A pasteable JS accessor pointing at the source of the hit. Paste it into a
+  // follow-up query() to read the FULL, untruncated node, e.g.
+  //   coreSpec.paths['/inventory/managedObjects'].get
+  //   coreSpec.tags.find((t) => t.name === 'Query language')
+  //   serviceSpecs['dtm'].info
   header: string
-  text: string // the indexed text for that hit
+  // A search PREVIEW of the indexed text. Long matches are truncated and wrapped
+  // in [TRUNCATED PREVIEW ...] markers naming \`header\` — read \`header\` for the full text.
+  text: string
+  truncated: boolean // true when \`text\` is a cut-down preview; read \`header\` for the full source
   kind: 'endpoint' | 'tag' | 'spec'
   spec: string // 'core' or a serviceSpecs contextPath key
   score: number // higher = more relevant; hits are returned best-first
 }
 declare function searchSpecs(
   query: string,
-  opts?: { limit?: number, minScore?: number, fuzzy?: number, prefix?: boolean, specs?: string[] }
+  opts?: { limit?: number, minScore?: number, fuzzy?: number, prefix?: boolean, maxTextLength?: number }
 ): SpecSearchHit[]
 \`\`\`
 
 - **Start by browsing the specs directly.** \`coreSpec\` — the main Cumulocity REST surface, always present. \`serviceSpecs\` — microservice APIs available on the active tenant, keyed by contextPath; an entry is **present iff** the service is reachable on this tenant. Paths are already prefixed (e.g. \`/service/myservice/items\`). Check with \`serviceSpecs.dtm\` (or \`'dtm' in serviceSpecs\`) before reaching in. Read \`Object.keys(coreSpec.paths)\` / \`serviceSpecs[...].paths\` and inspect the operation you expect to use.
-- \`searchSpecs\` — **secondary, keyword-based lookup.** Once you have (or think you have) the right endpoint, reach for it when the path listing alone is not enough: to learn **how a specific parameter is used or its expected format** (e.g. the query / \`$filter\` syntax, documented only under a tag), to understand **request/response bodies**, or as a **fallback when you are not sure you found the correct endpoint**. It searches every spec at once, so it surfaces docs that live in only one spec but apply broadly. Hits are returned **best-first** (descending \`score\`); each \`header\` is a JS accessor pointing straight at the source (e.g. \`coreSpec.paths['/x'].get\`), so you can read the full detail directly. Scope with \`opts.specs\`, cap with \`opts.limit\` (default 5), threshold with \`opts.minScore\`.
+- \`searchSpecs\` — **secondary, keyword-based lookup.** Once you have (or think you have) the right endpoint, reach for it when the path listing alone is not enough: to learn **how a specific parameter is used or its expected format** (e.g. the query / \`$filter\` syntax, documented only under a tag), to understand **request/response bodies**, or as a **fallback when you are not sure you found the correct endpoint**. It searches every spec at once, so it surfaces docs that live in only one spec but apply broadly. Hits are returned **best-first** (descending \`score\`). Each hit's \`text\` is a **truncated preview** of the match (long hits are cut and marked \`[TRUNCATED PREVIEW …]\`, with \`truncated: true\`); each \`header\` is a **pasteable JS accessor** (e.g. \`coreSpec.paths['/x'].get\`, \`coreSpec.tags.find((t) => t.name === 'Query language')\`). When a hit looks relevant, **paste its \`header\` into a follow-up \`query\` call to read the full, untruncated source** — the binding is never truncated. Cap with \`opts.limit\` (default 5), threshold with \`opts.minScore\`, widen/narrow the preview with \`opts.maxTextLength\`.
 - Prefer checking operation \`parameters\` before designing multi-step logic; use \`searchSpecs(...)\` to discover query-language features and constraints.
 - Fall back to custom traversal/aggregation only when endpoint-native options cannot express the needed result shape.
 

@@ -75,25 +75,27 @@ export function buildSpecDocs(core: IndexSpec, serviceSpecs: Record<string, Inde
   for (const [specKey, spec] of entries) {
     const accessor = specAccessor(specKey)
 
-    // spec doc — info.title / info.description
+    // spec doc — info.title / info.description. The header is a pasteable
+    // accessor: reading it returns the full info block.
     const specText = joinText([spec.info?.title, spec.info?.description])
     if (specText) {
       docs.push({
         id: `${specKey}::spec`,
-        header: spec.info?.title ? `${accessor}.info — ${spec.info.title}` : `${accessor}.info`,
+        header: `${accessor}.info`,
         text: specText,
         kind: 'spec',
         spec: specKey,
       })
     }
 
-    // tag docs
+    // tag docs. The header is a pasteable accessor that resolves to the tag
+    // object (read `.description` off it for the full text).
     for (const tag of spec.tags ?? []) {
       if (!tag?.name)
         continue
       docs.push({
         id: `${specKey}::tag::${tag.name}`,
-        header: `${accessor}.tags — ${tag.name}`,
+        header: `${accessor}.tags.find((t) => t.name === ${JSON.stringify(tag.name)})`,
         text: joinText([tag.name, tag.description]),
         kind: 'tag',
         spec: specKey,
@@ -137,8 +139,16 @@ export function buildSpecDocs(core: IndexSpec, serviceSpecs: Record<string, Inde
 /**
  * Sandbox-side `searchSpecs` helper, declared at module scope in the query run
  * script (closes over `__specIndex`). Returns minisearch's ranked hits
- * (header/text/kind/spec/score), scoped by optional `specs`, filtered by
- * `minScore`, capped at `limit`.
+ * (header/text/truncated/kind/spec/score), filtered by `minScore`, capped at
+ * `limit`.
+ *
+ * Each hit's `text` is a SEARCH PREVIEW: long matches are truncated to
+ * `maxTextLength` chars (default 800) and wrapped with `[TRUNCATED PREVIEW …]`
+ * markers — at the top and bottom — that name the hit's `header` accessor so
+ * the agent reads the full, untruncated source by pasting that accessor into a
+ * follow-up `query` call. We deliberately truncate HERE (in search) and never
+ * in the spec bindings themselves: a hit is a pointer, the binding is the
+ * source of truth.
  */
 export const SEARCH_SPECS_SOURCE = `function searchSpecs(query, opts) {
   if (typeof query !== 'string' || query.trim() === '') {
@@ -148,11 +158,20 @@ export const SEARCH_SPECS_SOURCE = `function searchSpecs(query, opts) {
   const limit = typeof options.limit === 'number' ? options.limit : 10;
   const fuzzy = typeof options.fuzzy === 'number' ? options.fuzzy : 0.2;
   const prefix = options.prefix !== false;
-  const only = Array.isArray(options.specs) ? new Set(options.specs) : null;
+  const maxText = typeof options.maxTextLength === 'number' && options.maxTextLength > 0 ? options.maxTextLength : 800;
   let results = __specIndex.search(query, { fuzzy, prefix });
-  if (only) results = results.filter((r) => only.has(r.spec));
   if (typeof options.minScore === 'number') results = results.filter((r) => r.score >= options.minScore);
-  return results.slice(0, limit).map((r) => ({ header: r.header, text: r.text, kind: r.kind, spec: r.spec, score: r.score }));
+  return results.slice(0, limit).map((r) => {
+    const full = typeof r.text === 'string' ? r.text : '';
+    const truncated = full.length > maxText;
+    let text = full;
+    if (truncated) {
+      const head = '[TRUNCATED PREVIEW — showing first ' + maxText + ' of ' + full.length + ' chars; this text is INCOMPLETE. Read the full, untruncated source in code via: ' + r.header + ']\\n\\n';
+      const foot = '\\n\\n[END TRUNCATED PREVIEW — content was cut off. Do not rely on this preview; read the full source via: ' + r.header + ']';
+      text = head + full.slice(0, maxText) + foot;
+    }
+    return { header: r.header, text: text, truncated: truncated, kind: r.kind, spec: r.spec, score: r.score };
+  });
 }`
 
 /**

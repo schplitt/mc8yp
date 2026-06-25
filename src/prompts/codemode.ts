@@ -86,11 +86,12 @@ type Spec = {
 }
 
 type SpecSearchHit = {
-  // JS accessor pointing at the source, e.g.
-  //   "coreSpec.paths['/inventory/managedObjects'].get"
-  //   "coreSpec.tags — Query language"
+  // Pasteable JS accessor pointing at the source — read it for the full text, e.g.
+  //   coreSpec.paths['/inventory/managedObjects'].get
+  //   coreSpec.tags.find((t) => t.name === 'Query language')
   header: string
-  text: string
+  text: string // a TRUNCATED preview of the match; read \`header\` for the full source
+  truncated: boolean // true when \`text\` was cut to a preview
   kind: 'endpoint' | 'tag' | 'spec'
   spec: string // 'core' or a serviceSpecs key
   score: number // higher = more relevant; hits come back best-first
@@ -100,23 +101,23 @@ declare const coreSpec: Spec
 declare const serviceSpecs: ${serviceSpecsType}
 declare function searchSpecs(
   query: string,
-  opts?: { limit?: number, minScore?: number, fuzzy?: number, prefix?: boolean, specs?: string[] }
+  opts?: { limit?: number, minScore?: number, fuzzy?: number, prefix?: boolean, maxTextLength?: number }
 ): SpecSearchHit[]
 \`\`\`
 
 ### Searching Across Specs
 
-\`searchSpecs\` indexes endpoints, tags, and spec info from every visible spec in one place. Use it **after** browsing the paths directly — to learn how a parameter or format works (e.g. the query language), to understand bodies, or to confirm you have the right endpoint when unsure. Hits come back best-first; each \`header\` is a JS accessor pointing at the source. Cap with \`opts.limit\` (default 5), scope with \`opts.specs\`, threshold with \`opts.minScore\`.
+\`searchSpecs\` indexes endpoints, tags, and spec info from every visible spec in one place. Use it **after** browsing the paths directly — to learn how a parameter or format works (e.g. the query language), to understand bodies, or to confirm you have the right endpoint when unsure. Hits come back best-first. Each hit's \`text\` is a **truncated preview** (long matches are cut and marked \`[TRUNCATED PREVIEW …]\`, with \`truncated: true\`) — it is **not** the full doc. Each \`header\` is a **pasteable accessor**: when a hit looks relevant, **paste its \`header\` into a follow-up \`query\` call to read the full, untruncated source** (the binding itself is never truncated). Cap with \`opts.limit\` (default 5), threshold with \`opts.minScore\`, resize the preview with \`opts.maxTextLength\`.
 
 \`\`\`js
-// Confirm/inspect how the query language is used — it is documented in core but
-// applies across services. The header points to where to read the full text.
+// 1) Find the relevant doc — the query language is documented in core but
+//    applies across services. Hit \`text\` is a truncated preview.
 () => searchSpecs('query language filter operator', { limit: 5 })
 \`\`\`
-
 \`\`\`js
-// Scope the search to a single service
-() => searchSpecs('asset hierarchy', { specs: ['dtm'] })
+// 2) Read the FULL, untruncated source by pasting the chosen hit's header.
+//    (e.g. for the "Query language" tag hit above)
+() => coreSpec.tags.find((t) => t.name === 'Query language')?.description
 \`\`\`
 
 Examples (all zero-parameter — note no arguments in the arrow function signatures):
