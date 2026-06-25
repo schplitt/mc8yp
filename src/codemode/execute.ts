@@ -23,7 +23,7 @@ export const BLOCKED_REQUEST_PREFIX = 'Request blocked by MCP connection policy.
 const SANDBOX_LIMITS = {
   memoryMb: 128,
   cpuTimeMs: 50_000,
-  maxBridgeCalls: 200,
+  maxBridgeCalls: 40,
 } as const
 
 // ─────────────────────────────────────────────────────────────────────────

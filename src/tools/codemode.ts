@@ -93,37 +93,15 @@ declare function searchSpecs(
 \`\`\`
 
 - **Start by browsing the specs directly.** \`coreSpec\` — the main Cumulocity REST surface, always present. \`serviceSpecs\` — microservice APIs available on the active tenant, keyed by contextPath; an entry is **present iff** the service is reachable on this tenant. Paths are already prefixed (e.g. \`/service/myservice/items\`). Check with \`serviceSpecs.dtm\` (or \`'dtm' in serviceSpecs\`) before reaching in. Read \`Object.keys(coreSpec.paths)\` / \`serviceSpecs[...].paths\` and inspect the operation you expect to use.
-- \`searchSpecs\` — **secondary, keyword-based lookup.** Once you have (or think you have) the right endpoint, reach for it when the path listing alone is not enough: to learn **how a specific parameter is used or its expected format** (e.g. the query / \`$filter\` syntax, documented only under a tag), to understand **request/response bodies**, or as a **fallback when you are not sure you found the correct endpoint**. It searches every spec at once, so it surfaces docs that live in only one spec but apply broadly. Hits are returned **best-first** (descending \`score\`); each \`header\` is a JS accessor pointing straight at the source (e.g. \`coreSpec.paths['/x'].get\`), so you can read the full detail directly. Scope with \`opts.specs\`, cap with \`opts.limit\` (default 10), threshold with \`opts.minScore\`.
-- Prefer checking operation \`parameters\` before designing multi-step logic. If filters, expansions, or selectors exist, use them first.
-- When an operation has \`tags\`, read the matching tag descriptions to discover domain-specific query language/functions and recommended usage patterns.
+- \`searchSpecs\` — **secondary, keyword-based lookup.** Once you have (or think you have) the right endpoint, reach for it when the path listing alone is not enough: to learn **how a specific parameter is used or its expected format** (e.g. the query / \`$filter\` syntax, documented only under a tag), to understand **request/response bodies**, or as a **fallback when you are not sure you found the correct endpoint**. It searches every spec at once, so it surfaces docs that live in only one spec but apply broadly. Hits are returned **best-first** (descending \`score\`); each \`header\` is a JS accessor pointing straight at the source (e.g. \`coreSpec.paths['/x'].get\`), so you can read the full detail directly. Scope with \`opts.specs\`, cap with \`opts.limit\` (default 5), threshold with \`opts.minScore\`.
+- Prefer checking operation \`parameters\` before designing multi-step logic; use \`searchSpecs(...)\` to discover query-language features and constraints.
 - Fall back to custom traversal/aggregation only when endpoint-native options cannot express the needed result shape.
-
-Both \`coreSpec\` and each \`serviceSpecs\` entry have a top-level \`tags\` array with domain documentation. Each operation may reference one or more tags by name via its \`tags[]\` field. When you need deeper context about an API area or resource, look up the matching tag entry by name and read its \`description\`.
 
 \`\`\`js
 // After locating an endpoint, search for how a parameter/format works (e.g. the
 // query language) or to confirm you have the right one. Each hit's header points
 // at the source node to read next.
 () => searchSpecs('query language filter operator', { limit: 5 })
-\`\`\`
-
-\`\`\`js
-// Get all tag names to find relevant documentation areas — use first when you know the domain but not the exact path
-() => serviceSpecs.dtm?.tags?.map(t => t.name)
-\`\`\`
-
-\`\`\`js
-// Find documentation for a known tag name
-() => serviceSpecs.dtm?.tags?.find(t => t.name === 'Assets')?.description
-\`\`\`
-
-\`\`\`js
-// Follow the tag reference from a specific operation
-() => {
-  const op = serviceSpecs.dtm?.paths['/service/dtm/assets/linkedSeries']?.get
-  const tagName = op?.tags?.[0]
-  return tagName ? serviceSpecs.dtm?.tags?.find(t => t.name === tagName)?.description : null
-}
 \`\`\`
 
 ${getQueryResultDescription(env)}
@@ -185,8 +163,10 @@ Your code must evaluate to an async function. Return the final value you want.
 Execution strategy:
 - First inspect endpoint parameters with \`query\` and choose the lowest-call approach.
 - Read relevant tag documentation to discover domain query language/features before writing custom control flow.
-- Prefer native API filters/expansions/selectors over manual traversal loops when both satisfy the request.
-- Use manual traversal only when endpoint-native options cannot express the needed result shape.
+- Prefer native API filters/expansions/selectors/hierarchy operators over manual traversal loops when both satisfy the request.
+- Do not hardcode ID arrays copied from previous responses for open-ended tenant data. Derive candidate IDs at runtime via endpoint-native filters or hierarchy endpoints.
+- Avoid N+1 per-ID fetch loops for unbounded sets. Use bulk/list endpoints with server-side filtering first; use per-ID traversal only when no endpoint-native alternative exists.
+- For hierarchy requests (for example "under <asset/group>"), resolve the parent once, then use a hierarchy-capable endpoint or server-side filter rather than enumerating fixed child IDs.
 
 On success the result is returned in Toon format. On a blocked or failed execution a plain text message is returned. A blocked message means the operation was denied by connection policy — retrying through the same connection will not help.
 

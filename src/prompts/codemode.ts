@@ -52,8 +52,10 @@ Use \`query\` to inspect OpenAPI specs (bundled core or discovered microservices
 - The \`query\` tool shows the raw bundled OpenAPI specs for the selected build
 - The current MCP connection may still block \`execute\` requests through deny rules and/or an allow list even when an operation exists in a visible spec
 - Prefer endpoint-native filters/expansions/selectors over manual traversal loops when they can express the same result
-- Inspect operation \`parameters\` first, then use referenced \`tags\` documentation to discover domain query-language features and constraints
-- If you are going to send a request with a \`query=\` parameter (or any parameter whose schema format is \`c8y:query\`), you MUST verify the query-language syntax first via \`searchSpecs(...)\` or the referenced tag docs, and cite what you found in your reasoning before calling \`execute\`
+- Inspect operation \`parameters\` first; use \`searchSpecs(...)\` to discover domain query-language features and constraints
+- If you are going to send a request with a \`query=\` parameter, you MUST verify the query-language syntax first via \`searchSpecs(...)\`, and cite what you found in your reasoning before calling \`execute\`
+- Avoid hardcoded ID arrays copied from prior responses. For open-ended tenant data, derive IDs via endpoint-native filters, hierarchy operators, or subresource endpoints at execution time.
+- Avoid N+1 per-ID fetch loops when the candidate set can grow. Use one bulk/list endpoint with server-side filtering first; fall back to per-ID requests only when no endpoint-native alternative exists.
 - Fall back to custom traversal/aggregation only when endpoint-native options cannot express the required output
 
 ### Available Shape
@@ -104,7 +106,7 @@ declare function searchSpecs(
 
 ### Searching Across Specs
 
-\`searchSpecs\` indexes endpoints, tags, and spec info from every visible spec in one place. Use it **after** browsing the paths directly — to learn how a parameter or format works (e.g. the query language), to understand bodies, or to confirm you have the right endpoint when unsure. Hits come back best-first; each \`header\` is a JS accessor pointing at the source. Cap with \`opts.limit\` (default 10), scope with \`opts.specs\`, threshold with \`opts.minScore\`.
+\`searchSpecs\` indexes endpoints, tags, and spec info from every visible spec in one place. Use it **after** browsing the paths directly — to learn how a parameter or format works (e.g. the query language), to understand bodies, or to confirm you have the right endpoint when unsure. Hits come back best-first; each \`header\` is a JS accessor pointing at the source. Cap with \`opts.limit\` (default 5), scope with \`opts.specs\`, threshold with \`opts.minScore\`.
 
 \`\`\`js
 // Confirm/inspect how the query language is used — it is documented in core but
@@ -115,31 +117,6 @@ declare function searchSpecs(
 \`\`\`js
 // Scope the search to a single service
 () => searchSpecs('asset hierarchy', { specs: ['dtm'] })
-\`\`\`
-
-### Tag Documentation
-
-Both \`coreSpec\` and each \`serviceSpecs\` entry have a top-level \`tags\` array with domain documentation. 
-Each operation may reference one or more tags by name via its \`tags[]\` field. When you need deeper context 
-about an API area or resource, look up the matching tag entry by name and read its \`description\`.
-
-\`\`\`js
-// Get all tag names to find relevant documentation areas - use first when you know the domain but not the exact path
-() => serviceSpecs.dtm?.tags?.map(t => t.name)
-\`\`\`
-
-\`\`\`js
-// Find documentation for a known tag name
-() => serviceSpecs.dtm?.tags?.find(t => t.name === 'Assets')?.description
-\`\`\`
-
-\`\`\`js
-// Follow the tag reference from a specific operation
-() => {
-  const op = serviceSpecs.dtm?.paths['/service/dtm/assets/linkedSeries']?.get
-  const tagName = op?.tags?.[0]
-  return tagName ? serviceSpecs.dtm?.tags?.find(t => t.name === tagName)?.description : null
-}
 \`\`\`
 
 Examples (all zero-parameter — note no arguments in the arrow function signatures):
@@ -156,14 +133,6 @@ Examples (all zero-parameter — note no arguments in the arrow function signatu
 
 \`\`\`js
 () => coreSpec.paths['/inventory/managedObjects']?.get
-\`\`\`
-
-\`\`\`js
-() => {
-  const op = coreSpec.paths['/inventory/managedObjects']?.get
-  const tagName = op?.tags?.[0]
-  return tagName ? coreSpec.tags?.find((t) => t.name === tagName)?.description : null
-}
 \`\`\`
 
 ## execute
@@ -220,11 +189,14 @@ ${getOpenApiSection()}
 
 ## Working Pattern
 1. Use \`query\` to find the right endpoint, parameters, and response shape — browse \`coreSpec\`/\`serviceSpecs\` paths directly first, then use \`searchSpecs(...)\` when you need parameter/format/body insight or are unsure you found the right endpoint.
-2. If an operation uses \`query\` / \`c8y:query\`, verify syntax before execute: inspect operation \`parameters\`, then use \`searchSpecs(...)\` and/or the referenced tag description to confirm operators/functions and constraints.
+2. If an operation uses \`query\` / \`c8y:query\`, verify syntax before execute: inspect operation \`parameters\`, then use \`searchSpecs(...)\` to confirm operators/functions and constraints.
 3. Cite that evidence in your response before the write/read execute call that depends on it.
-4. Prefer endpoint-native filters/expansions/selectors before manual traversal.
-5. Use \`execute\` with a small async function expression that calls that endpoint and returns only the needed result.
-6. Keep functions small and return only the data needed for the next reasoning step.
+4. Plan for scale: assume tenant datasets can be large and unbounded.
+5. Do not hardcode ID lists from sample outputs unless the user explicitly provided a fixed ID set.
+6. Prefer endpoint-native filters/expansions/selectors/hierarchy operators before manual traversal.
+7. Avoid N+1 per-ID fetch loops unless the candidate set is explicitly small and bounded.
+8. Use \`execute\` with a small async function expression that calls that endpoint and returns only the needed result.
+9. Keep functions small and return only the data needed for the next reasoning step.
 ${restrictionSection}
 `,
     )
