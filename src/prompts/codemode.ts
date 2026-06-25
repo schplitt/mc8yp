@@ -43,7 +43,7 @@ Use \`query\` to inspect OpenAPI specs (bundled core or discovered microservices
 - Input: a **zero-parameter** JavaScript function expression
 - Do NOT declare \`coreSpec\`, \`serviceSpecs\`, or \`searchSpecs\` as function parameters — they are already available as top-level bindings in the surrounding scope
 - **Browse \`coreSpec.paths\` / \`serviceSpecs[...].paths\` to locate the endpoint** you expect to use
-- **\`searchSpecs(query, opts)\` is your primary tool for discovering capabilities the path listing does NOT show** — the query language, \`$filter\` operators, hierarchy operators (e.g. \`isinhierarchyof\`), parameter formats, and request/response bodies. They live in tag docs, not path names, so browsing paths alone never reveals them. It indexes every visible spec (one document per endpoint, per tag, and per spec info block). Each hit's \`text\` is a truncated preview; **paste the hit's \`header\` (a pasteable JS accessor) into a follow-up \`query\` to read the full, untruncated source**
+- **\`searchSpecs(query, opts)\` is your primary tool for discovering capabilities the path listing does NOT show** — operators, parameter semantics and accepted formats, request/response bodies, and other usage details. They live in tag and parameter docs, not path names, so browsing paths alone never reveals them. It indexes every visible spec (one document per endpoint, per tag, and per spec info block). Each hit's \`text\` is a truncated preview; **paste the hit's \`header\` (a pasteable JS accessor) into a follow-up \`query\` to read the full, untruncated source**
 - \`coreSpec\` is for the main Cumulocity REST surface: inventory, alarms, events, measurements, identity, device control, users, tenants, audit
 - \`serviceSpecs\` contains microservice APIs available on the current tenant, keyed by contextPath (e.g. \`serviceSpecs.dtm\`). An entry is present if the service is actually reachable on this tenant — use \`serviceSpecs.<key>\` or \`'<key>' in serviceSpecs\` to check availability. Paths are already prefixed for direct use with \`cumulocity.request()\`
 - Return the exact value you want back from that function
@@ -51,10 +51,10 @@ Use \`query\` to inspect OpenAPI specs (bundled core or discovered microservices
 - Strings are returned as-is; other results are returned as JSON text
 - The \`query\` tool shows the raw bundled OpenAPI specs for the selected build
 - The current MCP connection may still block \`execute\` requests through deny rules and/or an allow list even when an operation exists in a visible spec
-- **Before writing any manual traversal, recursion, or client-side aggregation loop, \`searchSpecs\` for a server-side operator that does it in one request** (filters, expansions, hierarchy operators). A hand-written BFS over sub-resources is almost always the wrong answer.
-- Inspect operation \`parameters\` first; use \`searchSpecs(...)\` to discover domain query-language features and constraints
-- **If you are going to send a request with a \`query=\` / \`$filter=\` parameter, you MUST \`searchSpecs\` the query language and confirm the exact operator and syntax first**, and cite what you found in your reasoning before calling \`execute\`. Known gotchas: \`eq\` supports wildcards (\`name eq 'Borkum*'\`), \`like\` is NOT supported, and "everything under X" is \`isinhierarchyof(<id>...)\`, not a recursive fetch
-- Avoid hardcoded ID arrays copied from prior responses. For open-ended tenant data, derive IDs via endpoint-native filters, hierarchy operators, or subresource endpoints at execution time.
+- **Before writing any manual traversal, recursion, or client-side aggregation loop, \`searchSpecs\` for a server-side capability that does it in one request.** A hand-written BFS over sub-resources is almost always the wrong answer.
+- Inspect operation \`parameters\` first; use \`searchSpecs(...)\` to discover the operators, formats, and constraints they accept
+- **If you are going to send a request with a parameter whose value has its own syntax or structured format, you MUST \`searchSpecs\` to confirm the exact accepted syntax first**, and cite what you found in your reasoning before calling \`execute\`. Do not assume a feature exists or guess its spelling — and prefer a single server-side request over a client-side loop wherever the API supports it
+- Avoid hardcoded ID arrays copied from prior responses. For open-ended tenant data, derive IDs via endpoint-native filters, relationship/subresource endpoints, or other server-side capabilities at execution time.
 - Avoid N+1 per-ID fetch loops when the candidate set can grow. Use one bulk/list endpoint with server-side filtering first; fall back to per-ID requests only when no endpoint-native alternative exists.
 - Fall back to custom traversal/aggregation only when endpoint-native options cannot express the required output
 
@@ -88,7 +88,7 @@ type Spec = {
 type SpecSearchHit = {
   // Pasteable JS accessor pointing at the source — read it for the full text, e.g.
   //   coreSpec.paths['/inventory/managedObjects'].get
-  //   coreSpec.tags.find((t) => t.name === 'Query language')
+  //   coreSpec.tags.find((t) => t.name === 'Alarms')
   header: string
   text: string // a TRUNCATED preview of the match; read \`header\` for the full source
   truncated: boolean // true when \`text\` was cut to a preview
@@ -107,17 +107,15 @@ declare function searchSpecs(
 
 ### Searching Across Specs
 
-\`searchSpecs\` indexes endpoints, tags, and spec info from every visible spec in one place. Browse paths to locate an endpoint, but **reach for \`searchSpecs\` to discover anything the path listing does not show** — query-language and \`$filter\` operators, hierarchy operators (e.g. \`isinhierarchyof\`), parameter formats, and request/response bodies (these live in tag docs, not path names). Always search it before writing a manual traversal loop or sending a \`query=\` request. Hits come back best-first. Each hit's \`text\` is a **truncated preview** (long matches are cut and marked \`[TRUNCATED PREVIEW …]\`, with \`truncated: true\`) — it is **not** the full doc. Each \`header\` is a **pasteable accessor**: when a hit looks relevant, **paste its \`header\` into a follow-up \`query\` call to read the full, untruncated source** (the binding itself is never truncated). Cap with \`opts.limit\` (default 5), threshold with \`opts.minScore\`, resize the preview with \`opts.maxTextLength\`.
+\`searchSpecs\` indexes endpoints, tags, and spec info from every visible spec in one place. Browse paths to locate an endpoint, but **reach for \`searchSpecs\` to discover anything the path listing does not show** — operators, parameter semantics and accepted formats, request/response bodies, and other usage details (these live in tag and parameter docs, not path names). Always search it before writing a manual traversal loop or passing a parameter whose syntax you are unsure of. Hits come back best-first. Each hit's \`text\` is a **truncated preview** (long matches are cut and marked \`[TRUNCATED PREVIEW …]\`, with \`truncated: true\`) — it is **not** the full doc. Each \`header\` is a **pasteable accessor**: when a hit looks relevant, **paste its \`header\` into a follow-up \`query\` call to read the full, untruncated source** (the binding itself is never truncated). Cap with \`opts.limit\` (default 5), threshold with \`opts.minScore\`, resize the preview with \`opts.maxTextLength\`.
 
 \`\`\`js
-// 1) Find the relevant doc — the query language is documented in core but
-//    applies across services. Hit \`text\` is a truncated preview.
-() => searchSpecs('query language filter operator', { limit: 5 })
+// 1) Find the relevant doc for what you need. Hit \`text\` is a truncated preview.
+() => searchSpecs('keywords describing the capability you need', { limit: 5 })
 \`\`\`
 \`\`\`js
 // 2) Read the FULL, untruncated source by pasting the chosen hit's header.
-//    (e.g. for the "Query language" tag hit above)
-() => coreSpec.tags.find((t) => t.name === 'Query language')?.description
+() => coreSpec.tags.find((t) => t.name === 'Alarms')?.description
 \`\`\`
 
 Examples (all zero-parameter — note no arguments in the arrow function signatures):
@@ -189,12 +187,12 @@ ${getRuntimeSection()}
 ${getOpenApiSection()}
 
 ## Working Pattern
-1. Use \`query\` to find the right endpoint, parameters, and response shape — browse \`coreSpec\`/\`serviceSpecs\` paths to locate the endpoint, and use \`searchSpecs(...)\` to discover query-language/\`$filter\`/hierarchy operators and parameter formats that the path listing does not show.
-2. If an operation uses \`query\` / \`c8y:query\`, or you are about to write a traversal/recursion/aggregation loop, verify syntax before execute: inspect operation \`parameters\`, then use \`searchSpecs(...)\` to confirm operators/functions (e.g. \`isinhierarchyof\`, wildcard \`eq\`) and constraints. Reach for a server-side operator before any manual loop.
+1. Use \`query\` to find the right endpoint, parameters, and response shape — browse \`coreSpec\`/\`serviceSpecs\` paths to locate the endpoint, and use \`searchSpecs(...)\` to discover the operators, parameter formats, and usage details that the path listing does not show.
+2. If an operation takes a parameter with its own syntax or structured format, or you are about to write a traversal/recursion/aggregation loop, verify before execute: inspect operation \`parameters\`, then use \`searchSpecs(...)\` to confirm the available operators/features and constraints. Reach for a server-side capability before any manual loop.
 3. Cite that evidence in your response before the write/read execute call that depends on it.
 4. Plan for scale: assume tenant datasets can be large and unbounded.
 5. Do not hardcode ID lists from sample outputs unless the user explicitly provided a fixed ID set.
-6. Prefer endpoint-native filters/expansions/selectors/hierarchy operators before manual traversal.
+6. Prefer endpoint-native filters/expansions/selectors before manual traversal.
 7. Avoid N+1 per-ID fetch loops unless the candidate set is explicitly small and bounded.
 8. Use \`execute\` with a small async function expression that calls that endpoint and returns only the needed result.
 9. Keep functions small and return only the data needed for the next reasoning step.

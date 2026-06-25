@@ -79,7 +79,7 @@ type SpecSearchHit = {
   // A pasteable JS accessor pointing at the source of the hit. Paste it into a
   // follow-up query() to read the FULL, untruncated node, e.g.
   //   coreSpec.paths['/inventory/managedObjects'].get
-  //   coreSpec.tags.find((t) => t.name === 'Query language')
+  //   coreSpec.tags.find((t) => t.name === 'Alarms')
   //   serviceSpecs['dtm'].info
   header: string
   // A search PREVIEW of the indexed text. Long matches are truncated and wrapped
@@ -97,14 +97,14 @@ declare function searchSpecs(
 \`\`\`
 
 - **Browse the specs to locate an endpoint.** \`coreSpec\` — the main Cumulocity REST surface, always present. \`serviceSpecs\` — microservice APIs available on the active tenant, keyed by contextPath; an entry is **present iff** the service is reachable on this tenant. Paths are already prefixed (e.g. \`/service/myservice/items\`). Check with \`serviceSpecs.dtm\` (or \`'dtm' in serviceSpecs\`) before reaching in. Read \`Object.keys(coreSpec.paths)\` / \`serviceSpecs[...].paths\` and inspect the operation you expect to use.
-- **\`searchSpecs\` is the primary way to discover capabilities the path listing does NOT show you** — the Cumulocity **query language**, \`$filter\` operators, **hierarchy operators (e.g. \`isinhierarchyof\`)**, parameter formats, and request/response bodies. These live in tag docs, not in the path names, so browsing paths alone will never reveal them. It searches every spec at once. Hits are returned **best-first** (descending \`score\`). Each hit's \`text\` is a **truncated preview** (long hits are cut and marked \`[TRUNCATED PREVIEW …]\`, with \`truncated: true\`); each \`header\` is a **pasteable JS accessor** (e.g. \`coreSpec.paths['/x'].get\`, \`coreSpec.tags.find((t) => t.name === 'Query language')\`). When a hit looks relevant, **paste its \`header\` into a follow-up \`query\` call to read the full, untruncated source** — the binding is never truncated. Cap with \`opts.limit\` (default 5), threshold with \`opts.minScore\`, widen/narrow the preview with \`opts.maxTextLength\`.
-- **Before writing ANY manual traversal, recursion, or client-side aggregation loop, \`searchSpecs\` for a server-side operator that does it in one request** — filters, expansions, and especially hierarchy operators. A hand-written BFS over sub-resources is almost always the wrong answer; search first. Manual loops are a last resort, only when no endpoint-native option exists.
-- **Before sending any request with a \`query=\` / \`$filter=\` parameter you MUST \`searchSpecs\` the query language and confirm the exact operator and syntax first.** Known gotchas the docs spell out: \`eq\` supports wildcards (\`name eq 'Borkum*'\`), \`like\` is NOT supported, and "everything under X" is expressed with \`isinhierarchyof(<id>...)\`, not a recursive fetch.
+- **\`searchSpecs\` is the primary way to discover capabilities the path listing does NOT show you** — operators, parameter semantics and accepted formats, request/response bodies, and other usage details. These live in tag and parameter docs, not in the path names, so browsing paths alone will never reveal them. It searches every spec at once. Hits are returned **best-first** (descending \`score\`). Each hit's \`text\` is a **truncated preview** (long hits are cut and marked \`[TRUNCATED PREVIEW …]\`, with \`truncated: true\`); each \`header\` is a **pasteable JS accessor** (e.g. \`coreSpec.paths['/x'].get\`, \`coreSpec.tags.find((t) => t.name === 'Alarms')\`). When a hit looks relevant, **paste its \`header\` into a follow-up \`query\` call to read the full, untruncated source** — the binding is never truncated. Cap with \`opts.limit\` (default 5), threshold with \`opts.minScore\`, widen/narrow the preview with \`opts.maxTextLength\`.
+- **Before writing ANY manual traversal, recursion, or client-side aggregation loop, \`searchSpecs\` for a server-side capability that does it in one request.** A hand-written BFS over sub-resources is almost always the wrong answer; search first. Manual loops are a last resort, only when no endpoint-native option exists.
+- **Before passing a parameter whose value has its own syntax or structured format, you MUST \`searchSpecs\` to confirm the exact accepted syntax first.** Do not assume a feature exists or guess its spelling — verify it in the docs the search surfaces.
 
 \`\`\`js
-// Discover query-language / hierarchy / filter capabilities BEFORE writing logic.
-// Read the chosen hit's header to get the full operator syntax.
-() => searchSpecs('hierarchy filter query language operator', { limit: 5 })
+// Discover an endpoint's operators, parameter formats, and usage BEFORE writing
+// logic. Read the chosen hit's header to get the full detail.
+() => searchSpecs('keywords for the capability you need', { limit: 5 })
 \`\`\`
 
 ${getQueryResultDescription(env)}
@@ -164,12 +164,12 @@ declare const cumulocity: {
 Your code must evaluate to an async function. Return the final value you want.
 
 Execution strategy:
-- First inspect endpoint parameters with \`query\`, and **\`searchSpecs\` the query language before writing any control flow** — it surfaces \`$filter\` operators and hierarchy operators (e.g. \`isinhierarchyof\`) that the path listing never shows. Then choose the lowest-call approach.
+- First inspect endpoint parameters with \`query\`, and **\`searchSpecs\` for the relevant usage details before writing any control flow** — it surfaces operators and parameter semantics that the path listing never shows. Then choose the lowest-call approach.
 - **If you catch yourself about to write a loop, recursion, or client-side aggregation, stop and \`searchSpecs\` for a server-side operator first.** A hand-written BFS/DFS over sub-resources is almost always the wrong answer when one filtered request would do.
-- Prefer native API filters/expansions/selectors/hierarchy operators over manual traversal loops when both satisfy the request.
-- Do not hardcode ID arrays copied from previous responses for open-ended tenant data. Derive candidate IDs at runtime via endpoint-native filters or hierarchy endpoints.
+- Prefer native API filters/expansions/selectors/traversal operators over manual traversal loops when both satisfy the request.
+- Do not hardcode ID arrays copied from previous responses for open-ended tenant data. Derive candidate IDs at runtime via endpoint-native filters or relationship endpoints.
 - Avoid N+1 per-ID fetch loops for unbounded sets. Use bulk/list endpoints with server-side filtering first; use per-ID traversal only when no endpoint-native alternative exists.
-- For hierarchy requests (for example "everything under <asset/group>"), resolve the parent id(s) once, then use \`isinhierarchyof(<id>...)\` (or another hierarchy-capable filter) in a single query rather than recursively enumerating children. Combine it with the other predicate in the same \`$filter\`, e.g. \`isinhierarchyof(123) and <fragment>.state eq 'maintenance'\`.
+- For "everything under <parent>" requests, resolve the parent id(s) once, then look for a server-side filter or traversal operator that returns the whole subtree in a single query rather than recursively enumerating children. Combine it with any other predicate in the same request.
 
 On success the result is returned in Toon format. On a blocked or failed execution a plain text message is returned. A blocked message means the operation was denied by connection policy — retrying through the same connection will not help.
 
