@@ -525,6 +525,159 @@ describe('query', () => {
       restore()
     }
   })
+
+  it('exposes searchSpecs over endpoints, tags, and spec info with source headers', async () => {
+    const restore = withSpecs({
+      // Runtime specs carry `info` and `operationId`; the narrow Spec type does
+      // not, hence the cast.
+      core: {
+        info: { title: 'Cumulocity core', description: 'The core REST API' },
+        tags: [{ name: 'Query language', description: 'OData $filter eq operator with wildcards' }],
+        paths: {
+          '/inventory/managedObjects': {
+            get: {
+              operationId: 'getManagedObjectCollection',
+              summary: 'Retrieve managed objects',
+              description: 'List the inventory of managed objects',
+              tags: ['Inventory'],
+            },
+          },
+        },
+      },
+      specs: { dtm: { paths: { '/service/dtm/assets': { get: { summary: 'List digital twin assets' } } } } },
+    } as unknown as ResolvedSpecs)
+    try {
+      const result = await query(
+        '() => searchSpecs("odata filter operator", { limit: 5 }).map(r => ({ header: r.header, kind: r.kind, spec: r.spec, hasText: typeof r.text === "string", hasScore: typeof r.score === "number" }))',
+      )
+      const hits = JSON.parse(stripQueryFooter(result)) as Array<{ header: string, kind: string, spec: string, hasText: boolean, hasScore: boolean }>
+      expect(hits.length).toBeGreaterThan(0)
+      // Top hit is the core "Query language" tag, identified by its header.
+      expect(hits[0]).toMatchObject({ kind: 'tag', spec: 'core', hasText: true, hasScore: true })
+      expect(hits[0].header).toBe('coreSpec.tags — Query language')
+    } finally {
+      restore()
+    }
+  })
+
+  it('searchSpecs can be scoped to specific specs and indexes service endpoints', async () => {
+    const restore = withSpecs({
+      core: { paths: { '/inventory/managedObjects': { get: { summary: 'Retrieve managed objects' } } } },
+      specs: { dtm: { paths: { '/service/dtm/assets': { get: { summary: 'List managed assets' } } } } },
+    } as unknown as ResolvedSpecs)
+    try {
+      const result = await query(
+        '() => searchSpecs("managed", { specs: ["dtm"] }).map(r => r.spec)',
+      )
+      const specs = JSON.parse(stripQueryFooter(result)) as string[]
+      expect(specs.length).toBeGreaterThan(0)
+      expect(specs.every((s) => s === 'dtm')).toBe(true)
+    } finally {
+      restore()
+    }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// searchSpecs — full end-to-end through the real query() path. Same code as
+// production query codemode (precompiled prefix → ?bundle minisearch → index →
+// searchSpecs), exercised against a realistic multi-spec surface to prove the
+// keyword search behaves as intended: cross-spec discovery, score ordering,
+// navigable headers, spec scoping, and chaining a hit back into the binding.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('query — searchSpecs end-to-end', () => {
+  interface Hit { header: string, text: string, kind: string, spec: string, score: number }
+
+  const SPECS = {
+    core: {
+      info: { title: 'Cumulocity core', description: 'Inventory, alarms and measurements REST API' },
+      tags: [
+        { name: 'Query language', description: 'OData $filter language: eq, gt, and wildcards to filter managed objects' },
+        { name: 'Alarms', description: 'Alarm severity, status and acknowledgement handling' },
+      ],
+      paths: {
+        '/inventory/managedObjects': {
+          get: {
+            operationId: 'getManagedObjectCollection',
+            summary: 'Retrieve a collection of managed objects',
+            description: 'Paginated inventory listing',
+            tags: ['Inventory'],
+            parameters: [{ name: 'query', in: 'query', description: 'Filter using the $filter query language' }],
+          },
+        },
+        '/alarm/alarms': {
+          get: { operationId: 'getAlarmCollection', summary: 'Retrieve a collection of alarms', tags: ['Alarms'] },
+        },
+      },
+    },
+    specs: {
+      dtm: {
+        info: { title: 'Digital Twin Manager', description: 'Asset model service' },
+        paths: {
+          '/service/dtm/assets': {
+            get: { operationId: 'listAssets', summary: 'List digital twin assets', description: 'Traverse the asset hierarchy' },
+          },
+        },
+      },
+    },
+  } as unknown as ResolvedSpecs
+
+  async function runSearch<T>(code: string): Promise<T> {
+    const ctxSpy = vi.spyOn(c8yMcpServer, 'ctx', 'get').mockReturnValue({
+      custom: { env: 'cli' as const, restrictions: [], allowRules: [], specs: SPECS },
+    } as unknown as ReturnType<typeof c8yMcpServer['ctx']['valueOf']>)
+    try {
+      return JSON.parse(stripQueryFooter(await query(code))) as T
+    } finally {
+      ctxSpy.mockRestore()
+    }
+  }
+
+  it('finds the core query-language docs from a keyword, ranked first, with a navigable header', async () => {
+    const hits = await runSearch<Hit[]>('() => searchSpecs("filter query language")')
+    expect(hits.length).toBeGreaterThan(0)
+    expect(hits[0]).toMatchObject({ kind: 'tag', spec: 'core' })
+    expect(hits[0].header).toBe('coreSpec.tags — Query language')
+  })
+
+  it('returns hits sorted by descending score', async () => {
+    const hits = await runSearch<Hit[]>('() => searchSpecs("managed objects inventory", { limit: 10 })')
+    const scores = hits.map((h) => h.score)
+    expect(scores.length).toBeGreaterThan(1)
+    expect([...scores].sort((a, b) => b - a)).toEqual(scores)
+  })
+
+  it('endpoint headers point straight at the source spec node', async () => {
+    const hits = await runSearch<Hit[]>('() => searchSpecs("retrieve managed objects collection")')
+    const endpoint = hits.find((h) => h.kind === 'endpoint' && h.spec === 'core')
+    expect(endpoint?.header).toBe('coreSpec.paths["/inventory/managedObjects"].get')
+  })
+
+  it('scopes results to a single service and points into serviceSpecs', async () => {
+    const hits = await runSearch<Hit[]>('() => searchSpecs("asset hierarchy", { specs: ["dtm"] })')
+    expect(hits.length).toBeGreaterThan(0)
+    expect(hits.every((h) => h.spec === 'dtm')).toBe(true)
+    expect(hits.some((h) => h.header.startsWith('serviceSpecs["dtm"]'))).toBe(true)
+  })
+
+  it('respects the limit option', async () => {
+    const counts = await runSearch<{ all: number, limited: number }>(
+      '() => ({ all: searchSpecs("collection").length, limited: searchSpecs("collection", { limit: 1 }).length })',
+    )
+    expect(counts.all).toBeGreaterThan(1)
+    expect(counts.limited).toBe(1)
+  })
+
+  it('supports the intended workflow: search, then read the node the header points to', async () => {
+    // Returns an object (query() passes strings through raw, objects as JSON).
+    const out = await runSearch<{ found: boolean, summary: string | null }>(`() => {
+      const hit = searchSpecs("managed objects", { specs: ["core"] }).find(h => h.kind === "endpoint")
+      return { found: !!hit, summary: hit ? coreSpec.paths["/inventory/managedObjects"].get.summary : null }
+    }`)
+    expect(out.found).toBe(true)
+    expect(out.summary).toBe('Retrieve a collection of managed objects')
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────

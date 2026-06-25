@@ -13,6 +13,7 @@ import { c8yMcpServer } from '../server-instance'
 import { evaluateAccessPolicy } from '../utils/restriction-matcher'
 import { HTTP_METHODS } from '../utils/restrictions'
 import type { AllowRule, RestrictionRule } from '../utils/restrictions'
+import { buildSpecSearchSource } from './spec-index'
 
 const QUERY_ENTRY_PATH = '/codemode-query.mjs'
 const EXECUTE_ENTRY_PATH = '/codemode-execute.mjs'
@@ -207,10 +208,14 @@ function buildQueryScript(sourceCode: string): string {
   }
   return [
     // `minisearch` is provided as a source-string import (see QUERY_IMPORTS).
-    // Bound at module scope so the agent's query function can close over it.
+    // coreSpec / serviceSpecs / searchSpecs are bound at module scope so the
+    // agent's query function can close over them. The minisearch index is
+    // (re)built here on every call — caching it in a precompiled prefix is a
+    // follow-up.
     'import MiniSearch from "minisearch";',
     `const coreSpec = ${JSON.stringify(resolved.core)};`,
     `const serviceSpecs = ${JSON.stringify(resolved.specs)};`,
+    buildSpecSearchSource(),
     `const __mc8ypQuery = (${functionExpression});`,
     'if (typeof __mc8ypQuery !== "function") { throw new TypeError("Query code must evaluate to a function.") }',
     'export default await __mc8ypQuery();',
@@ -280,9 +285,9 @@ function extractDefaultExport(exportsObject: unknown): unknown {
   throw new Error(NO_DEFAULT_EXPORT_MESSAGE)
 }
 
-// Source-string imports available to the query sandbox. minisearch lets query
-// code build a search index over coreSpec/serviceSpecs and look up docs (e.g.
-// the OData query language, documented only in core) across all specs at once.
+// Source-string import available to the query sandbox. minisearch (bundled by
+// the `?bundle` plugin) powers the spec search index; the query sandbox stays
+// network-free — minisearch is the only thing it can import.
 const QUERY_IMPORTS: Imports = { minisearch: minisearchBundle }
 
 export async function query(functionCode: string): Promise<string> {

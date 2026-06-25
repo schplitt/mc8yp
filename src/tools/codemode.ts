@@ -72,15 +72,40 @@ type Spec = {
 
 declare const coreSpec: Spec
 declare const serviceSpecs: Record<string, Spec>
+
+// Full-text search over a prebuilt index of EVERY visible spec at once:
+// one document per endpoint, per tag, and per spec info block.
+type SpecSearchHit = {
+  // A JS accessor pointing at the source of the hit, e.g.
+  //   "coreSpec.paths['/inventory/managedObjects'].get"
+  //   "coreSpec.tags — Query language"
+  //   "serviceSpecs['dtm'].info — Digital Twin Manager"
+  header: string
+  text: string // the indexed text for that hit
+  kind: 'endpoint' | 'tag' | 'spec'
+  spec: string // 'core' or a serviceSpecs contextPath key
+  score: number // higher = more relevant; hits are returned best-first
+}
+declare function searchSpecs(
+  query: string,
+  opts?: { limit?: number, minScore?: number, fuzzy?: number, prefix?: boolean, specs?: string[] }
+): SpecSearchHit[]
 \`\`\`
 
-- \`coreSpec\` — the main Cumulocity REST surface. Always present.
-- \`serviceSpecs\` — microservice APIs available on the active tenant, keyed by contextPath. An entry is **present iff** the service is reachable on this tenant. Paths are already prefixed (e.g. \`/service/myservice/items\`). Check with \`serviceSpecs.dtm\` (or \`'dtm' in serviceSpecs\`) before reaching in.
+- **Start by browsing the specs directly.** \`coreSpec\` — the main Cumulocity REST surface, always present. \`serviceSpecs\` — microservice APIs available on the active tenant, keyed by contextPath; an entry is **present iff** the service is reachable on this tenant. Paths are already prefixed (e.g. \`/service/myservice/items\`). Check with \`serviceSpecs.dtm\` (or \`'dtm' in serviceSpecs\`) before reaching in. Read \`Object.keys(coreSpec.paths)\` / \`serviceSpecs[...].paths\` and inspect the operation you expect to use.
+- \`searchSpecs\` — **secondary, keyword-based lookup.** Once you have (or think you have) the right endpoint, reach for it when the path listing alone is not enough: to learn **how a specific parameter is used or its expected format** (e.g. the query / \`$filter\` syntax, documented only under a tag), to understand **request/response bodies**, or as a **fallback when you are not sure you found the correct endpoint**. It searches every spec at once, so it surfaces docs that live in only one spec but apply broadly. Hits are returned **best-first** (descending \`score\`); each \`header\` is a JS accessor pointing straight at the source (e.g. \`coreSpec.paths['/x'].get\`), so you can read the full detail directly. Scope with \`opts.specs\`, cap with \`opts.limit\` (default 10), threshold with \`opts.minScore\`.
 - Prefer checking operation \`parameters\` before designing multi-step logic. If filters, expansions, or selectors exist, use them first.
 - When an operation has \`tags\`, read the matching tag descriptions to discover domain-specific query language/functions and recommended usage patterns.
 - Fall back to custom traversal/aggregation only when endpoint-native options cannot express the needed result shape.
 
 Both \`coreSpec\` and each \`serviceSpecs\` entry have a top-level \`tags\` array with domain documentation. Each operation may reference one or more tags by name via its \`tags[]\` field. When you need deeper context about an API area or resource, look up the matching tag entry by name and read its \`description\`.
+
+\`\`\`js
+// After locating an endpoint, search for how a parameter/format works (e.g. the
+// query language) or to confirm you have the right one. Each hit's header points
+// at the source node to read next.
+() => searchSpecs('query language filter operator', { limit: 5 })
+\`\`\`
 
 \`\`\`js
 // Get all tag names to find relevant documentation areas — use first when you know the domain but not the exact path
@@ -118,7 +143,7 @@ Examples:
 `,
     schema: v.object({
       code: createCodeSchema(
-        'A zero-parameter JavaScript function expression. coreSpec and serviceSpecs are already declared as top-level constants — do not redeclare them as function parameters. Return the final result. Async functions are supported.',
+        'A zero-parameter JavaScript function expression. coreSpec, serviceSpecs, and the searchSpecs(query, opts) helper are already available as top-level bindings — do not redeclare them as function parameters. Return the final result. Async functions are supported.',
       ),
     }),
   }, async (input) => {

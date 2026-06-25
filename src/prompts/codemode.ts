@@ -41,7 +41,9 @@ You have two MCP tools available.
 Use \`query\` to inspect OpenAPI specs (bundled core or discovered microservices).
 
 - Input: a **zero-parameter** JavaScript function expression
-- Do NOT declare \`coreSpec\` or \`serviceSpecs\` as function parameters — they are already declared as top-level constants in the surrounding scope
+- Do NOT declare \`coreSpec\`, \`serviceSpecs\`, or \`searchSpecs\` as function parameters — they are already available as top-level bindings in the surrounding scope
+- **Browse the specs directly first.** Inspect \`coreSpec.paths\` / \`serviceSpecs[...].paths\` and the operation you expect to use
+- \`searchSpecs(query, opts)\` is a secondary, keyword-based lookup over a prebuilt index of every visible spec (one document per endpoint, per tag, and per spec info block). Reach for it **after** browsing paths — when you need to know how a specific parameter is used or its expected format (e.g. the query language documented only under core), to understand request/response bodies, or as a fallback when you are not sure you found the correct endpoint. Read each hit's \`header\` (a JS accessor) to jump to the source in \`coreSpec\`/\`serviceSpecs\`
 - \`coreSpec\` is for the main Cumulocity REST surface: inventory, alarms, events, measurements, identity, device control, users, tenants, audit
 - \`serviceSpecs\` contains microservice APIs available on the current tenant, keyed by contextPath (e.g. \`serviceSpecs.dtm\`). An entry is present if the service is actually reachable on this tenant — use \`serviceSpecs.<key>\` or \`'<key>' in serviceSpecs\` to check availability. Paths are already prefixed for direct use with \`cumulocity.request()\`
 - Return the exact value you want back from that function
@@ -51,6 +53,7 @@ Use \`query\` to inspect OpenAPI specs (bundled core or discovered microservices
 - The current MCP connection may still block \`execute\` requests through deny rules and/or an allow list even when an operation exists in a visible spec
 - Prefer endpoint-native filters/expansions/selectors over manual traversal loops when they can express the same result
 - Inspect operation \`parameters\` first, then use referenced \`tags\` documentation to discover domain query-language features and constraints
+- If you are going to send a request with a \`query=\` parameter (or any parameter whose schema format is \`c8y:query\`), you MUST verify the query-language syntax first via \`searchSpecs(...)\` or the referenced tag docs, and cite what you found in your reasoning before calling \`execute\`
 - Fall back to custom traversal/aggregation only when endpoint-native options cannot express the required output
 
 ### Available Shape
@@ -80,8 +83,38 @@ type Spec = {
   tags?: Array<{ name: string, description?: string }>
 }
 
+type SpecSearchHit = {
+  // JS accessor pointing at the source, e.g.
+  //   "coreSpec.paths['/inventory/managedObjects'].get"
+  //   "coreSpec.tags — Query language"
+  header: string
+  text: string
+  kind: 'endpoint' | 'tag' | 'spec'
+  spec: string // 'core' or a serviceSpecs key
+  score: number // higher = more relevant; hits come back best-first
+}
+
 declare const coreSpec: Spec
 declare const serviceSpecs: ${serviceSpecsType}
+declare function searchSpecs(
+  query: string,
+  opts?: { limit?: number, minScore?: number, fuzzy?: number, prefix?: boolean, specs?: string[] }
+): SpecSearchHit[]
+\`\`\`
+
+### Searching Across Specs
+
+\`searchSpecs\` indexes endpoints, tags, and spec info from every visible spec in one place. Use it **after** browsing the paths directly — to learn how a parameter or format works (e.g. the query language), to understand bodies, or to confirm you have the right endpoint when unsure. Hits come back best-first; each \`header\` is a JS accessor pointing at the source. Cap with \`opts.limit\` (default 10), scope with \`opts.specs\`, threshold with \`opts.minScore\`.
+
+\`\`\`js
+// Confirm/inspect how the query language is used — it is documented in core but
+// applies across services. The header points to where to read the full text.
+() => searchSpecs('query language filter operator', { limit: 5 })
+\`\`\`
+
+\`\`\`js
+// Scope the search to a single service
+() => searchSpecs('asset hierarchy', { specs: ['dtm'] })
 \`\`\`
 
 ### Tag Documentation
@@ -136,14 +169,6 @@ Examples (all zero-parameter — note no arguments in the arrow function signatu
 ## execute
 Use \`execute\` when you want to call the real Cumulocity API.
 
-- Input: a JavaScript function expression
-- The top-level binding \`cumulocity\` is available automatically
-- It can call \`await cumulocity.request({ method, path, ... })\`
-- Do not build auth headers or tenant URLs yourself
-- Return the value you want from that function; async functions are usually the right choice here
-- On success, the returned value is sent back in Toon format
-- If execution is blocked or fails, execute returns a plain text error message
-- If a request is blocked by MCP connection policy, \`execute\` returns an explanatory text message — that is an access restriction, not a Cumulocity API failure
 
 ### Available Shape
 \`\`\`ts
@@ -194,11 +219,12 @@ ${getRuntimeSection()}
 ${getOpenApiSection()}
 
 ## Working Pattern
-1. Use \`query\` to find the right endpoint, parameters, and response shape.
-2. Use operation tags and tag documentation to discover domain-specific query language/functions before implementing custom control flow.
-3. Prefer endpoint-native filters/expansions/selectors before manual traversal.
-4. Use \`execute\` with a small async function expression that calls that endpoint and returns only the needed result.
-5. Keep functions small and return only the data needed for the next reasoning step.
+1. Use \`query\` to find the right endpoint, parameters, and response shape — browse \`coreSpec\`/\`serviceSpecs\` paths directly first, then use \`searchSpecs(...)\` when you need parameter/format/body insight or are unsure you found the right endpoint.
+2. If an operation uses \`query\` / \`c8y:query\`, verify syntax before execute: inspect operation \`parameters\`, then use \`searchSpecs(...)\` and/or the referenced tag description to confirm operators/functions and constraints.
+3. Cite that evidence in your response before the write/read execute call that depends on it.
+4. Prefer endpoint-native filters/expansions/selectors before manual traversal.
+5. Use \`execute\` with a small async function expression that calls that endpoint and returns only the needed result.
+6. Keep functions small and return only the data needed for the next reasoning step.
 ${restrictionSection}
 `,
     )
