@@ -21,7 +21,7 @@ interface IndexOperation {
   summary?: string
   description?: string
   tags?: string[]
-  parameters?: Array<{ name?: string, description?: string }>
+  parameters?: Array<{ name?: string, description?: string, schema?: { format?: string }, examples?: Record<string, { value?: unknown, description?: string }> }>
 }
 interface IndexSpec {
   info?: { title?: string, description?: string }
@@ -111,7 +111,12 @@ export function buildSpecDocs(core: IndexSpec, serviceSpecs: Record<string, Inde
         if (!op || typeof op !== 'object')
           continue
         const paramText = Array.isArray(op.parameters)
-          ? op.parameters.map((p) => joinText([p?.name, p?.description])).join(' ')
+          ? op.parameters.map((p) => {
+              const exampleValues = p?.examples
+                ? Object.values(p.examples).map((e) => joinText([typeof e?.value === 'string' ? e.value : undefined, e?.description])).join(' ')
+                : ''
+              return joinText([p?.name, p?.description, p?.schema?.format, exampleValues])
+            }).join(' ')
           : ''
         docs.push({
           id: `${specKey}::op::${method}::${path}`,
