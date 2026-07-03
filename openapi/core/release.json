@@ -1216,6 +1216,9 @@
           },
           {
             "$ref": "#/components/parameters/processingModeHeader"
+          },
+          {
+            "$ref": "#/components/parameters/queryParam_alarm_incrementCount"
           }
         ],
         "tags": [
@@ -1283,9 +1286,9 @@
           "200": {
             "description": "An existing alarm was updated.",
             "content": {
-              "application/vnd.com.nsn.cumulocity.alarm+json": {
+              "application/vnd.com.nsn.cumulocity.alarmUpsertResponse+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/alarm"
+                  "$ref": "#/components/schemas/alarmUpsertResponse"
                 }
               }
             }
@@ -1293,9 +1296,9 @@
           "201": {
             "description": "An alarm was created.",
             "content": {
-              "application/vnd.com.nsn.cumulocity.alarm+json": {
+              "application/vnd.com.nsn.cumulocity.alarmUpsertResponse+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/alarm"
+                  "$ref": "#/components/schemas/alarmUpsertResponse"
                 }
               }
             }
@@ -15754,6 +15757,304 @@
         }
       }
     },
+    "/tenant/tenants/{tenantId}/applications/restricted-roles": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/tenantId"
+        }
+      ],
+      "get": {
+        "operationId": "getTenantApplicationRestrictedRolesResource",
+        "x-codegen-resource-name": "getRestrictedRoles",
+        "tags": [
+          "Tenant applications"
+        ],
+        "security": [
+          {
+            "Basic": []
+          },
+          {
+            "OAI-Secure": []
+          },
+          {
+            "SSO": []
+          }
+        ],
+        "summary": "Retrieve the microservice applications restricted roles list",
+        "description": "Retrieve the list of roles that are restricted from being requested by microservices subscribed to or owned by the tenant.\n\n<section><h5>Required roles</h5>\n(ROLE_TENANT_MANAGEMENT_READ <b>OR</b> ROLE_TENANT_ADMIN) <b>AND</b> (the current tenant is its parent <b>OR</b> is the management tenant <b>OR</b> is the current tenant)\n</section>\n",
+        "x-code-samples": [
+          {
+            "lang": "cURL",
+            "source": "curl --location --request GET \"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles\" \\\n--header \"Authorization: Basic <AUTHORIZATION>\"\n"
+          },
+          {
+            "lang": "C#",
+            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.GET);\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
+          },
+          {
+            "lang": "Java",
+            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.get(\"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\").asString();\n"
+          },
+          {
+            "lang": "Node.js",
+            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"GET\", \"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\"\n    })\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
+          },
+          {
+            "lang": "Python",
+            "source": "import requests\n\nurl = \"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles\"\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\"\n}\nresponse = requests.request(\"GET\", url, headers=headers)\nprint(response.text.encode(\"utf8\"))\n"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/tenantRestrictedRolesFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/operationNotAuthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/tenantNotFound"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putTenantApplicationRestrictedRolesResource",
+        "x-codegen-resource-name": "updateRestrictedRoles",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/acceptHeader"
+          }
+        ],
+        "tags": [
+          "Tenant applications"
+        ],
+        "security": [
+          {
+            "Basic": []
+          },
+          {
+            "OAI-Secure": []
+          },
+          {
+            "SSO": []
+          }
+        ],
+        "summary": "Replace the microservice applications restricted roles list",
+        "description": "Replace tenant's restricted roles list entirely. Microservices that are subscribed to or owned by the tenant cannot request any role on this list.\nOnly roles that actually exist in the system are accepted. Duplicate roles in the request body are silently deduplicated.\n\n<section><h5>Required roles</h5>\n(ROLE_TENANT_MANAGEMENT_ADMIN <b>OR</b> ROLE_TENANT_MANAGEMENT_UPDATE <b>OR</b> ROLE_TENANT_ADMIN) <b>AND</b> (the current tenant is its parent <b>OR</b> is the management tenant <b>OR</b> is the current tenant)\n</section>\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestrictedRoles"
+              }
+            }
+          }
+        },
+        "x-code-samples": [
+          {
+            "lang": "cURL",
+            "source": "curl --location --request PUT \"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles\" \\\n--header \"Authorization: Basic <AUTHORIZATION>\" \\\n--header \"Accept: application/vnd.com.nsn.cumulocity.tenant+json\" \\\n--header \"Content-Type: application/json\" \\\n--data-raw '[\"ROLE_TENANT_ADMIN\",\"ROLE_TENANT_MANAGEMENT_ADMIN\"]'\n"
+          },
+          {
+            "lang": "C#",
+            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.PUT);\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\nrequest.AddHeader(\"Accept\", \"application/vnd.com.nsn.cumulocity.tenant+json\");\nrequest.AddHeader(\"Content-Type\", \"application/json\");\nrequest.AddParameter(\"application/json\", \"[\\\"ROLE_TENANT_ADMIN\\\",\\\"ROLE_TENANT_MANAGEMENT_ADMIN\\\"]\", ParameterType.RequestBody);\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
+          },
+          {
+            "lang": "Java",
+            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.put(\"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\")\n    .header(\"Accept\", \"application/vnd.com.nsn.cumulocity.tenant+json\")\n    .header(\"Content-Type\", \"application/json\")\n    .body(\"[\\\"ROLE_TENANT_ADMIN\\\",\\\"ROLE_TENANT_MANAGEMENT_ADMIN\\\"]\")\n    .asString();\nSystem.out.println(response);\n"
+          },
+          {
+            "lang": "Node.js",
+            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"PUT\", \"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\",\n        \"Accept\": \"application/vnd.com.nsn.cumulocity.tenant+json\",\n        \"Content-Type\": \"application/json\"\n    })\n    .send(JSON.stringify([\"ROLE_TENANT_ADMIN\",\"ROLE_TENANT_MANAGEMENT_ADMIN\"]))\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
+          },
+          {
+            "lang": "Python",
+            "source": "import requests\nimport json\n\nurl = \"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles\"\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\",\n  \"Accept\": \"application/vnd.com.nsn.cumulocity.tenant+json\",\n  \"Content-Type\": \"application/json\"\n}\npayload = json.dumps([\"ROLE_TENANT_ADMIN\", \"ROLE_TENANT_MANAGEMENT_ADMIN\"])\nresponse = requests.request(\"PUT\", url, headers=headers, data=payload)\nprint(response.text.encode(\"utf8\"))\n"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The restricted roles list was replaced and the updated tenant is sent in the response.",
+            "content": {
+              "application/vnd.com.nsn.cumulocity.tenant+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/tenantWithRestrictedRoles"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/operationNotAuthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/tenantNotFound"
+          },
+          "422": {
+            "description": "Unprocessable Entity – one or more roles in the request body do not exist."
+          }
+        }
+      }
+    },
+    "/tenant/tenants/{tenantId}/applications/restricted-roles/{roleId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/tenantId"
+        },
+        {
+          "$ref": "#/components/parameters/roleId"
+        }
+      ],
+      "post": {
+        "operationId": "postTenantApplicationRestrictedRoleResource",
+        "x-codegen-resource-name": "addRestrictedRole",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/acceptHeader"
+          }
+        ],
+        "tags": [
+          "Tenant applications"
+        ],
+        "security": [
+          {
+            "Basic": []
+          },
+          {
+            "OAI-Secure": []
+          },
+          {
+            "SSO": []
+          }
+        ],
+        "summary": "Add a role to the microservice restricted roles list",
+        "description": "Add a single role to tenant's restricted roles list. Microservices that are subscribed to or owned by the tenant cannot request roles on this list.\nIf the role is already in the list, the request is accepted and the list remains unchanged.\n\n<section><h5>Required roles</h5>\n(ROLE_TENANT_MANAGEMENT_ADMIN <b>OR</b> ROLE_TENANT_MANAGEMENT_UPDATE <b>OR</b> ROLE_TENANT_ADMIN) <b>AND</b> (the current tenant is its parent <b>OR</b> is the management tenant <b>OR</b> is the current tenant)\n</section>\n",
+        "x-code-samples": [
+          {
+            "lang": "cURL",
+            "source": "curl --location --request POST \"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles/{roleId}\" \\\n--header \"Authorization: Basic <AUTHORIZATION>\" \\\n--header \"Accept: application/vnd.com.nsn.cumulocity.tenant+json\"\n"
+          },
+          {
+            "lang": "C#",
+            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles/{roleId}\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.POST);\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\nrequest.AddHeader(\"Accept\", \"application/vnd.com.nsn.cumulocity.tenant+json\");\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
+          },
+          {
+            "lang": "Java",
+            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.post(\"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles/{roleId}\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\")\n    .header(\"Accept\", \"application/vnd.com.nsn.cumulocity.tenant+json\")\n    .asString();\nSystem.out.println(response);\n"
+          },
+          {
+            "lang": "Node.js",
+            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"POST\", \"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles/{roleId}\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\",\n        \"Accept\": \"application/vnd.com.nsn.cumulocity.tenant+json\"\n    })\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
+          },
+          {
+            "lang": "Python",
+            "source": "import requests\n\nurl = \"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles/{roleId}\"\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\",\n  \"Accept\": \"application/vnd.com.nsn.cumulocity.tenant+json\"\n}\nresponse = requests.request(\"POST\", url, headers=headers)\nprint(response.text.encode(\"utf8\"))\n"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The role was added and the updated tenant is sent in the response.",
+            "content": {
+              "application/vnd.com.nsn.cumulocity.tenant+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/tenantWithMoreRestrictedRoles"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/operationNotAuthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/tenantNotFound"
+          },
+          "422": {
+            "description": "Unprocessable Entity – the specified role does not exist."
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteTenantApplicationRestrictedRoleResource",
+        "x-codegen-resource-name": "removeRestrictedRole",
+        "tags": [
+          "Tenant applications"
+        ],
+        "security": [
+          {
+            "Basic": []
+          },
+          {
+            "OAI-Secure": []
+          },
+          {
+            "SSO": []
+          }
+        ],
+        "summary": "Remove a role from the microservice restricted roles list",
+        "description": "Remove a single role from tenant's restricted roles list. Microservices that are subscribed to or owned by the tenant cannot request any role on this list.\n\n<section><h5>Required roles</h5>\n(ROLE_TENANT_MANAGEMENT_ADMIN <b>OR</b> ROLE_TENANT_MANAGEMENT_UPDATE <b>OR</b> ROLE_TENANT_ADMIN) <b>AND</b> (the current tenant is its parent <b>OR</b> is the management tenant <b>OR</b> is the current tenant)\n</section>\n",
+        "x-code-samples": [
+          {
+            "lang": "cURL",
+            "source": "curl --location --request DELETE \"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles/{roleId}\" \\\n--header \"Authorization: Basic <AUTHORIZATION>\"\n"
+          },
+          {
+            "lang": "C#",
+            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles/{roleId}\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.DELETE);\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
+          },
+          {
+            "lang": "Java",
+            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.delete(\"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles/{roleId}\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\").asString();\nSystem.out.println(response);\n"
+          },
+          {
+            "lang": "Node.js",
+            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"DELETE\", \"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles/{roleId}\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\"\n    })\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
+          },
+          {
+            "lang": "Python",
+            "source": "import requests\n\nurl = \"https://<TENANT_DOMAIN>/tenant/tenants/{tenantId}/applications/restricted-roles/{roleId}\"\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\"\n}\nresponse = requests.request(\"DELETE\", url, headers=headers)\nprint(response.text.encode(\"utf8\"))\n"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The role was removed and the updated tenant is sent in the response.",
+            "content": {
+              "application/vnd.com.nsn.cumulocity.tenant+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/tenantWithRestrictedRoles"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/operationNotAuthorized"
+          },
+          "404": {
+            "description": "The role is not in the restricted roles list.",
+            "content": {
+              "application/vnd.com.nsn.cumulocity.error+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity – the specified role does not exist."
+          }
+        }
+      }
+    },
     "/tenant/tenants/{tenantId}/trusted-certificates": {
       "parameters": [
         {
@@ -21115,6 +21416,16 @@
           "example": "2021-03-30"
         }
       },
+      "queryParam_alarm_incrementCount": {
+        "name": "incrementCount",
+        "in": "query",
+        "description": "When set to `true`, the `count` property of an existing alarm is incremented during upsert.",
+        "schema": {
+          "type": "boolean",
+          "default": false,
+          "example": true
+        }
+      },
       "queryParam_application_type": {
         "name": "type",
         "in": "query",
@@ -22725,6 +23036,16 @@
           }
         }
       },
+      "tenantRestrictedRolesFound": {
+        "description": "The request has succeeded and the restricted roles list is sent in the response.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RestrictedRoles"
+            }
+          }
+        }
+      },
       "tenantApplicationReferenceFound": {
         "description": "The request has succeeded and the tenant applications are sent in the response.",
         "content": {
@@ -23253,6 +23574,68 @@
         "additionalProperties": {
           "description": "It is possible to add an arbitrary number of additional properties as a list of key-value pairs, for example, `\"property1\": {}`, `\"property2\": \"value\"`. These properties are known as custom fragments and can be of any type, for example, object or string. Each custom fragment is identified by a unique name.\n\nReview [Getting started > Technical concepts > Cumulocity's domain model > Inventory > Fragments > Naming conventions of fragments](https://www.cumulocity.com/docs/concepts/domain-model/#naming-conventions-of-fragments) in the Cumulocity user documentation as there are characters that can not be used when naming custom fragments.\n",
           "x-additionalPropertiesName": "customFragments"
+        }
+      },
+      "alarmUpsertResponse": {
+        "type": "object",
+        "required": [
+          "alarm",
+          "previousState"
+        ],
+        "properties": {
+          "alarm": {
+            "description": "The alarm as it exists after the upsert operation.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/alarm"
+              }
+            ]
+          },
+          "previousState": {
+            "description": "A snapshot of the alarm as it existed immediately before the upsert. This field is `null` when the upsert\ncreated a new alarm, and a full alarm representation when an existing alarm was updated.\n",
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/alarm"
+              }
+            ]
+          }
+        },
+        "example": {
+          "alarm": {
+            "count": 1,
+            "creationTime": "2020-03-19T12:16:31.586Z",
+            "lastUpdated": "2020-03-20T13:41:39.678Z",
+            "id": "20200301",
+            "self": "https://<TENANT_DOMAIN>/alarm/alarms/20200301",
+            "severity": "MAJOR",
+            "source": {
+              "id": "251982",
+              "name": "My tracking device",
+              "self": "https://<TENANT_DOMAIN>/inventory/managedObjects/251982"
+            },
+            "status": "ACTIVE",
+            "text": "No data received from the device within the required interval.",
+            "time": "2020-03-19T00:00:00.000Z",
+            "type": "c8y_UnavailabilityAlarm"
+          },
+          "previousState": {
+            "count": 1,
+            "creationTime": "2020-03-19T12:16:31.586Z",
+            "lastUpdated": "2020-03-19T12:16:31.586Z",
+            "id": "20200301",
+            "self": "https://<TENANT_DOMAIN>/alarm/alarms/20200301",
+            "severity": "MINOR",
+            "source": {
+              "id": "251982",
+              "name": "My tracking device",
+              "self": "https://<TENANT_DOMAIN>/inventory/managedObjects/251982"
+            },
+            "status": "ACKNOWLEDGED",
+            "text": "No data received from the device within the required interval.",
+            "time": "2020-03-19T00:00:00.000Z",
+            "type": "c8y_UnavailabilityAlarm"
+          }
         }
       },
       "auditApiResource": {
@@ -26825,6 +27208,89 @@
           "parent": "t1511681",
           "status": "ACTIVE"
         }
+      },
+      "tenantWithRestrictedRoles": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/tenant"
+          }
+        ],
+        "example": {
+          "id": "t07007007",
+          "self": "https://<TENANT_DOMAIN>/tenant/tenants/t07007007",
+          "adminEmail": "john@doe.com",
+          "adminName": "johndoe",
+          "allowCreateTenants": false,
+          "applications": {
+            "self": "https://<TENANT_DOMAIN>/tenant/tenants/t07007007/applications",
+            "references": []
+          },
+          "company": "ACME AG",
+          "contactName": "John Doe",
+          "contactPhone": "+52 333 567 1234",
+          "creationTime": "2020-05-02T20:00:29.907Z",
+          "customProperties": {
+            "msForbiddenRoles": [
+              "ROLE_TENANT_ADMIN",
+              "ROLE_TENANT_MANAGEMENT_ADMIN"
+            ]
+          },
+          "domain": "mytenant.cumulocity.com",
+          "ownedApplications": {
+            "self": "https://<TENANT_DOMAIN>/tenant/tenants/t07007007/applications",
+            "references": []
+          },
+          "parent": "t1511681",
+          "status": "ACTIVE"
+        }
+      },
+      "tenantWithMoreRestrictedRoles": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/tenant"
+          }
+        ],
+        "example": {
+          "id": "t07007007",
+          "self": "https://<TENANT_DOMAIN>/tenant/tenants/t07007007",
+          "adminEmail": "john@doe.com",
+          "adminName": "johndoe",
+          "allowCreateTenants": false,
+          "applications": {
+            "self": "https://<TENANT_DOMAIN>/tenant/tenants/t07007007/applications",
+            "references": []
+          },
+          "company": "ACME AG",
+          "contactName": "John Doe",
+          "contactPhone": "+52 333 567 1234",
+          "creationTime": "2020-05-02T20:00:29.907Z",
+          "customProperties": {
+            "msForbiddenRoles": [
+              "ROLE_TENANT_ADMIN",
+              "ROLE_TENANT_MANAGEMENT_ADMIN",
+              "ROLE_TENANT_ALARM_ADMIN"
+            ]
+          },
+          "domain": "mytenant.cumulocity.com",
+          "ownedApplications": {
+            "self": "https://<TENANT_DOMAIN>/tenant/tenants/t07007007/applications",
+            "references": []
+          },
+          "parent": "t1511681",
+          "status": "ACTIVE"
+        }
+      },
+      "RestrictedRoles": {
+        "description": "An array of role names that are restricted from being requested by microservices in the tenant.",
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        },
+        "example": [
+          "ROLE_TENANT_ADMIN",
+          "ROLE_TENANT_MANAGEMENT_ADMIN"
+        ]
       },
       "option": {
         "description": "A tuple storing tenant configuration.",
