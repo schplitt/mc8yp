@@ -25,14 +25,32 @@ declare module '*?bundle' {
 declare module '#core-openapi' {
   import type { Spec } from './utils/spec-resolution'
 
+  /**
+   * Prebuilt embedding vectors for a core spec version (see
+   * scripts/build-spec-vectors.ts). `ids[i]` is the chunk id of row `i` in the
+   * base64-encoded row-major Float32 `embeddings` matrix; the runtime re-chunks
+   * the inlined `spec` and zips these on by id. ALWAYS present for bundled core
+   * versions — the build fails if a vector file is missing.
+   */
+  export interface SpecVectors {
+    model: string
+    dim: number
+    dtype: string
+    chunkerVersion: string
+    ids: string[]
+    embeddings: string
+  }
+
   export interface CoreOpenApiEntry {
     version: string
     label: string
     spec: Spec
+    vectors: SpecVectors
   }
   export const specs: ReadonlyArray<CoreOpenApiEntry>
   export function getCoreOpenApiSpec(): Spec
   export function getCoreOpenApiVersion(): string
   export function setCoreOpenApiVersion(version: string): void
   export function getCoreOpenApiLabel(): string
+  export function getCoreOpenApiVectors(): SpecVectors
 }

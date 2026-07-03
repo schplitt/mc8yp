@@ -36,6 +36,7 @@
     "creds-list": "pnpm dlx jiti ./src/cli/index.ts creds list",
     "build": "tsdown",
     "update:openapi": "node ./scripts/update-openapi.mjs",
+    "build:vectors": "node ./scripts/build-spec-vectors.ts",
     "package:microservices": "node ./scripts/package-microservices.mjs",
     "lint": "eslint",
     "lint:fix": "eslint --fix",
@@ -47,6 +48,7 @@
     "release": "bumpp"
   },
   "dependencies": {
+    "@huggingface/transformers": "catalog:",
     "@iso4/sandbox": "catalog:",
     "@napi-rs/keyring": "catalog:"
   },
@@ -67,7 +69,6 @@
     "consola": "catalog:",
     "eslint": "catalog:",
     "h3": "catalog:",
-    "minisearch": "catalog:",
     "rolldown": "catalog:",
     "tmcp": "catalog:",
     "tsdown": "catalog:",

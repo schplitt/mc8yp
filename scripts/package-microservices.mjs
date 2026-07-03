@@ -52,6 +52,13 @@ COPY pnpm-workspace.yaml ./pnpm-workspace.yaml
 RUN npm install -g pnpm@${pnpmVersion} \
   && pnpm install --prod --frozen-lockfile
 
+# Bake the embedding model into the transformers cache (inside node_modules) so
+# it rides along in the COPY below — the deployed service loads it offline with
+# no cold-start download.
+COPY scripts/prefetch-model.mjs ./scripts/prefetch-model.mjs
+COPY openapi/vectors/core/release.json ./openapi/vectors/core/release.json
+RUN node scripts/prefetch-model.mjs
+
 FROM node:24-bookworm-slim AS runtime
 
 WORKDIR /app

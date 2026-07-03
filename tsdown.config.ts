@@ -1,8 +1,9 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { rolldown } from 'rolldown'
 import { defineConfig } from 'tsdown'
+import workerPlugin from './workerPlugin.ts'
 import { preprocessOpenApi } from './src/utils/openapi-preprocessor.ts'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
@@ -17,6 +18,7 @@ const OPENAPI_MODULES = {
     getVersion: 'getCoreOpenApiVersion',
     setVersion: 'setCoreOpenApiVersion',
     getLabel: 'getCoreOpenApiLabel',
+    getVectors: 'getCoreOpenApiVectors',
     pluginName: 'mc8yp:core-openapi',
   },
 } as const
@@ -65,10 +67,27 @@ async function readSpecJson(api: OpenApiModuleName, version: string): Promise<st
   return prepareSpecJson(raw, source.servicePrefix)
 }
 
+// Prebuilt embedding vectors live in openapi/vectors/<api>/<version>.json
+// (ids + base64 Float32 matrix; see scripts/build-spec-vectors.ts). Inlined
+// alongside the spec so the runtime loads them instead of re-embedding the core
+// corpus at startup. These are REQUIRED for every bundled core version — a
+// missing file fails the build (run `pnpm build:vectors`) rather than shipping
+// a core surface the runtime cannot search.
+function readVectorsJson(api: OpenApiModuleName, version: string): string {
+  const vectorsPath = path.join(rootDir, 'openapi', 'vectors', api, `${version}.json`)
+  if (!existsSync(vectorsPath)) {
+    throw new Error(
+      `Missing prebuilt vectors for ${api}/${version} at ${path.relative(rootDir, vectorsPath)}. `
+      + `Run \`pnpm build:vectors\` before building.`,
+    )
+  }
+  return readFileSync(vectorsPath, 'utf8').trim()
+}
+
 async function generateEntries(api: OpenApiModuleName, versions: readonly string[]): Promise<string> {
   const lines = await Promise.all(versions.map(async (version) => {
     const source = getSourceConfig(api, version)
-    return `  { version: ${JSON.stringify(version)}, label: ${JSON.stringify(source.label)}, spec: ${await readSpecJson(api, version)} },`
+    return `  { version: ${JSON.stringify(version)}, label: ${JSON.stringify(source.label)}, spec: ${await readSpecJson(api, version)}, vectors: ${readVectorsJson(api, version)} },`
   }))
   return lines.join('\n')
 }
@@ -95,6 +114,12 @@ export function ${moduleInfo.setVersion}(version) {
 export function ${moduleInfo.getLabel}() {
   return ${moduleInfo.entryConst}.find((entry) => entry.version === activeVersion)?.label ?? ${moduleInfo.entryConst}[0]?.label ?? activeVersion;
 }
+export function ${moduleInfo.getVectors}() {
+  const entry = ${moduleInfo.entryConst}.find((entry) => entry.version === activeVersion) ?? ${moduleInfo.entryConst}[0];
+  if (!entry?.vectors)
+    throw new Error("No prebuilt vectors for core OpenAPI version " + activeVersion + ".");
+  return entry.vectors;
+}
 `
 }
 
@@ -115,6 +140,11 @@ export function ${moduleInfo.setVersion}() {
 }
 export function ${moduleInfo.getLabel}() {
   return ${moduleInfo.entryConst}[0]?.label ?? ${JSON.stringify(label)};
+}
+export function ${moduleInfo.getVectors}() {
+  if (!${moduleInfo.entryConst}[0]?.vectors)
+    throw new Error("No prebuilt vectors for core OpenAPI version ${version}.");
+  return ${moduleInfo.entryConst}[0].vectors;
 }
 `
 }
@@ -264,11 +294,14 @@ const serverBuilds = OPENAPI_CONFIG.builds.map((build) => ({
   clean: build.version === OPENAPI_CONFIG.builds[0]?.version,
   dts: false,
   format: 'module' as const,
-  plugins: [coreOpenApiPlugin({ mode: 'server', build }), bundledServicesPlugin({ mode: 'server', build }), bundleStringPlugin()],
-  // Bundle all non-native deps so the Docker image only needs @iso4/sandbox
-  // (and its per-platform Rust binary) installed at runtime via pnpm install --prod.
-  // @napi-rs/* is excluded defensively (not used in server mode anyway).
-  noExternal: [/^(?!@iso4\/sandbox$|@napi-rs\/)/],
+  plugins: [coreOpenApiPlugin({ mode: 'server', build }), bundledServicesPlugin({ mode: 'server', build }), bundleStringPlugin(), workerPlugin()],
+  // Bundle pure-JS deps; keep these external (installed via pnpm install --prod):
+  //   @iso4/sandbox              per-platform Rust binary (sandbox isolate)
+  //   @huggingface/transformers  pulls native onnxruntime-node + sharp (+ @img/*)
+  //                              which can't be inlined — kept external so its
+  //                              whole native tree installs transitively at runtime
+  //   @napi-rs/*                 N-API native bindings (defensive; unused server-side)
+  noExternal: [/^(?!@iso4\/sandbox$|@napi-rs\/|@huggingface\/transformers)/],
   outDir: `.output/${build.version}`,
 }))
 
@@ -281,13 +314,15 @@ export default defineConfig([
     clean: true,
     dts: false,
     format: 'module',
-    plugins: [coreOpenApiPlugin({ mode: 'cli' }), bundledServicesPlugin({ mode: 'cli' }), bundleStringPlugin()],
-    // Bundle every non-native dep to reduce supply-chain risk for CLI users.
-    // @iso4/sandbox must stay external: it resolves per-platform Rust binaries
-    // (@iso4/v8-*) at runtime and cannot be statically inlined.
-    // @napi-rs/* must stay external for the same reason (N-API native bindings).
+    plugins: [coreOpenApiPlugin({ mode: 'cli' }), bundledServicesPlugin({ mode: 'cli' }), bundleStringPlugin(), workerPlugin()],
+    // Bundle pure-JS deps to reduce supply-chain risk for CLI users. These stay
+    // external (cannot be statically inlined; installed from node_modules):
+    //   @iso4/sandbox              per-platform Rust binaries (@iso4/v8-*)
+    //   @napi-rs/*                 N-API native bindings (keyring)
+    //   @huggingface/transformers  pulls native onnxruntime-node + sharp (+ @img/*);
+    //                              kept external so its native tree resolves at runtime
     // @iso4/fetch is pure JS (rou3 + undici) and is safe to bundle.
-    noExternal: [/^(?!@iso4\/sandbox$|@napi-rs\/)/],
+    noExternal: [/^(?!@iso4\/sandbox$|@napi-rs\/|@huggingface\/transformers)/],
     outDir: 'dist',
   },
 ])

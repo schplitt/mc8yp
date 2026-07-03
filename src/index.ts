@@ -4,6 +4,7 @@ import { getQuery, H3, HTTPError, serve } from 'h3'
 import openApiSpec from '../openapi.json' with { type: 'json' }
 import { c8yMcpServer, setupMcpServer } from './server'
 import process from 'node:process'
+import { prewarmServiceIndexes } from './codemode/spec-search.ts'
 import {
   ALLOW_HEADER,
   ALLOW_QUERY_KEYS,
@@ -69,6 +70,9 @@ const app = new H3().all('/mcp', async (event) => {
     if (cached) {
       const result = await cached
       specs = resolveSpecs(result.specs, result.installedContextPaths)
+      // Eagerly embed discovered service specs in the background (cached across
+      // tenants by content hash) so the first searchSpecs call doesn't pay it.
+      prewarmServiceIndexes(specs.specs, consola)
     }
   }
 

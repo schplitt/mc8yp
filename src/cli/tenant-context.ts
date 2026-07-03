@@ -1,4 +1,6 @@
 import { BasicAuth, Client } from '@c8y/client'
+import consola from 'consola'
+import { prewarmServiceIndexes } from '../codemode/spec-search.ts'
 import { startDiscovery } from '../utils/api-discovery'
 import { createC8yAuthHeaders } from '../utils/client'
 import type { ResolvedSpecs } from '../utils/spec-resolution'
@@ -72,6 +74,10 @@ export async function setCliTenantContext(tenantUrl: string): Promise<CliTenantC
     authorizationHeader: authHeaders.Authorization!,
     specs: resolveSpecs(discovered, installedContextPaths),
   }
+
+  // Eagerly embed discovered service specs in the background so the first
+  // searchSpecs call is instant (core is already loaded from prebuilt vectors).
+  prewarmServiceIndexes(_context.specs.specs, consola)
 
   return _context
 }

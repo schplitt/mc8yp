@@ -3,17 +3,14 @@ import { encode } from '@toon-format/toon'
 import { createSafeFetch } from '@iso4/fetch'
 import type { SafeFetchGlobal } from '@iso4/fetch'
 import { createSandbox } from '@iso4/sandbox'
-import type { HostGlobals, Imports, Sandbox } from '@iso4/sandbox'
-// Bundled (single-string ESM) source of minisearch, produced by the `?bundle`
-// tsdown plugin. Injected into the query sandbox as a source-string import so
-// query code can build a search index over the OpenAPI specs.
-import minisearchBundle from 'minisearch?bundle'
+import type { HostGlobals, Sandbox } from '@iso4/sandbox'
 import { createC8yAuthHeaders, resolveC8yAuth } from '../utils/client'
 import { c8yMcpServer } from '../server-instance'
 import { evaluateAccessPolicy } from '../utils/restriction-matcher'
 import { HTTP_METHODS } from '../utils/restrictions'
 import type { AllowRule, RestrictionRule } from '../utils/restrictions'
-import { buildSpecSearchSource } from './spec-index'
+import { getServiceIndex, loadCoreIndex, search } from './spec-search.ts'
+import type { SearchOptions, SpecSearchHit, VectorIndex } from './spec-search.ts'
 
 const QUERY_ENTRY_PATH = '/codemode-query.mjs'
 const EXECUTE_ENTRY_PATH = '/codemode-execute.mjs'
@@ -207,15 +204,12 @@ function buildQueryScript(sourceCode: string): string {
     )
   }
   return [
-    // `minisearch` is provided as a source-string import (see QUERY_IMPORTS).
-    // coreSpec / serviceSpecs / searchSpecs are bound at module scope so the
-    // agent's query function can close over them. The minisearch index is
-    // (re)built here on every call — caching it in a precompiled prefix is a
-    // follow-up.
-    'import MiniSearch from "minisearch";',
+    // coreSpec / serviceSpecs are injected as scope consts so the agent can
+    // browse them directly. `searchSpecs` is NOT defined here — it is installed
+    // as a host-bridge global (see query()), because semantic vector search runs
+    // host-side (model + vectors live on the host, never in the sandbox).
     `const coreSpec = ${JSON.stringify(resolved.core)};`,
     `const serviceSpecs = ${JSON.stringify(resolved.specs)};`,
-    buildSpecSearchSource(),
     `const __mc8ypQuery = (${functionExpression});`,
     'if (typeof __mc8ypQuery !== "function") { throw new TypeError("Query code must evaluate to a function.") }',
     'export default await __mc8ypQuery();',
@@ -285,10 +279,27 @@ function extractDefaultExport(exportsObject: unknown): unknown {
   throw new Error(NO_DEFAULT_EXPORT_MESSAGE)
 }
 
-// Source-string import available to the query sandbox. minisearch (bundled by
-// the `?bundle` plugin) powers the spec search index; the query sandbox stays
-// network-free — minisearch is the only thing it can import.
-const QUERY_IMPORTS: Imports = { minisearch: minisearchBundle }
+// Host bridge backing the sandbox `searchSpecs(query, opts)` global. Semantic
+// vector search runs entirely host-side: embed the query (same model as the
+// prebuilt/cached vectors), cosine over core + the tenant's discovered service
+// indexes, return ranked hits. The sandbox never sees the model or the vectors.
+async function runSearchSpecs(queryArg: unknown, optsArg: unknown): Promise<SpecSearchHit[]> {
+  if (typeof queryArg !== 'string' || queryArg.trim() === '')
+    throw new TypeError('searchSpecs(query, opts): query must be a non-empty string')
+  const resolved = c8yMcpServer.ctx.custom?.specs
+  if (!resolved) {
+    throw new Error(
+      c8yMcpServer.ctx.custom?.env === 'cli'
+        ? 'No active tenant set. Call set-active-tenant first.'
+        : 'No tenant specs available for this MCP connection.',
+    )
+  }
+  const opts = (optsArg && typeof optsArg === 'object') ? optsArg as SearchOptions : {}
+  const indexes: VectorIndex[] = [loadCoreIndex()]
+  for (const [contextPath, spec] of Object.entries(resolved.specs))
+    indexes.push(await getServiceIndex(contextPath, spec as Parameters<typeof getServiceIndex>[1]))
+  return search(queryArg, indexes, opts)
+}
 
 export async function query(functionCode: string): Promise<string> {
   const sandbox = await getSandbox()
@@ -296,8 +307,9 @@ export async function query(functionCode: string): Promise<string> {
     code: buildQueryScript(functionCode),
     filename: QUERY_ENTRY_PATH,
     limits: SANDBOX_LIMITS,
-    // No globals → no fetch surface; the query sandbox cannot reach the network.
-    imports: QUERY_IMPORTS,
+    // `searchSpecs` is the only host bridge — semantic spec search runs on the
+    // host. The query sandbox still has NO fetch surface (cannot reach network).
+    globals: { searchSpecs: (q, o) => runSearchSpecs(q, o) } satisfies HostGlobals,
   })
 
   if (!result.ok) {

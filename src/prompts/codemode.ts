@@ -43,7 +43,8 @@ Use \`query\` to inspect OpenAPI specs (bundled core or discovered microservices
 - Input: a **zero-parameter** JavaScript function expression
 - Do NOT declare \`coreSpec\`, \`serviceSpecs\`, or \`searchSpecs\` as function parameters — they are already available as top-level bindings in the surrounding scope
 - **Browse \`coreSpec.paths\` / \`serviceSpecs[...].paths\` to locate the endpoint** you expect to use
-- **\`searchSpecs(query, opts)\` is your primary tool for discovering capabilities the path listing does NOT show** — operators, parameter semantics and accepted formats, request/response bodies, and other usage details. They live in tag and parameter docs, not path names, so browsing paths alone never reveals them. It indexes every visible spec (one document per endpoint, per tag, and per spec info block). Each hit's \`text\` is a truncated preview; **paste the hit's \`header\` (a pasteable JS accessor) into a follow-up \`query\` to read the full, untruncated source**
+- **\`searchSpecs(query, opts)\` is your primary tool for discovering capabilities the path listing does NOT show** — operators, parameter semantics and accepted formats, request/response bodies, and other usage details. They live in tag and parameter docs, not path names, so browsing paths alone never reveals them. It is **semantic** search (matches meaning, not just keywords) over every visible spec (one document per endpoint, per tag, and per spec info block). Each hit's \`text\` is a truncated preview; **paste the hit's \`header\` (a pasteable JS accessor) into a follow-up \`query\` to read the full, untruncated source**
+- ⚠️ **\`searchSpecs\` is ASYNC — you MUST \`await\` it.** It returns a \`Promise<SpecSearchHit[]>\`, so make your function \`async\` and write \`const hits = await searchSpecs(...)\` before calling \`.map\`/\`.filter\`/etc. \`searchSpecs(...).map(...)\` will throw "map is not a function".
 - \`coreSpec\` is for the main Cumulocity REST surface: inventory, alarms, events, measurements, identity, device control, users, tenants, audit
 - \`serviceSpecs\` contains microservice APIs available on the current tenant, keyed by contextPath (e.g. \`serviceSpecs.dtm\`). An entry is present if the service is actually reachable on this tenant — use \`serviceSpecs.<key>\` or \`'<key>' in serviceSpecs\` to check availability. Paths are already prefixed for direct use with \`cumulocity.request()\`
 - Return the exact value you want back from that function
@@ -99,10 +100,11 @@ type SpecSearchHit = {
 
 declare const coreSpec: Spec
 declare const serviceSpecs: ${serviceSpecsType}
+// Semantic vector search — runs on the host. It is ASYNC: you MUST await it.
 declare function searchSpecs(
   query: string,
-  opts?: { limit?: number, minScore?: number, fuzzy?: number, prefix?: boolean, maxTextLength?: number }
-): SpecSearchHit[]
+  opts?: { limit?: number, minScore?: number, maxTextLength?: number }
+): Promise<SpecSearchHit[]>
 \`\`\`
 
 ### Searching Across Specs
@@ -110,8 +112,15 @@ declare function searchSpecs(
 \`searchSpecs\` indexes endpoints, tags, and spec info from every visible spec in one place. Browse paths to locate an endpoint, but **reach for \`searchSpecs\` to discover anything the path listing does not show** — operators, parameter semantics and accepted formats, request/response bodies, and other usage details (these live in tag and parameter docs, not path names). Always search it before writing a manual traversal loop or passing a parameter whose syntax you are unsure of. Hits come back best-first. Each hit's \`text\` is a **truncated preview** (long matches are cut and marked \`[TRUNCATED PREVIEW …]\`, with \`truncated: true\`) — it is **not** the full doc. Each \`header\` is a **pasteable accessor**: when a hit looks relevant, **paste its \`header\` into a follow-up \`query\` call to read the full, untruncated source** (the binding itself is never truncated). Cap with \`opts.limit\` (default 5), threshold with \`opts.minScore\`, resize the preview with \`opts.maxTextLength\`.
 
 \`\`\`js
-// 1) Find the relevant doc for what you need. Hit \`text\` is a truncated preview.
-() => searchSpecs('keywords describing the capability you need', { limit: 5 })
+// 1) Find the relevant doc semantically. searchSpecs is ASYNC — make the
+//    function async and AWAIT it before using the array. Describe the
+//    capability in natural language (it matches meaning, not just keywords):
+//    "walk the device hierarchy" finds the query-language operators even though
+//    they never say "tree". Each hit's \`text\` is a truncated preview.
+async () => {
+  const hits = await searchSpecs('describe the capability you need in plain language', { limit: 5 })
+  return hits.map((h) => ({ header: h.header, kind: h.kind, score: h.score }))
+}
 \`\`\`
 \`\`\`js
 // 2) Read the FULL, untruncated source by pasting the chosen hit's header.
