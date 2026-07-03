@@ -58,7 +58,8 @@ export interface ResolvedSpecs {
  * deliberately browse all bundled snapshots regardless of installation,
  * use {@link getBundledOnlySpecs} (the CLI's no-tenant fallback).
  * @param discoveredSpecs Result of live API discovery for the tenant.
- * @param installedContextPaths Subscribed app context paths on the tenant.
+ * @param installedContextPaths Context paths of microservices the tenant owns
+ *   or is subscribed to (discovery filters to type=MICROSERVICE).
  */
 export function resolveSpecs(
   discoveredSpecs: readonly DiscoveredApiSpec[],

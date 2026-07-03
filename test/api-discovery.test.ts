@@ -52,25 +52,38 @@ function makeSpec(paths: Record<string, object> = {}) {
   }
 }
 
+interface ListFilter {
+  tenant?: string
+  type?: string
+  pageSize: number
+  currentPage: number
+}
+
 /**
  * Build a fake Cumulocity client surface. discoverApiSpecs only touches
- * `client.application.listByTenant(tenantId, params)` and
- * `client.core.fetch(path)` — a minimal shape covering those two is enough.
+ * `client.application.list(filter)` and `client.core.fetch(path)` — a minimal
+ * shape covering those two is enough. `apps` is the full applications set;
+ * the mock slices it by the filter's pageSize/currentPage so the production
+ * pagination loop is exercised for real.
  * @param responses - Per-call response specification (apps, coreFetch)
+ * @param listCalls - When provided, every `application.list` filter is pushed
+ *   here so tests can assert query params and page count
  */
-function mockClient(responses: MockResponses): Client {
+function mockClient(responses: MockResponses, listCalls?: ListFilter[]): Client {
   const isErrorShape = (v: unknown): v is { status: number, statusText: string } =>
     !!v && typeof v === 'object' && 'status' in v && 'statusText' in v
 
   return {
     application: {
-      listByTenant: () => {
+      list: (filter: ListFilter) => {
+        listCalls?.push(filter)
         const a = responses.apps
         if (isErrorShape(a)) {
           // eslint-disable-next-line prefer-promise-reject-errors -- mimics @c8y/client's `{ res, data }` reject shape
           return Promise.reject({ res: { status: a.status, statusText: a.statusText } })
         }
-        return Promise.resolve({ data: a ?? [] })
+        const start = (filter.currentPage - 1) * filter.pageSize
+        return Promise.resolve({ data: (a ?? []).slice(start, start + filter.pageSize) })
       },
     },
     core: {
@@ -245,6 +258,33 @@ describe('discoverApiSpecs', () => {
       apps: { status: 500, statusText: 'Internal Server Error' },
     }), TENANT_ID)).rejects.toThrow('Failed to fetch applications: 500')
   })
+
+  it('queries the applications endpoint filtered by tenant and type MICROSERVICE', async () => {
+    const listCalls: ListFilter[] = []
+    await discoverApiSpecs(mockClient({ apps: [makeApp()] }, listCalls), TENANT_ID)
+    expect(listCalls).toHaveLength(1)
+    expect(listCalls[0]).toMatchObject({
+      tenant: TENANT_ID,
+      type: 'MICROSERVICE',
+      currentPage: 1,
+    })
+  })
+
+  it('aggregates all pages when the applications listing spans multiple pages', async () => {
+    const listCalls: ListFilter[] = []
+    // 100-per-page production page size → 250 apps means 3 pages, the last one short.
+    const apps = Array.from({ length: 250 }, (_, i) =>
+      makeApp({ id: `app${i}`, name: `Service ${i}`, contextPath: `svc${i}`, openApiSpec: undefined }))
+    const result = await discoverApiSpecs(mockClient({ apps }, listCalls), TENANT_ID)
+    expect(listCalls.map((c) => c.currentPage)).toEqual([1, 2, 3])
+    expect(result.installedContextPaths.size).toBe(250)
+  })
+
+  it('stops paginating after the first short page', async () => {
+    const listCalls: ListFilter[] = []
+    await discoverApiSpecs(mockClient({ apps: [makeApp(), makeApp({ id: 'app2', name: 'Other', contextPath: 'other' })] }, listCalls), TENANT_ID)
+    expect(listCalls).toHaveLength(1)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -269,7 +309,7 @@ describe('startDiscovery', () => {
 
   it('is idempotent — returns the same in-flight promise on concurrent calls', () => {
     // A never-resolving client keeps the discovery promise pending forever.
-    const stuck = { application: { listByTenant: () => new Promise(() => {}) } } as unknown as Client
+    const stuck = { application: { list: () => new Promise(() => {}) } } as unknown as Client
     const p1 = startDiscovery(TENANT_ID, stuck)
     const p2 = startDiscovery(TENANT_ID, stuck)
     expect(p1).toBe(p2)
@@ -280,7 +320,7 @@ describe('startDiscovery', () => {
     // A client whose methods would throw if called proves the cache short-circuited.
     const boom = {
       application: {
-        listByTenant: () => {
+        list: () => {
           throw new Error('should not be called')
         },
       },
@@ -293,7 +333,7 @@ describe('startDiscovery', () => {
     let calls = 0
     const failing = {
       application: {
-        listByTenant: () => {
+        list: () => {
           calls += 1
           // eslint-disable-next-line prefer-promise-reject-errors -- mimics @c8y/client's `{ res, data }` reject shape
           return Promise.reject({ res: { status: 403, statusText: 'Forbidden' } })
@@ -312,7 +352,7 @@ describe('startDiscovery', () => {
     setCachedApiSpecs(TENANT_ID, goodSpecs)
     // A client that would reject if called: cache hit short-circuits it.
     const wouldFail = {
-      application: { listByTenant: () => Promise.reject(new Error('should not be called')) },
+      application: { list: () => Promise.reject(new Error('should not be called')) },
     } as unknown as Client
     const result = await startDiscovery(TENANT_ID, wouldFail)
     expect(result.specs).toEqual(goodSpecs)
