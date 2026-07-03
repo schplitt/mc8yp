@@ -70,7 +70,10 @@ export interface DiscoveryResult {
    */
   specs: DiscoveredApiSpec[]
   /**
-   * All subscribed app context paths regardless of whether they have a spec URL.
+   * Context paths of all microservices the tenant owns or is subscribed to,
+   * regardless of whether they have a spec URL. Discovery filters the
+   * applications listing to type=MICROSERVICE, so HOSTED/EXTERNAL apps never
+   * appear here.
    */
   installedContextPaths: ReadonlySet<string>
 }
@@ -164,16 +167,29 @@ export function setCachedApiSpecs(
 // Core discovery logic
 // ---------------------------------------------------------------------------
 
+// Applications listing page size. Small pages keep each response well under
+// the internal gateway's streaming limits — `applicationsByTenant` with
+// pageSize=2000 returned every HOSTED web app manifest in one response and
+// got cut off mid-body ("Premature close") on app-heavy tenants.
+const APPLICATIONS_PAGE_SIZE = 100
+
+// Runaway guard for the pagination loop (100 * 50 = 5000 apps, far above any
+// real tenant's microservice count).
+const APPLICATIONS_MAX_PAGES = 50
+
 /**
  * Fetch and return discovered specs for the given tenant.
  * Throws on fatal errors (applications listing); individual spec download
  * failures are skipped.
  *
- * Uses `applicationsByTenant/{tenantId}` (via `listByTenant`) rather than
- * the user-scoped `applicationsByUser` endpoint so the call works with
- * service-user credentials — service users cannot call /user/currentUser,
- * which the user-scoped endpoint depends on. The tenantId is always known
- * at the call site (it is the discovery cache key).
+ * Uses `/application/applications?tenant=<id>&type=MICROSERVICE`, paginated.
+ * The `tenant` filter covers apps the tenant owns or is subscribed to, and
+ * `type=MICROSERVICE` drops HOSTED/EXTERNAL apps — they can never contribute
+ * a spec anyway (spec download goes through `/service/<contextPath>/`, which
+ * only exists for microservices) and their large manifests were what made the
+ * unpaginated response exceed gateway limits. The endpoint needs only
+ * ROLE_APPLICATION_MANAGEMENT_READ and does not depend on /user/currentUser,
+ * so it works with service-user credentials.
  *
  * All Cumulocity API calls go through the provided \@c8y/client. This module
  * never touches `fetch` directly so auth strategy choice (Basic, Bearer,
@@ -182,10 +198,21 @@ export function setCachedApiSpecs(
  * @param tenantId - Cumulocity tenant ID to list applications for
  */
 export async function discoverApiSpecs(client: Client, tenantId: string): Promise<DiscoveryResult> {
-  let apps: DiscoveryApplication[]
+  const apps: DiscoveryApplication[] = []
   try {
-    const res = await client.application.listByTenant(tenantId, { pageSize: 2000 })
-    apps = (res.data ?? []) as DiscoveryApplication[]
+    for (let currentPage = 1; currentPage <= APPLICATIONS_MAX_PAGES; currentPage++) {
+      const res = await client.application.list({
+        tenant: tenantId,
+        type: 'MICROSERVICE',
+        pageSize: APPLICATIONS_PAGE_SIZE,
+        currentPage,
+        withTotalPages: false,
+      })
+      const page = (res.data ?? []) as DiscoveryApplication[]
+      apps.push(...page)
+      if (page.length < APPLICATIONS_PAGE_SIZE)
+        break
+    }
   } catch (err) {
     throw new Error(`Failed to fetch applications: ${c8yErrorSummary(err)}`)
   }
