@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { StdioTransport } from '@tmcp/transport-stdio'
 import { defineCommand, runMain } from 'citty'
 import consola from 'consola'
@@ -33,6 +35,11 @@ const main = defineCommand({
       description: `Bundled core OpenAPI snapshot to expose to query. Available: ${specs.map((e) => `${e.version} (${e.label})`).join(', ')}.`,
       alias: 's',
       default: getCoreOpenApiVersion(),
+    },
+    policyData: {
+      type: 'string',
+      description: 'Path to an OPA data.json file. When supplied, OPA decides whether to allow, elicit, or deny mutating operations instead of always prompting.',
+      alias: ['p', 'policy-data'],
     },
   },
   setup: () => {
@@ -77,6 +84,21 @@ const main = defineCommand({
       consola.info(`Applying ${parsedAllowRules.length} allow rule(s):`, parsedAllowRules.map((r) => r.source))
     }
 
+    const rawPolicyData = Array.isArray(args.policyData) ? args.policyData.at(-1) : args.policyData
+    let policyDataPath: string | undefined
+    if (rawPolicyData) {
+      policyDataPath = resolve(rawPolicyData)
+      if (!existsSync(policyDataPath)) {
+        throw new Error(`--policy-data: file not found: ${policyDataPath}`)
+      }
+      try {
+        JSON.parse(readFileSync(policyDataPath, 'utf8'))
+      } catch {
+        throw new Error(`--policy-data: file is not valid JSON: ${policyDataPath}`)
+      }
+      consola.info(`OPA policy data loaded: ${policyDataPath}`)
+    }
+
     // If a tenant was previously selected, populate the in-memory context now
     // so the first tool call is immediately ready — discovery cost is paid here
     // at startup, not deferred to the first tool call.
@@ -119,6 +141,7 @@ const main = defineCommand({
       // the agent cannot misuse this state for real calls.
       specs: active?.specs ?? getBundledOnlySpecs(),
       auth: active ? { tenantUrl: active.tenantUrl, authorizationHeader: active.authorizationHeader } : undefined,
+      policyDataPath,
     })
   },
 })

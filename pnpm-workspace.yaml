@@ -19,6 +19,7 @@ catalog:
   '@iso4/fetch': ^0.0.1
   '@iso4/sandbox': ^0.0.3
   '@napi-rs/keyring': ^1.3.0
+  '@open-policy-agent/opa-wasm': ^1.10.0
   '@schplitt/eslint-config': ^1.5.1
   '@tmcp/adapter-valibot': ^0.1.6
   '@tmcp/transport-http': ^0.8.6

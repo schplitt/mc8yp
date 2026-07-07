@@ -2,6 +2,7 @@ import { defineTool } from 'tmcp/tool'
 import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
 import { execute, query } from '../codemode/execute'
+import { evaluatePolicies } from './intercept'
 import type { Env } from '../types'
 
 function createCodeSchema(description: string) {
@@ -186,6 +187,9 @@ async () => {
     }),
   }, async (input) => {
     try {
+      const blocked = await evaluatePolicies(input.code)
+      if (blocked)
+        return tool.error(blocked)
       return tool.text(await execute(input.code))
     } catch (error) {
       return tool.error(error instanceof Error ? error.message : String(error))
