@@ -1,187 +1,120 @@
 import { defineTool } from 'tmcp/tool'
 import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
-import { execute, query } from '../codemode/execute'
+import { execute } from '../codemode/execute'
 import type { Env } from '../types'
 
-function createCodeSchema(description: string) {
-  return v.pipe(v.string(), v.minLength(1), v.description(description))
-}
-
-function getOpenApiNote(): string {
-  return 'This MCP exposes a bundled Cumulocity core OpenAPI snapshot. Use `coreSpec` for inventory, alarms, events, measurements, users, tenants, and the broader Cumulocity REST surface. Bundled and discovered microservice APIs available on the current tenant are exposed via `serviceSpecs` (keyed by contextPath). Prefer endpoint-native parameters (filters, expansions, paging, sorting) over manual multi-call traversal when they can express the request.'
-}
-
-function getQuerySafetyPreface(env: Env): string {
-  if (env === 'server')
-    return 'Searches the bundled and discovered OpenAPI specs available to the current connection.'
-  return '**Read first.** The active tenant is global to this CLI session and can be flipped between calls by `set-active-tenant`. Every result ends with a footer line naming the active tenant (or noting there is none) so you can verify which tenant the result reflects before acting on it. If the footer says "no active tenant" you are looking at bundled reference snapshots — call `status` to see stored credentials and `set-active-tenant` to connect before relying on the result.'
-}
-
-function getExecuteSafetyPreface(env: Env): string {
-  const sharedFooter = 'An endpoint visible in `query` may still return 404 from `execute` when the service is not actually installed on the current tenant.'
+function getSafetyPreface(env: Env): string {
+  const sharedFooter = 'A method visible in discovery may still return 404 when the service is not actually installed on the current tenant.'
   if (env === 'server')
     return sharedFooter
   return [
-    '**Read first.** Every result starts with an `Executed against tenant: <url>` marker line followed by a blank line. Verify it matches the tenant you intend to mutate before reporting the result. The active tenant is global to this CLI session and can be flipped between calls by `set-active-tenant`. If no tenant is active `execute` fails with a missing-auth error — call `status` and `set-active-tenant` to connect first.',
+    '**Read first.** Every result starts with a marker line: either `Executed against tenant: <url>` or a no-active-tenant notice. Verify it matches the tenant you intend to act on before reporting the result. The active tenant is global to this CLI session and can be flipped between calls by `set-active-tenant`. Without an active tenant, discovery (codemode/docs) works against bundled reference snapshots but live API calls fail with a missing-auth error — call `status` and `set-active-tenant` to connect.',
     '',
     sharedFooter,
   ].join('\n')
 }
 
-function getQueryResultDescription(env: Env): string {
-  if (env === 'server')
-    return 'If your function returns a string it is returned as-is. Any other value is returned as JSON.'
-  return 'If your function returns a string it is returned as-is. Any other value is returned as JSON. A footer line naming the active tenant (or noting there is none) is appended after a `---` separator on every successful result.'
-}
-
-export function createQueryTool(env: Env) {
+export function createCodemodeTool(env: Env) {
   return defineTool({
-    name: 'query',
-    title: 'Query OpenAPI Specs',
-    description: `${getQuerySafetyPreface(env)}
+    name: 'codemode',
+    title: 'Cumulocity Code Mode',
+    description: `${getSafetyPreface(env)}
 
-Search the bundled and discovered OpenAPI specs by evaluating a JavaScript function.
+Run an async JavaScript function against the Cumulocity API. Discovery, documentation, and typed API calls all happen inside one function — find what you need and call it in the same run.
 
-${getOpenApiNote()}
+The expensive mistake is a hasty API call: an unparameterized request returns large payloads that flood your context. \`search\` and \`describe\` are cheap — spend calls there first.
 
-Available bindings (all zero-parameter — do NOT declare these as function parameters):
+Do NOT rely on prior knowledge of these APIs and do not assume anything: the available namespaces and their capabilities are tenant-specific and discovered at runtime. What you think you know about an API may be outdated or may be outclassed by a service on this tenant you have never seen. Verify through search, describe, and docs.
+
+Available globals (do NOT declare these as function parameters):
 
 \`\`\`ts
-type OperationInfo = {
-  summary?: string
-  description?: string
-  tags?: string[]
-  parameters?: Array<{ name: string, in: string, required?: boolean, schema?: unknown, description?: string }>
-  requestBody?: { required?: boolean, content?: Record<string, { schema?: unknown }> }
-  responses?: Record<string, { description?: string, content?: Record<string, { schema?: unknown }> }>
+declare const codemode: {
+  /** Ranked fuzzy search over API method names, REST paths, and summaries. Returns the top 20 by score. Pass several phrasings at once — results are unioned. */
+  search: (query: string | string[]) => Promise<{
+    results: Array<{ target: string, namespace: string, method: string, httpMethod: string, apiPath: string, summary?: string, score: number }>
+    total: number
+    truncated: boolean
+  }>
+  /**
+   * No target: overview of the namespaces on THIS tenant and their
+   * responsibilities — ALWAYS your first call.
+   * "namespace.method": the typed interface for ONE method — signature,
+   * input/output types with OpenAPI docs as JSDoc, related doc ids.
+   * Array of method targets (max 5): describe a shortlist in one call and
+   * COMPARE their input types before picking.
+   * Namespace-only targets are rejected — use search to find methods.
+   */
+  describe: (target?: string | string[]) => Promise<
+    { target: string, kind: 'overview' | 'method', content: string }
+    | Array<{ target: string, kind: 'overview' | 'method', content: string }>
+  >
 }
 
-type PathItem = {
-  get?: OperationInfo
-  post?: OperationInfo
-  put?: OperationInfo
-  patch?: OperationInfo
-  delete?: OperationInfo
+declare const docs: {
+  /** Fuzzy full-text search over prose documentation topics: domain query languages, concepts, API-area guides. Per-method details live in codemode.describe instead. */
+  search: (query: string, opts?: { limit?: number, fuzzy?: number, prefix?: boolean, minScore?: number, maxTextLength?: number }) => Promise<Array<{
+    id: string, title: string, text: string, truncated: boolean, kind: 'topic' | 'overview', namespace: string, score: number
+  }>>
+  /**
+   * Full untruncated text of a documentation entry. Return it WHOLE — never
+   * slice or truncate doc text: the crucial capability (an operator, a
+   * function, a constraint) is often documented near the end, and a blind
+   * cut loses exactly the part you searched for. Long doc topics are the
+   * one output where length is justified.
+   */
+  read: (id: string) => Promise<{ id: string, title: string, text: string, kind: string, namespace: string }>
 }
 
-type Spec = {
-  paths: Record<string, PathItem>
-  tags?: Array<{ name: string, description?: string }>
-}
-
-declare const coreSpec: Spec
-declare const serviceSpecs: Record<string, Spec>
+// API namespaces: \`c8y\` (Cumulocity core — always present) plus one global
+// per microservice available on the current tenant (e.g. \`dtm\`), each with
+// one typed method per operation and a low-level escape hatch:
+//   await c8y.getManagedObjectCollectionResource({ pageSize: 5 })
+//   await c8y.request({ method: 'GET', path: '/inventory/managedObjects', params: { pageSize: 5 } })
+// The request escape hatch is a LAST resort: use it only after repeated
+// searches found no method — a derived method exists for nearly every operation.
 \`\`\`
 
-- \`coreSpec\` — the main Cumulocity REST surface. Always present.
-- \`serviceSpecs\` — microservice APIs available on the active tenant, keyed by contextPath. An entry is **present iff** the service is reachable on this tenant. Paths are already prefixed (e.g. \`/service/myservice/items\`). Check with \`serviceSpecs.dtm\` (or \`'dtm' in serviceSpecs\`) before reaching in.
-- Prefer checking operation \`parameters\` before designing multi-step logic. If filters, expansions, or selectors exist, use them first.
-- When an operation has \`tags\`, read the matching tag descriptions to discover domain-specific query language/functions and recommended usage patterns.
-- Fall back to custom traversal/aggregation only when endpoint-native options cannot express the needed result shape.
+Workflow — ALWAYS in this order: describe() → search → describe(shortlist) → call.
+1. \`codemode.describe()\` (no target) — ALWAYS start here. It lists the API namespaces on THIS tenant with their responsibilities. A domain service (asset management, data preparation, …) usually has a far better API for its domain — server-side hierarchy queries, bulk operations — than composing the generic core API. Decide which namespaces could own the problem's domain, and search with each of their vocabularies.
+2. \`codemode.search(["phrasing 1", "phrasing 2"])\` — find candidate methods (top 20 by score). Results usually contain several overlapping endpoints (single-item, collection, count, by-external-id, bulk variants) — read all summaries and shortlist every candidate that could satisfy the request in ONE call, don't grab the first hit. If all results come from one namespace, re-check the overview — another namespace may own the domain with a stronger API. If the expected method is missing, re-search with other domain words before concluding it does not exist — check \`total\` too.
+3. \`codemode.describe(["ns.methodA", "ns.methodB"])\` (max 5) — ALWAYS describe before calling, and describe the whole shortlist in one call. Compare the input types: prefer the method whose parameters push the work to the server — query/filter parameters (especially ones marked \`@format c8y:query\` or documenting a query grammar), hierarchy/recursive selectors, bulk endpoints — over methods that would force per-item calls or client-side filtering. Describing five candidates costs almost nothing; one wrong or unfiltered API call costs more context than all your discovery combined.
+4. \`docs.search("...")\` / \`docs.read(id)\` — when a parameter references domain syntax you don't know, read the docs before guessing values. Read doc texts to the END — never \`.slice()\` them: the operator or function you need is often documented in the later sections, and a blind cut loses exactly the crucial part.
+5. Call the winner: \`await c8y.someMethod({ ...params, body })\` (path/query/header parameters and \`body\` share one flat input object). ONE well-parameterized call beats fetching broadly and filtering in your code, and beats chains of per-item calls. If you catch yourself looping over items to call an API for each one, go back to step 1 — a collection, query, or bulk endpoint usually exists.
+6. Return only the data needed to answer — never return raw unfiltered collections.
 
-Both \`coreSpec\` and each \`serviceSpecs\` entry have a top-level \`tags\` array with domain documentation. Each operation may reference one or more tags by name via its \`tags[]\` field. When you need deeper context about an API area or resource, look up the matching tag entry by name and read its \`description\`.
+Discovery and API calls can be combined in a single run. Methods blocked by the connection access policy are omitted from discovery entirely; a blocked live request fails with an explanatory message — that is a connection-level access restriction, not a Cumulocity API failure, and retrying will not help.
 
-\`\`\`js
-// Get all tag names to find relevant documentation areas — use first when you know the domain but not the exact path
-() => serviceSpecs.dtm?.tags?.map(t => t.name)
-\`\`\`
-
-\`\`\`js
-// Find documentation for a known tag name
-() => serviceSpecs.dtm?.tags?.find(t => t.name === 'Assets')?.description
-\`\`\`
-
-\`\`\`js
-// Follow the tag reference from a specific operation
-() => {
-  const op = serviceSpecs.dtm?.paths['/service/dtm/assets/linkedSeries']?.get
-  const tagName = op?.tags?.[0]
-  return tagName ? serviceSpecs.dtm?.tags?.find(t => t.name === tagName)?.description : null
-}
-\`\`\`
-
-${getQueryResultDescription(env)}
-The current MCP connection may still block \`execute\` calls even when an operation is visible in a spec.
-
-Examples:
-\`() => Object.keys(serviceSpecs)\`
-\`() => Object.keys(coreSpec.paths).filter((p) => p.includes('inventory'))\`
-\`() => serviceSpecs.dtm?.paths['/service/dtm/assets']?.get\`
-
-\`\`\`js
-() => {
-  const op = coreSpec.paths['/inventory/managedObjects']?.get
-  return { summary: op?.summary, parameters: op?.parameters }
-}
-\`\`\`
-`,
-    schema: v.object({
-      code: createCodeSchema(
-        'A zero-parameter JavaScript function expression. coreSpec and serviceSpecs are already declared as top-level constants — do not redeclare them as function parameters. Return the final result. Async functions are supported.',
-      ),
-    }),
-  }, async (input) => {
-    try {
-      return tool.text(await query(input.code))
-    } catch (error) {
-      return tool.error(error instanceof Error ? error.message : String(error))
-    }
-  })
-}
-
-export function createExecuteTool(env: Env) {
-  return defineTool({
-    name: 'execute',
-    title: 'Execute Cumulocity API Call',
-    description: `${getExecuteSafetyPreface(env)}
-
-Execute JavaScript code against the Cumulocity API. Use the query tool first to find the right endpoint, then write an async function that calls cumulocity.request().
-
-${getOpenApiNote()}
-
-Available in your function:
-
-\`\`\`ts
-type CumulocityRequestOptions = {
-  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
-  path: string
-  body?: unknown
-  headers?: Record<string, string>
-}
-
-declare const cumulocity: {
-  request<T = unknown>(options: CumulocityRequestOptions): Promise<T>
-}
-\`\`\`
-
-Your code must evaluate to an async function. Return the final value you want.
-
-Execution strategy:
-- First inspect endpoint parameters with \`query\` and choose the lowest-call approach.
-- Read relevant tag documentation to discover domain query language/features before writing custom control flow.
-- Prefer native API filters/expansions/selectors over manual traversal loops when both satisfy the request.
-- Use manual traversal only when endpoint-native options cannot express the needed result shape.
-
-On success the result is returned in Toon format. On a blocked or failed execution a plain text message is returned. A blocked message means the operation was denied by connection policy — retrying through the same connection will not help.
+Your code must evaluate to an async function. Return the final value you want; on success it is returned in Toon format.
 
 Examples:
 \`\`\`js
 async () => {
-  return await cumulocity.request({ method: 'GET', path: '/inventory/managedObjects?pageSize=5' })
+  const { results } = await codemode.search('alarms by severity')
+  const { content } = await codemode.describe(results[0].target)
+  return content
 }
+\`\`\`
 
+\`\`\`js
 async () => {
-  return await cumulocity.request({
-    method: 'GET',
-    path: '/alarm/alarms?pageSize=10&type=myAlarmType',
-  })
+  return await c8y.getAlarmCollectionResource({ pageSize: 10, severity: 'MAJOR' })
+}
+\`\`\`
+
+\`\`\`js
+async () => {
+  const hits = await docs.search('inventory query language syntax')
+  return hits.length > 0 ? (await docs.read(hits[0].id)).text : 'no docs found'
 }
 \`\`\`
 `,
     schema: v.object({
-      code: createCodeSchema(
-        'An async JavaScript function expression. The top-level binding `cumulocity` is available automatically. Return the final result. `await` is supported.',
+      code: v.pipe(
+        v.string(),
+        v.minLength(1),
+        v.description('An async JavaScript function expression. The globals codemode, docs, c8y, and per-service namespaces are available automatically — do not declare them as parameters. Return the final result.'),
       ),
     }),
   }, async (input) => {

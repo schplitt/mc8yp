@@ -4,13 +4,13 @@ import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
 import { getCliTenantContext } from '../cli/tenant-context'
 import { c8yMcpServer } from '../server-instance'
-import { getCachedDiscovery, refreshApiSpecs } from '../utils/api-discovery'
+import { refreshApiSpecs } from '../utils/api-discovery'
 import { resolveSpecs } from '../utils/spec-resolution'
 import { resetActiveTenant } from './active-tenant'
 
 const STATUS_TOOL_DESCRIPTION
-  = 'Show the current CLI status: stored tenant credentials, which tenant query and execute will hit, and the specs visible to query right now. '
-    + 'If no tenant is active, query falls back to all bundled OpenAPI snapshots and execute is unavailable — set-active-tenant must be called first. '
+  = 'Show the current CLI status: stored tenant credentials, which tenant the codemode tool will hit, and the API namespaces visible right now. '
+    + 'If no tenant is active, codemode discovery falls back to all bundled OpenAPI snapshots and live API calls are unavailable — set-active-tenant must be called first. '
     + 'This tool also self-heals: if the active tenant has lost its stored credentials it is automatically reset before the status is reported.\n\n'
     + 'Pass `refresh: true` to force a fresh API spec discovery against the active tenant. Use this after subscribing or unsubscribing a microservice in the tenant — otherwise discovered specs stay cached for 30 minutes. '
     + 'If no tenant is active, `refresh: true` is a noop.'
@@ -50,7 +50,7 @@ async function buildCliStatus(refresh: boolean): Promise<string> {
     active = null
     sections.push(
       `Active tenant ${cleared} was cleared automatically because no credentials are stored for it. `
-      + 'Query now falls back to all bundled OpenAPI snapshots; execute is unavailable until you set a tenant.',
+      + 'Codemode discovery now falls back to all bundled OpenAPI snapshots; live API calls are unavailable until you set a tenant.',
     )
   }
 
@@ -67,7 +67,7 @@ async function buildCliStatus(refresh: boolean): Promise<string> {
   if (active) {
     sections.push(`Active tenant: ${active.tenantUrl}`)
   } else {
-    sections.push('Active tenant: (none) — query falls back to all bundled OpenAPI snapshots; execute is unavailable until set-active-tenant is called. Visibility in the bundled-only mode does NOT guarantee any service is installed on any tenant.')
+    sections.push('Active tenant: (none) — codemode discovery falls back to all bundled OpenAPI snapshots; live API calls are unavailable until set-active-tenant is called. Visibility in the bundled-only mode does NOT guarantee any service is installed on any tenant.')
   }
 
   if (creds.length === 0) {
@@ -77,21 +77,8 @@ async function buildCliStatus(refresh: boolean): Promise<string> {
     sections.push(`Stored credentials:\n${lines}`)
   }
 
-  // For label enrichment, look up the active tenant's tenantId from the
-  // keyring. The CLI tenant context only carries tenantUrl, so we rely on
-  // the credentials lookup. Best-effort: failure just drops the labels.
-  let activeTenantId: string | undefined
-  if (active) {
-    try {
-      activeTenantId = (await globalThis._getCredentialsByTenantUrl(active.tenantUrl)).tenantId
-    } catch {
-      activeTenantId = undefined
-    }
-  }
-  sections.push(await buildVisibleSpecsSection(activeTenantId))
-
   if (!active && creds.length > 0) {
-    sections.push('Next step: call set-active-tenant with one of the tenant URLs above before using query or execute.')
+    sections.push('Next step: call set-active-tenant with one of the tenant URLs above before making live API calls through codemode.')
   }
 
   return sections.join('\n\n')
@@ -114,7 +101,7 @@ async function refreshCliActiveTenant(tenantUrl: string): Promise<string> {
     const resolved = resolveSpecs(result.specs, result.installedContextPaths)
 
     // Update both the CLI-local context and the shared MCP custom context
-    // so subsequent query/execute calls see the new surface immediately.
+    // so subsequent codemode calls see the new surface immediately.
     const cliCtx = getCliTenantContext()
     if (cliCtx) {
       cliCtx.specs = resolved
@@ -126,59 +113,5 @@ async function refreshCliActiveTenant(tenantUrl: string): Promise<string> {
     return `Refreshed API discovery for ${tenantUrl}: ${result.specs.length} spec(s) downloaded, ${result.installedContextPaths.size} subscribed application(s).`
   } catch (err) {
     return `Refresh failed for ${tenantUrl}: ${err instanceof Error ? err.message : String(err)}`
-  }
-}
-
-/**
- * Render the "Visible specs" block. Awaits the cached discovery promise
- * (if any) to enrich entries with app/spec labels; falls back to a bare
- * contextPath list when the cache is cold or the lookup fails.
- * @param tenantId - Tenant ID used as the discovery cache key for label enrichment.
- */
-async function buildVisibleSpecsSection(tenantId: string | undefined): Promise<string> {
-  const specs = c8yMcpServer.ctx.custom?.specs
-  if (!specs) {
-    return 'Visible specs: (none) — no tenant context resolved.'
-  }
-
-  const labels = await getDiscoveryLabels(tenantId)
-
-  const lines: string[] = ['- core (Cumulocity core API, always present as `coreSpec`)']
-  const serviceKeys = Object.keys(specs.specs).sort()
-  if (serviceKeys.length === 0) {
-    lines.push('  (no service specs available)')
-  } else {
-    for (const key of serviceKeys) {
-      const meta = labels?.get(key)
-      const label = meta
-        ? ` — ${meta.appLabel}${meta.specLabel !== meta.appLabel ? ` / ${meta.specLabel}` : ''}`
-        : ''
-      lines.push(`- serviceSpecs.${key}${label}`)
-    }
-  }
-  return `Visible specs (use in query as \`coreSpec\` / \`serviceSpecs.<key>\`):\n${lines.join('\n')}`
-}
-
-/**
- * Best-effort discovery metadata lookup. Returns undefined when the cache
- * has no entry for the tenant or when reading it throws — the caller
- * gracefully falls back to a label-less listing.
- * @param tenantId - Tenant ID used as the discovery cache key.
- */
-async function getDiscoveryLabels(
-  tenantId: string | undefined,
-): Promise<Map<string, { appLabel: string, specLabel: string }> | undefined> {
-  if (!tenantId)
-    return undefined
-  const cached = getCachedDiscovery(tenantId)
-  if (!cached)
-    return undefined
-  try {
-    const result = await cached
-    const map = new Map<string, { appLabel: string, specLabel: string }>()
-    for (const s of result.specs) map.set(s.contextPath, { appLabel: s.appLabel, specLabel: s.specLabel })
-    return map
-  } catch {
-    return undefined
   }
 }

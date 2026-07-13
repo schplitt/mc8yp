@@ -9,9 +9,9 @@ import { getBundledOnlySpecs } from '../utils/spec-resolution'
 /**
  * Clear the active tenant everywhere it is recorded: persistence file,
  * in-memory CLI context, and the shared MCP custom context. The custom-
- * context update is what makes subsequent `query` / `execute` calls observe
- * the no-tenant state — query falls back to bundled-only specs, execute
- * errors loudly on missing auth.
+ * context update is what makes subsequent `codemode` calls observe the
+ * no-tenant state — discovery falls back to bundled-only specs, live API
+ * calls error loudly on missing auth.
  *
  * Exported so the drift-recovery paths (status, CLI startup) can reuse
  * the same teardown the explicit reset uses.
@@ -31,7 +31,7 @@ export function createSetActiveTenantTool() {
     {
       name: 'set-active-tenant',
       title: 'Set Active Tenant',
-      description: 'Set the Cumulocity tenant for this CLI session, or pass tenantUrl: null to clear the active tenant. The tenantUrl must match one returned by the status tool. The selection is persisted across sessions so you only need to call this once (or when switching tenants). Clearing falls back to bundled-only browsing — query still works but execute is unavailable until a tenant is set again.',
+      description: 'Set the Cumulocity tenant for this CLI session, or pass tenantUrl: null to clear the active tenant. The tenantUrl must match one returned by the status tool. The selection is persisted across sessions so you only need to call this once (or when switching tenants). Clearing falls back to bundled-only browsing — codemode discovery still works but live API calls are unavailable until a tenant is set again.',
       schema: v.object({
         tenantUrl: v.nullable(
           v.pipe(
@@ -47,7 +47,7 @@ export function createSetActiveTenantTool() {
         if (input.tenantUrl === null) {
           resetActiveTenant()
           return tool.text(
-            'Active tenant cleared. Query now falls back to all bundled OpenAPI snapshots; execute is unavailable until you set a tenant. Call set-active-tenant with a tenantUrl from the status tool to reconnect.',
+            'Active tenant cleared. Codemode discovery now falls back to all bundled OpenAPI snapshots; live API calls are unavailable until you set a tenant. Call set-active-tenant with a tenantUrl from the status tool to reconnect.',
           )
         }
 
@@ -66,7 +66,7 @@ export function createSetActiveTenantTool() {
         const ctx = await setCliTenantContext(input.tenantUrl)
 
         // Push auth and specs into the shared MCP context so all subsequent
-        // tool calls (query, execute) read from it without needing to re-resolve.
+        // codemode calls read from it without needing to re-resolve.
         const custom = c8yMcpServer.ctx.custom
         if (!custom) {
           // should never happen
@@ -80,7 +80,7 @@ export function createSetActiveTenantTool() {
           .filter(([, v]) => v !== null)
           .map(([k]) => k)
         return tool.text(
-          `Active tenant set to ${input.tenantUrl}. Available specs: ${specKeys.join(', ') || '(none)'}. You can now use query and execute.`,
+          `Active tenant set to ${input.tenantUrl}. Available specs: ${specKeys.join(', ') || '(none)'}. You can now use the codemode tool.`,
         )
       } catch (error) {
         return tool.error(error instanceof Error ? error.message : String(error))

@@ -19,8 +19,8 @@ catalogs:
       specifier: ^0.0.1
       version: 0.0.1
     '@iso4/sandbox':
-      specifier: ^0.0.3
-      version: 0.0.3
+      specifier: ^0.2.2
+      version: 0.2.2
     '@napi-rs/keyring':
       specifier: ^1.3.0
       version: 1.3.0
@@ -60,6 +60,9 @@ catalogs:
     h3:
       specifier: 2.0.1-rc.22
       version: 2.0.1-rc.22
+    minisearch:
+      specifier: ^7.2.0
+      version: 7.2.0
     tmcp:
       specifier: ^1.19.4
       version: 1.19.4
@@ -88,7 +91,7 @@ importers:
     dependencies:
       '@iso4/sandbox':
         specifier: 'catalog:'
-        version: 0.0.3
+        version: 0.2.2
       '@napi-rs/keyring':
         specifier: 'catalog:'
         version: 1.3.0
@@ -141,6 +144,9 @@ importers:
       h3:
         specifier: 'catalog:'
         version: 2.0.1-rc.22
+      minisearch:
+        specifier: 'catalog:'
+        version: 7.2.0
       tmcp:
         specifier: 'catalog:'
         version: 1.19.4(typescript@6.0.3)
@@ -576,33 +582,33 @@ packages:
     resolution: {integrity: sha512-9moEW0miSoMzyX4OEEFtAZGsLKGSCFqDh+VZap5/qhvCD1OPV/jzPrQ1Bu2RdzHttjqhQ9kAnZQN9/9+yejfKQ==}
     engines: {node: '>=24.0.0'}
 
-  '@iso4/sandbox@0.0.3':
-    resolution: {integrity: sha512-bQyLNQbmJGf4RiHAEojCkQjUeXZxEpOb43DWcv7Zai7WR4c6hBe5Btniz5nNXTQvsKrhZqODDM1Y1No1kyqUEw==}
+  '@iso4/sandbox@0.2.2':
+    resolution: {integrity: sha512-2nYzX2JhYXY+UVWbkUxYXF/bdD60/GZOMphYtB5XJxHv6cmJdDadZU46aw+WGZiPpJh8LILKRQ4bTgQV2wIw9w==}
     engines: {node: '>=24.0.0'}
 
-  '@iso4/v8-darwin-arm64@0.0.3':
-    resolution: {integrity: sha512-9iZtvgA3d1q5zHFgCQiab8X5UxPRUvdvUJZajXfYaeMXdR96vMShSV50pRUOyLZzJYjAA0QVIgqqpK4Fj9ERXg==}
+  '@iso4/v8-darwin-arm64@0.2.2':
+    resolution: {integrity: sha512-+5uLCagCZoJ00b62Ci5tyv3P+QzKqgAcx5660+K3G9068IPV6yIwKSSt7gfRYalYgzKgmj9q2xNwhNvGgBb/LA==}
     engines: {node: '>=24.0.0'}
     cpu: [arm64]
     os: [darwin]
     hasBin: true
 
-  '@iso4/v8-darwin-x64@0.0.3':
-    resolution: {integrity: sha512-56QuxWBWG8WzKdROWRdhxIc2L3Fhlbb2UYg99vW7ZoRQKFPRLQHBk6FFmaSXdTqhjb1TB4RctaUHHA848SqNKg==}
+  '@iso4/v8-darwin-x64@0.2.2':
+    resolution: {integrity: sha512-UJIAH64m7gwtPeMksEcqwqJ1oHMGk/MbWKujeOR9ryoc0OW+Ym0lnrQgYW3ZzYCnV2vRnTBT08M7RFVUfCLS6Q==}
     engines: {node: '>=24.0.0'}
     cpu: [x64]
     os: [darwin]
     hasBin: true
 
-  '@iso4/v8-linux-arm64-gnu@0.0.3':
-    resolution: {integrity: sha512-4BJdoUbUdMCN2JFOuHIiIvv/whEIYaH94PGU2jlBzpzI5VzBSq8bGGnkG1oVkNTiEOkLRzSy7sY678/Sxn2azw==}
+  '@iso4/v8-linux-arm64-gnu@0.2.2':
+    resolution: {integrity: sha512-NA6OUqJRZY+ycC3YVZubDqB2BCJyy4AXwkcBObu299/OywMjHTR6ey7w9zdE4wPDmmxl7JIDZFpjgQg7PcOM0A==}
     engines: {node: '>=24.0.0'}
     cpu: [arm64]
     os: [linux]
     hasBin: true
 
-  '@iso4/v8-linux-x64-gnu@0.0.3':
-    resolution: {integrity: sha512-7k13ZO3pizvjDrvyfFQCSzr0MtIaZWJPmpoTkPVhZZf4U19rxWOKKk8emzurmmaBXxNpGJspo53wAKJ8yLJ56A==}
+  '@iso4/v8-linux-x64-gnu@0.2.2':
+    resolution: {integrity: sha512-I59ODWRUlFUjRl6hcu+x3gfR03QLxbBJSVEs/Erx5inj7XazgstC0tMmTIS+DIYw85WX05d4HxSj4f09z98AIA==}
     engines: {node: '>=24.0.0'}
     cpu: [x64]
     os: [linux]
@@ -2641,6 +2647,9 @@ packages:
     resolution: {integrity: sha512-tEBHqDnIoM/1rXME1zgka9g6Q2lcoCkxHLuc7ODJ5BxbP5d4c2Z5cGgtXAku59200Cx7diuHTOYfSBD8n6mm8A==}
     engines: {node: '>=16 || 14 >=14.17'}
 
+  minisearch@7.2.0:
+    resolution: {integrity: sha512-dqT2XBYUOZOiC5t2HRnwADjhNS2cecp9u+TJRiJ1Qp/f5qjkeT5APcGPjHw+bz89Ms8Jp+cG4AlE+QZ/QnDglg==}
+
   minizlib@2.1.2:
     resolution: {integrity: sha512-bAxsR8BVfj60DWXHE3u30oHzfl4G7khkSuPW+qvpd7jFRHm7dLxOjUk1EHACJ/hxLY8phGJ0YhYHZo7jil7Qdg==}
     engines: {node: '>= 8'}
@@ -4076,23 +4085,23 @@ snapshots:
       rou3: 0.8.1
       undici: 6.26.0
 
-  '@iso4/sandbox@0.0.3':
+  '@iso4/sandbox@0.2.2':
     optionalDependencies:
-      '@iso4/v8-darwin-arm64': 0.0.3
-      '@iso4/v8-darwin-x64': 0.0.3
-      '@iso4/v8-linux-arm64-gnu': 0.0.3
-      '@iso4/v8-linux-x64-gnu': 0.0.3
+      '@iso4/v8-darwin-arm64': 0.2.2
+      '@iso4/v8-darwin-x64': 0.2.2
+      '@iso4/v8-linux-arm64-gnu': 0.2.2
+      '@iso4/v8-linux-x64-gnu': 0.2.2
 
-  '@iso4/v8-darwin-arm64@0.0.3':
+  '@iso4/v8-darwin-arm64@0.2.2':
     optional: true
 
-  '@iso4/v8-darwin-x64@0.0.3':
+  '@iso4/v8-darwin-x64@0.2.2':
     optional: true
 
-  '@iso4/v8-linux-arm64-gnu@0.0.3':
+  '@iso4/v8-linux-arm64-gnu@0.2.2':
     optional: true
 
-  '@iso4/v8-linux-x64-gnu@0.0.3':
+  '@iso4/v8-linux-x64-gnu@0.2.2':
     optional: true
 
   '@jridgewell/gen-mapping@0.3.13':
@@ -6336,6 +6345,8 @@ snapshots:
   minipass@5.0.0: {}
 
   minipass@7.1.3: {}
+
+  minisearch@7.2.0: {}
 
   minizlib@2.1.2:
     dependencies:

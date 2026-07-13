@@ -61,10 +61,29 @@ export interface ResolvedSpecs {
  * @param installedContextPaths Context paths of microservices the tenant owns
  *   or is subscribed to (discovery filters to type=MICROSERVICE).
  */
+// Memoized per (discoveredSpecs, installedContextPaths) object pair — both
+// come from the same per-tenant discovery cache entry, so in server mode the
+// H3 handler gets the SAME ResolvedSpecs object back for every request of a
+// tenant until its discovery refreshes. That identity is what the codemode
+// layer's WeakMap caches (derived operations, docs index) key on; without it
+// they would rebuild on every request. A refresh produces a fresh discovery
+// result → fresh resolved object → caches repopulate lazily and old entries
+// are garbage-collected.
+const resolvedSpecsCache = new WeakMap<object, WeakMap<object, ResolvedSpecs>>()
+
 export function resolveSpecs(
   discoveredSpecs: readonly DiscoveredApiSpec[],
   installedContextPaths: ReadonlySet<string>,
 ): ResolvedSpecs {
+  let byInstalled = resolvedSpecsCache.get(discoveredSpecs)
+  if (!byInstalled) {
+    byInstalled = new WeakMap()
+    resolvedSpecsCache.set(discoveredSpecs, byInstalled)
+  }
+  const cached = byInstalled.get(installedContextPaths)
+  if (cached)
+    return cached
+
   const specs: ServiceSpecs = {}
   const bundledContextPaths = new Set<string>()
 
@@ -85,7 +104,9 @@ export function resolveSpecs(
     }
   }
 
-  return { core: getCoreOpenApiSpec(), specs }
+  const resolved: ResolvedSpecs = { core: getCoreOpenApiSpec(), specs }
+  byInstalled.set(installedContextPaths, resolved)
+  return resolved
 }
 
 /**

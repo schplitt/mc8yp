@@ -85,3 +85,19 @@ describe('getBundledOnlySpecs', () => {
     expect(getBundledOnlySpecs().core).toEqual(resolveSpecs([], EMPTY_INSTALLED).core)
   })
 })
+
+describe('resolveSpecs — identity memoization', () => {
+  it('returns the same object for the same discovery inputs', () => {
+    const discovered = [makeDiscovered('svcA')]
+    const installed = new Set(['svcA'])
+    expect(resolveSpecs(discovered, installed)).toBe(resolveSpecs(discovered, installed))
+  })
+
+  it('returns a fresh object when either input changes identity', () => {
+    const discovered = [makeDiscovered('svcA')]
+    const installed = new Set(['svcA'])
+    const resolved = resolveSpecs(discovered, installed)
+    expect(resolveSpecs([makeDiscovered('svcA')], installed)).not.toBe(resolved)
+    expect(resolveSpecs(discovered, new Set(['svcA']))).not.toBe(resolved)
+  })
+})
