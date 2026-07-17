@@ -6,10 +6,10 @@ import pkgjson from '../../package.json' with { type: 'json' }
 import { getCoreOpenApiLabel, getCoreOpenApiVersion, setCoreOpenApiVersion, specs } from '#core-openapi'
 import { c8yMcpServer, setupMcpServer } from '../server'
 import { getCredentialsByTenantUrl, getStoredC8yAuth } from '../utils/credentials'
-import { parseAllowRule, parseRestrictionRule } from '../utils/restrictions'
+import { parseAllowRule, parseNoMcp, parseRestrictionRule } from '../utils/restrictions'
 import { clearActiveTenant, readActiveTenantUrl } from './active-tenant'
 import { getCliTenantContext, setCliTenantContext } from './tenant-context'
-import { getBundledOnlySpecs } from '../utils/spec-resolution'
+import { getBundledOnlyCapabilities } from '../utils/capability-resolution'
 
 const main = defineCommand({
   meta: {
@@ -18,21 +18,25 @@ const main = defineCommand({
     description: pkgjson.description,
   },
   args: {
-    restriction: {
+    'restriction': {
       type: 'string',
       description: 'Restriction rule to deny API access (for example "GET:/inventory/**"). Can be repeated.',
       alias: ['r', 'restrict'],
     },
-    allowed: {
+    'allowed': {
       type: 'string',
       description: 'Allow rule to permit API access (for example "GET:/inventory/**"). Can be repeated. When present, non-matching operations are blocked unless another allow rule matches them.',
       alias: ['a', 'allow'],
     },
-    spec: {
+    'spec': {
       type: 'string',
       description: `Bundled core OpenAPI snapshot to expose to codemode. Available: ${specs.map((e) => `${e.version} (${e.label})`).join(', ')}.`,
       alias: 's',
       default: getCoreOpenApiVersion(),
+    },
+    'no-mcp': {
+      type: 'string',
+      description: 'Disable MCP wrapping: pass "*" (or no value) for all services, or a contextPath. Can be repeated. Opted-out services fall back to their OpenAPI spec.',
     },
   },
   setup: () => {
@@ -77,6 +81,12 @@ const main = defineCommand({
       consola.info(`Applying ${parsedAllowRules.length} allow rule(s):`, parsedAllowRules.map((r) => r.source))
     }
 
+    const rawNoMcp = args['no-mcp'] as string | boolean | Array<string | boolean> | undefined
+    const noMcp = parseNoMcp(Array.isArray(rawNoMcp) ? rawNoMcp : rawNoMcp !== undefined ? [rawNoMcp] : [])
+    if (noMcp.all || noMcp.contextPaths.size > 0) {
+      consola.info(`MCP wrapping disabled for: ${noMcp.all ? 'all services' : [...noMcp.contextPaths].join(', ')}`)
+    }
+
     // If a tenant was previously selected, populate the in-memory context now
     // so the first tool call is immediately ready — discovery cost is paid here
     // at startup, not deferred to the first tool call.
@@ -84,10 +94,10 @@ const main = defineCommand({
     if (activeTenant) {
       try {
         const tenantCtx = await setCliTenantContext(activeTenant)
-        const serviceKeys = Object.keys(tenantCtx.specs.specs)
+        const specKeys = Object.keys(tenantCtx.specs.specs)
+        const mcpKeys = Object.keys(tenantCtx.specs.mcpServers)
         consola.info(`Active tenant: ${activeTenant}`)
-        consola.info(`Startup discovery complete: ${serviceKeys.length} microservice API spec(s) found${serviceKeys.length > 0 ? ` [${serviceKeys.join(', ')}]` : ''}`)
-        consola.info(`Available specs: ${['core', ...serviceKeys].join(', ')}`)
+        consola.info(`Startup discovery complete — OpenAPI specs: ${specKeys.length > 0 ? specKeys.join(', ') : 'none'}; MCP servers: ${mcpKeys.length > 0 ? mcpKeys.join(', ') : 'none'}`)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         // Drift recovery: if the persistence file points at a tenant whose
@@ -114,10 +124,11 @@ const main = defineCommand({
       env: 'cli' as const,
       restrictions,
       allowRules: parsedAllowRules,
+      noMcp,
       // No active tenant: expose every bundled spec so codemode discovery
       // stays useful as a reference. Live API calls throw a clear
       // missing-auth error so the agent cannot misuse this state.
-      specs: active?.specs ?? getBundledOnlySpecs(),
+      specs: active?.specs ?? getBundledOnlyCapabilities(),
       auth: active ? { tenantUrl: active.tenantUrl, authorizationHeader: active.authorizationHeader } : undefined,
     })
   },

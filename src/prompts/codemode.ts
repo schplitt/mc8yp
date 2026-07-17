@@ -37,7 +37,7 @@ One MCP tool: \`codemode\`. It runs an async JavaScript function in a sandbox wh
 
 \`\`\`ts
 declare const codemode: {
-  search: (query: string | string[]) => Promise<{ results: Array<{ target: string, namespace: string, method: string, httpMethod: string, apiPath: string, summary?: string, score: number }>, total: number, truncated: boolean }>
+  search: (query: string | string[]) => Promise<{ results: Array<{ target: string, namespace: string, method: string, httpMethod?: string, apiPath?: string, summary?: string, score: number }>, total: number, truncated: boolean }>
   describe: (target?: string | string[]) => Promise<{ target: string, kind: 'overview' | 'method', content: string } | Array<{ target: string, kind: 'overview' | 'method', content: string }>>
 }
 
@@ -51,7 +51,7 @@ API namespaces currently visible: ${namespaceNames.map((n) => `\`${n}\``).join('
 
 - \`c8y\` is the Cumulocity core REST surface (inventory, alarms, events, measurements, identity, device control, users, tenants, audit). Always present.
 - Each additional namespace is a microservice available on the current tenant (e.g. \`dtm\`). A namespace exists only when the service is actually reachable.
-- Every namespace has one typed method per API operation plus a low-level escape hatch: \`<ns>.request({ method, path, params?, body?, headers? })\` with tenant-relative paths. The escape hatch is a last resort — reach for it only after repeated searches found no derived method.
+- Every namespace has one typed method per API operation. The namespaces are the complete surface — there is no raw-request escape hatch. If a method seems missing, re-search with different wording; if it truly does not exist, report that instead of improvising.
 - Method inputs are a single flat object: path/query/header parameters as top-level keys, the request payload under \`body\`.
 
 ## Discovery Workflow — ALWAYS in this order: describe() → search → describe(shortlist) → call.
@@ -89,12 +89,6 @@ async () => {
   const grammar = hits.length > 0 ? (await docs.read(hits[0].id)).text : null
   const devices = await c8y.getManagedObjectCollectionResource({ query: "$filter=(type eq 'c8y_Device')", pageSize: 5 })
   return { grammar: grammar?.slice(0, 200), devices }
-}
-\`\`\`
-
-\`\`\`js
-async () => {
-  return await c8y.request({ method: 'GET', path: '/service/dtm/assets', params: { pageSize: 20 } })
 }
 \`\`\`
 

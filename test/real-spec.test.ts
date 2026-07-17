@@ -16,7 +16,7 @@ import { getMethodIndex, searchMethods } from '../src/codemode/method-search'
 import type { DocsIndex } from '../src/codemode/docs-index'
 import { renderMethodDeclaration } from '../src/codemode/type-render'
 import { preprocessOpenApi } from '../src/utils/openapi-preprocessor'
-import type { Spec } from '../src/utils/spec-resolution'
+import type { Spec } from '../src/utils/capability-resolution'
 
 let ops: DerivedOperation[]
 let dtmOps: DerivedOperation[]

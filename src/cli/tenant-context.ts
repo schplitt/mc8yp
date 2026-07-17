@@ -1,8 +1,8 @@
 import { BasicAuth, Client } from '@c8y/client'
-import { startDiscovery } from '../utils/api-discovery'
+import { startDiscovery } from '../utils/capability-discovery'
 import { createC8yAuthHeaders } from '../utils/client'
-import type { ResolvedSpecs } from '../utils/spec-resolution'
-import { resolveSpecs } from '../utils/spec-resolution'
+import type { TenantCapabilities } from '../utils/capability-resolution'
+import { resolveCapabilities } from '../utils/capability-resolution'
 
 export interface CliTenantContext {
   tenantUrl: string
@@ -13,7 +13,7 @@ export interface CliTenantContext {
   /**
    * Fully resolved specs (bundled + discovered, paths pre-prefixed).
    */
-  specs: ResolvedSpecs
+  specs: TenantCapabilities
 }
 
 let _context: CliTenantContext | null = null
@@ -65,12 +65,12 @@ export async function setCliTenantContext(tenantUrl: string): Promise<CliTenantC
   // _context.specs is a resolved snapshot; the cache is busted externally
   // when service-user credentials rotate. Call set-active-tenant again to
   // force a fresh snapshot into the context.
-  const { specs: discovered, installedContextPaths } = await startDiscovery(creds.tenantId, cliClient)
+  const { specs: discovered, installedContextPaths, mcpServers } = await startDiscovery(creds.tenantId, cliClient)
 
   _context = {
     tenantUrl,
     authorizationHeader: authHeaders.Authorization!,
-    specs: resolveSpecs(discovered, installedContextPaths),
+    specs: resolveCapabilities(discovered, installedContextPaths, mcpServers),
   }
 
   return _context

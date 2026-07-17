@@ -6,3 +6,5 @@ dist
 .c8y
 .vscode/mcp.json
 .DS_Store
+.claude/
+eval

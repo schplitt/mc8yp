@@ -4,8 +4,8 @@ import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
 import { getCliTenantContext } from '../cli/tenant-context'
 import { c8yMcpServer } from '../server-instance'
-import { refreshApiSpecs } from '../utils/api-discovery'
-import { resolveSpecs } from '../utils/spec-resolution'
+import { refreshCapabilities } from '../utils/capability-discovery'
+import { resolveCapabilities } from '../utils/capability-resolution'
 import { resetActiveTenant } from './active-tenant'
 
 const STATUS_TOOL_DESCRIPTION
@@ -97,8 +97,8 @@ async function refreshCliActiveTenant(tenantUrl: string): Promise<string> {
       new BasicAuth({ tenant: creds.tenantId, user: creds.user, password: creds.password }),
       tenantUrl,
     )
-    const result = await refreshApiSpecs(creds.tenantId, client)
-    const resolved = resolveSpecs(result.specs, result.installedContextPaths)
+    const result = await refreshCapabilities(creds.tenantId, client)
+    const resolved = resolveCapabilities(result.specs, result.installedContextPaths, result.mcpServers)
 
     // Update both the CLI-local context and the shared MCP custom context
     // so subsequent codemode calls see the new surface immediately.
@@ -110,7 +110,7 @@ async function refreshCliActiveTenant(tenantUrl: string): Promise<string> {
     if (custom) {
       custom.specs = resolved
     }
-    return `Refreshed API discovery for ${tenantUrl}: ${result.specs.length} spec(s) downloaded, ${result.installedContextPaths.size} subscribed application(s).`
+    return `Refreshed API discovery for ${tenantUrl}: ${result.specs.length} spec(s) downloaded, ${result.mcpServers.length} MCP server(s) connected, ${result.installedContextPaths.size} subscribed application(s).`
   } catch (err) {
     return `Refresh failed for ${tenantUrl}: ${err instanceof Error ? err.message : String(err)}`
   }

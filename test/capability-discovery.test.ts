@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Client } from '@c8y/client'
 import {
-  bustApiSpecCache,
-  discoverApiSpecs,
-  refreshApiSpecs,
-  setCachedApiSpecs,
+  bustCapabilityCache,
+  discoverTenantCapabilities,
+  refreshCapabilities,
+  setCachedCapabilities,
   startDiscovery,
-} from '../src/utils/api-discovery'
+} from '../src/utils/capability-discovery'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -60,7 +60,7 @@ interface ListFilter {
 }
 
 /**
- * Build a fake Cumulocity client surface. discoverApiSpecs only touches
+ * Build a fake Cumulocity client surface. discoverTenantCapabilities only touches
  * `client.application.list(filter)` and `client.core.fetch(path)` — a minimal
  * shape covering those two is enough. `apps` is the full applications set;
  * the mock slices it by the filter's pageSize/currentPage so the production
@@ -113,19 +113,19 @@ function specOk(body: unknown) {
 // ---------------------------------------------------------------------------
 
 describe('spec cache', () => {
-  afterEach(() => bustApiSpecCache())
+  afterEach(() => bustCapabilityCache())
 
   it('stores and retrieves a DiscoveryResult by awaiting the cached promise', async () => {
     const specs = [{ contextPath: 'svc', appLabel: 'Svc', specLabel: 'Svc', servicePrefix: '/service/svc', spec: {} }]
-    setCachedApiSpecs(TENANT_ID, specs)
+    setCachedCapabilities(TENANT_ID, specs)
     const result = await startDiscovery(TENANT_ID, mockClient({}))
     expect(result.specs).toEqual(specs)
   })
 
   it('busts a specific tenant cache — startDiscovery triggers fresh discovery after bust', async () => {
     const seeded = [{ contextPath: 'svc', appLabel: 'Svc', specLabel: 'Svc', servicePrefix: '/service/svc', spec: {} }]
-    setCachedApiSpecs(TENANT_ID, seeded)
-    bustApiSpecCache(TENANT_ID)
+    setCachedCapabilities(TENANT_ID, seeded)
+    bustCapabilityCache(TENANT_ID)
     // After bust, the cache is empty — the next startDiscovery must run
     // real discovery against the client, which now returns no apps.
     const result = await startDiscovery(TENANT_ID, mockClient({}))
@@ -133,26 +133,26 @@ describe('spec cache', () => {
   })
 
   it('busts all caches when called without arguments', async () => {
-    setCachedApiSpecs(TENANT_ID, [])
-    setCachedApiSpecs('t99999', [])
-    bustApiSpecCache()
+    setCachedCapabilities(TENANT_ID, [])
+    setCachedCapabilities('t99999', [])
+    bustCapabilityCache()
     // Both entries must be gone — re-seed and verify both promises are fresh
-    setCachedApiSpecs(TENANT_ID, [])
-    setCachedApiSpecs('t99999', [])
-    expect(await startDiscovery(TENANT_ID, mockClient({}))).toEqual({ specs: [], installedContextPaths: new Set() })
-    expect(await startDiscovery('t99999', mockClient({}))).toEqual({ specs: [], installedContextPaths: new Set() })
+    setCachedCapabilities(TENANT_ID, [])
+    setCachedCapabilities('t99999', [])
+    expect(await startDiscovery(TENANT_ID, mockClient({}))).toEqual({ specs: [], mcpServers: [], installedContextPaths: new Set() })
+    expect(await startDiscovery('t99999', mockClient({}))).toEqual({ specs: [], mcpServers: [], installedContextPaths: new Set() })
   })
 })
 
 // ---------------------------------------------------------------------------
-// discoverApiSpecs
+// discoverTenantCapabilities
 // ---------------------------------------------------------------------------
 
-describe('discoverApiSpecs', () => {
-  afterEach(() => bustApiSpecCache())
+describe('discoverTenantCapabilities', () => {
+  afterEach(() => bustCapabilityCache())
 
   it('returns empty specs when no apps have openApiSpec in manifest, but the app is in installedContextPaths', async () => {
-    const result = await discoverApiSpecs(mockClient({
+    const result = await discoverTenantCapabilities(mockClient({
       apps: [makeApp({ openApiSpec: undefined })],
     }), TENANT_ID)
     expect(result.specs).toEqual([])
@@ -161,7 +161,7 @@ describe('discoverApiSpecs', () => {
 
   it('downloads and path-prefixes a spec for a string openApiSpec entry', async () => {
     const rawSpec = makeSpec({ '/things': { get: { summary: 'List things' } } })
-    const result = await discoverApiSpecs(mockClient({
+    const result = await discoverTenantCapabilities(mockClient({
       apps: [makeApp({ contextPath: 'myservice', openApiSpec: 'openapi.json' })],
       coreFetch: { '/service/myservice/openapi.json': specOk(rawSpec) },
     }), TENANT_ID)
@@ -178,7 +178,7 @@ describe('discoverApiSpecs', () => {
   it('handles array openApiSpec manifest entries producing multiple spec entries', async () => {
     const specA = makeSpec({ '/alpha': { get: {} } })
     const specB = makeSpec({ '/beta': { post: {} } })
-    const result = await discoverApiSpecs(mockClient({
+    const result = await discoverTenantCapabilities(mockClient({
       apps: [makeApp({
         contextPath: 'multi',
         openApiSpec: [
@@ -198,7 +198,7 @@ describe('discoverApiSpecs', () => {
 
   it('strips leading slash from manifest spec path before building URL', async () => {
     const rawSpec = makeSpec({ '/items': { get: {} } })
-    const result = await discoverApiSpecs(mockClient({
+    const result = await discoverTenantCapabilities(mockClient({
       apps: [makeApp({ contextPath: 'svc', openApiSpec: '/spec.json' })],
       coreFetch: { '/service/svc/spec.json': specOk(rawSpec) },
     }), TENANT_ID)
@@ -207,7 +207,7 @@ describe('discoverApiSpecs', () => {
   })
 
   it('skips apps without a contextPath — they do not appear in installedContextPaths', async () => {
-    const result = await discoverApiSpecs(mockClient({
+    const result = await discoverTenantCapabilities(mockClient({
       apps: [{ id: 'x', name: 'No Context', manifest: { openApiSpec: 'spec.json' } }],
     }), TENANT_ID)
     expect(result.specs).toEqual([])
@@ -215,7 +215,7 @@ describe('discoverApiSpecs', () => {
   })
 
   it('skips a spec when the download request fails with a non-ok status', async () => {
-    const result = await discoverApiSpecs(mockClient({
+    const result = await discoverTenantCapabilities(mockClient({
       apps: [makeApp({ contextPath: 'broken', openApiSpec: 'spec.json' })],
       coreFetch: { '/service/broken/spec.json': { ok: false, status: 503, statusText: 'Service Unavailable' } },
     }), TENANT_ID)
@@ -224,7 +224,7 @@ describe('discoverApiSpecs', () => {
   })
 
   it('skips a spec when the download throws a network error', async () => {
-    const result = await discoverApiSpecs(mockClient({
+    const result = await discoverTenantCapabilities(mockClient({
       apps: [makeApp({ contextPath: 'neterr', openApiSpec: 'spec.json' })],
       coreFetch: { '/service/neterr/spec.json': new Error('Network error') },
     }), TENANT_ID)
@@ -233,7 +233,7 @@ describe('discoverApiSpecs', () => {
   })
 
   it('throws when two different apps share the same contextPath', async () => {
-    await expect(discoverApiSpecs(mockClient({
+    await expect(discoverTenantCapabilities(mockClient({
       apps: [
         makeApp({ id: 'app1', name: 'Service One', contextPath: 'shared', openApiSpec: 'spec.json' }),
         makeApp({ id: 'app2', name: 'Service Two', contextPath: 'shared', openApiSpec: 'spec.json' }),
@@ -246,7 +246,7 @@ describe('discoverApiSpecs', () => {
   it('does not throw when the same app appears twice in the list (same name, same contextPath)', async () => {
     const rawSpec = makeSpec({ '/a': { get: {} } })
     const app = makeApp({ contextPath: 'dup', openApiSpec: 'spec.json' })
-    const result = await discoverApiSpecs(mockClient({
+    const result = await discoverTenantCapabilities(mockClient({
       apps: [app, app],
       coreFetch: { '/service/dup/spec.json': specOk(rawSpec) },
     }), TENANT_ID)
@@ -254,14 +254,14 @@ describe('discoverApiSpecs', () => {
   })
 
   it('throws when fetching the application list fails', async () => {
-    await expect(discoverApiSpecs(mockClient({
+    await expect(discoverTenantCapabilities(mockClient({
       apps: { status: 500, statusText: 'Internal Server Error' },
     }), TENANT_ID)).rejects.toThrow('Failed to fetch applications: 500')
   })
 
   it('queries the applications endpoint filtered by tenant and type MICROSERVICE', async () => {
     const listCalls: ListFilter[] = []
-    await discoverApiSpecs(mockClient({ apps: [makeApp()] }, listCalls), TENANT_ID)
+    await discoverTenantCapabilities(mockClient({ apps: [makeApp()] }, listCalls), TENANT_ID)
     expect(listCalls).toHaveLength(1)
     expect(listCalls[0]).toMatchObject({
       tenant: TENANT_ID,
@@ -275,14 +275,14 @@ describe('discoverApiSpecs', () => {
     // 100-per-page production page size → 250 apps means 3 pages, the last one short.
     const apps = Array.from({ length: 250 }, (_, i) =>
       makeApp({ id: `app${i}`, name: `Service ${i}`, contextPath: `svc${i}`, openApiSpec: undefined }))
-    const result = await discoverApiSpecs(mockClient({ apps }, listCalls), TENANT_ID)
+    const result = await discoverTenantCapabilities(mockClient({ apps }, listCalls), TENANT_ID)
     expect(listCalls.map((c) => c.currentPage)).toEqual([1, 2, 3])
     expect(result.installedContextPaths.size).toBe(250)
   })
 
   it('stops paginating after the first short page', async () => {
     const listCalls: ListFilter[] = []
-    await discoverApiSpecs(mockClient({ apps: [makeApp(), makeApp({ id: 'app2', name: 'Other', contextPath: 'other' })] }, listCalls), TENANT_ID)
+    await discoverTenantCapabilities(mockClient({ apps: [makeApp(), makeApp({ id: 'app2', name: 'Other', contextPath: 'other' })] }, listCalls), TENANT_ID)
     expect(listCalls).toHaveLength(1)
   })
 })
@@ -292,7 +292,7 @@ describe('discoverApiSpecs', () => {
 // ---------------------------------------------------------------------------
 
 describe('startDiscovery', () => {
-  afterEach(() => bustApiSpecCache())
+  afterEach(() => bustCapabilityCache())
 
   it('returns a promise that resolves with a DiscoveryResult', async () => {
     const rawSpec = makeSpec({ '/things': { get: {} } })
@@ -316,7 +316,7 @@ describe('startDiscovery', () => {
   })
 
   it('returns a resolved promise immediately when cache is already ready', async () => {
-    setCachedApiSpecs(TENANT_ID, [])
+    setCachedCapabilities(TENANT_ID, [])
     // A client whose methods would throw if called proves the cache short-circuited.
     const boom = {
       application: {
@@ -349,7 +349,7 @@ describe('startDiscovery', () => {
 
   it('keeps a prior cached result if it exists — a failed discovery does not overwrite it', async () => {
     const goodSpecs = [{ contextPath: 'svc', appLabel: 'Svc', specLabel: 'Svc', servicePrefix: '/service/svc', spec: {} }]
-    setCachedApiSpecs(TENANT_ID, goodSpecs)
+    setCachedCapabilities(TENANT_ID, goodSpecs)
     // A client that would reject if called: cache hit short-circuits it.
     const wouldFail = {
       application: { list: () => Promise.reject(new Error('should not be called')) },
@@ -368,7 +368,7 @@ describe('startDiscovery', () => {
 })
 
 describe('awaiting startDiscovery', () => {
-  afterEach(() => bustApiSpecCache())
+  afterEach(() => bustCapabilityCache())
 
   it('returns empty DiscoveryResult when discovery finds nothing', async () => {
     const result = await startDiscovery(TENANT_ID, mockClient({}))
@@ -386,14 +386,14 @@ describe('awaiting startDiscovery', () => {
   })
 })
 
-describe('refreshApiSpecs', () => {
-  afterEach(() => bustApiSpecCache())
+describe('refreshCapabilities', () => {
+  afterEach(() => bustCapabilityCache())
 
   it('clears the existing cache and restarts discovery', async () => {
-    setCachedApiSpecs(TENANT_ID, [{ contextPath: 'old', appLabel: 'Old', specLabel: 'Old', servicePrefix: '/service/old', spec: {} }])
+    setCachedCapabilities(TENANT_ID, [{ contextPath: 'old', appLabel: 'Old', specLabel: 'Old', servicePrefix: '/service/old', spec: {} }])
 
     const rawSpec = makeSpec({ '/new': { get: {} } })
-    const result = await refreshApiSpecs(TENANT_ID, mockClient({
+    const result = await refreshCapabilities(TENANT_ID, mockClient({
       apps: [makeApp({ contextPath: 'new', openApiSpec: 'spec.json' })],
       coreFetch: { '/service/new/spec.json': specOk(rawSpec) },
     }))

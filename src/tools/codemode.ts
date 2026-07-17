@@ -33,7 +33,7 @@ Available globals (do NOT declare these as function parameters):
 declare const codemode: {
   /** Ranked fuzzy search over API method names, REST paths, and summaries. Returns the top 20 by score. Pass several phrasings at once — results are unioned. */
   search: (query: string | string[]) => Promise<{
-    results: Array<{ target: string, namespace: string, method: string, httpMethod: string, apiPath: string, summary?: string, score: number }>
+    results: Array<{ target: string, namespace: string, method: string, httpMethod?: string, apiPath?: string, summary?: string, score: number }>
     total: number
     truncated: boolean
   }>
@@ -69,11 +69,10 @@ declare const docs: {
 
 // API namespaces: \`c8y\` (Cumulocity core — always present) plus one global
 // per microservice available on the current tenant (e.g. \`dtm\`), each with
-// one typed method per operation and a low-level escape hatch:
+// one typed method per operation. If a method seems missing, search
+// with different wording; if it truly does not exist, say so instead of
+// improvising:
 //   await c8y.getManagedObjectCollectionResource({ pageSize: 5 })
-//   await c8y.request({ method: 'GET', path: '/inventory/managedObjects', params: { pageSize: 5 } })
-// The request escape hatch is a LAST resort: use it only after repeated
-// searches found no method — a derived method exists for nearly every operation.
 \`\`\`
 
 Workflow — ALWAYS in this order: describe() → search → describe(shortlist) → call.

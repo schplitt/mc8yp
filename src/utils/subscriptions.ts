@@ -17,7 +17,7 @@ import process from 'node:process'
 import { BasicAuth, Client } from '@c8y/client'
 import type { ICredentials } from '@c8y/client'
 import consola from 'consola'
-import { bustApiSpecCache, startDiscovery } from './api-discovery'
+import { bustCapabilityCache, startDiscovery } from './capability-discovery'
 
 export const SUBSCRIPTIONS_REFRESH_INTERVAL_MS = 15 * 60 * 1000
 
@@ -54,7 +54,7 @@ function warmDiscoveryCache(map: ReadonlyMap<string, ICredentials>): void {
   // the (potentially rotated) service-user credentials. startDiscovery is
   // fire-and-forget here — the resulting promises sit in the cache for
   // per-request lookups to await.
-  bustApiSpecCache()
+  bustCapabilityCache()
   for (const [tenantId, cred] of map) {
     startDiscovery(tenantId, new Client(new BasicAuth(cred), baseUrl))
       .catch(() => { /* logged inside startDiscovery; cache self-cleans on failure */ })

@@ -8,16 +8,16 @@ import { toRequest } from './derive-operations'
 import { describeTarget } from './describe'
 import { getDocsIndex, readDoc, searchDocs } from './docs-index'
 import { getMethodIndex, searchMethods } from './method-search'
-import type { MethodIndex } from './method-search'
+import type { MethodIndex, SearchableMethod } from './method-search'
 import { buildNamespaces, toSearchableMethods } from './namespaces'
-import type { CodemodeNamespace } from './namespaces'
+import type { CodemodeNamespace, McpNamespace, OpenApiNamespace } from './namespaces'
 import type { DocsSearchOptions } from './docs-index'
 import { createC8yAuthHeaders, resolveC8yAuth } from '../utils/client'
+import { McpHttpClient } from '../utils/mcp-client'
 import { c8yMcpServer } from '../server-instance'
 import { evaluateAccessPolicy } from '../utils/restriction-matcher'
-import { HTTP_METHODS } from '../utils/restrictions'
-import type { AllowRule, RestrictionRule } from '../utils/restrictions'
-import type { ResolvedSpecs } from '../utils/spec-resolution'
+import type { AllowRule, NoMcpConfig, RestrictionRule } from '../utils/restrictions'
+import type { TenantCapabilities } from '../utils/capability-resolution'
 
 const EXECUTE_ENTRY_PATH = '/codemode-execute.mjs'
 
@@ -287,37 +287,53 @@ function buildAgentModule(functionCode: string): string {
 }
 
 /**
- * A live-call dispatcher; degraded to a throwing stub when no tenant is active.
+ * A live-call dispatcher; degraded to throwing stubs when no tenant is active.
  */
 interface LiveCalls {
-  operation: (namespace: CodemodeNamespace, opName: string, input: unknown) => Promise<unknown>
-  request: (options: unknown) => Promise<unknown>
+  operation: (namespace: OpenApiNamespace, opName: string, input: unknown) => Promise<unknown>
+  mcpCall: (namespace: McpNamespace, toolName: string, args: unknown) => Promise<unknown>
+  /**
+   * Close any MCP sessions opened during the run. Never throws.
+   */
+  dispose: () => Promise<void>
 }
 
-function createLiveCalls(safeFetch: SafeFetchGlobal, tenantUrl: string): LiveCalls {
+function createLiveCalls(safeFetch: SafeFetchGlobal, tenantUrl: string, authHeaders: Record<string, string>): LiveCalls {
+  // One MCP session per namespace per run, opened lazily on first use and
+  // closed after the run — auth is the end user's, so sessions must not
+  // outlive the connection context they were created for.
+  const mcpClients = new Map<string, McpHttpClient>()
+  const base = tenantUrl.endsWith('/') ? tenantUrl : `${tenantUrl}/`
+
+  const mcpClientFor = (namespace: McpNamespace): McpHttpClient => {
+    let client = mcpClients.get(namespace.name)
+    if (!client) {
+      client = new McpHttpClient({
+        url: namespace.server.url,
+        fetch: (path, init) => fetch(new URL(path.replace(/^\//, ''), base), {
+          ...init,
+          headers: {
+            ...(init.headers as Record<string, string> | undefined),
+            ...(namespace.server.sendAuthentication ? authHeaders : {}),
+          },
+        }),
+      })
+      mcpClients.set(namespace.name, client)
+    }
+    return client
+  }
+
   return {
     operation: async (namespace, opName, input) => {
       const op = namespace.operations.find((o) => o.name === opName)!
       return performRequest(safeFetch, tenantUrl, toRequest(op, input))
     },
-    request: async (rawOptions) => {
-      if (!rawOptions || typeof rawOptions !== 'object')
-        throw new TypeError('request options must be an object')
-      const options = rawOptions as { method?: unknown, path?: unknown, params?: unknown, body?: unknown, headers?: unknown }
-      if (typeof options.path !== 'string' || options.path.length === 0)
-        throw new TypeError('request path must be a non-empty string')
-      if (typeof options.method !== 'string' || options.method.trim().length === 0)
-        throw new TypeError('request method must be a non-empty string')
-      const method = options.method.trim().toUpperCase()
-      if (!HTTP_METHODS.includes(method as typeof HTTP_METHODS[number]))
-        throw new TypeError(`request method must be one of: ${HTTP_METHODS.join(', ')}`)
-      return performRequest(safeFetch, tenantUrl, {
-        method,
-        path: options.path,
-        query: options.params && typeof options.params === 'object' ? options.params as Record<string, unknown> : undefined,
-        body: options.body,
-        headers: options.headers && typeof options.headers === 'object' ? options.headers as Record<string, string> : undefined,
-      })
+    mcpCall: async (namespace, toolName, args) => {
+      return mcpClientFor(namespace).callTool(toolName, args)
+    },
+    dispose: async () => {
+      await Promise.all([...mcpClients.values()].map((client) => client.close()))
+      mcpClients.clear()
     },
   }
 }
@@ -326,7 +342,7 @@ function createUnauthenticatedCalls(message: string): LiveCalls {
   const fail = async (): Promise<never> => {
     throw new Error(message)
   }
-  return { operation: fail, request: fail }
+  return { operation: fail, mcpCall: fail, dispose: async () => {} }
 }
 
 function buildApiModule(
@@ -335,7 +351,9 @@ function buildApiModule(
   docsIndex: ReturnType<typeof getDocsIndex>,
   live: LiveCalls,
 ): HostModuleObject {
-  const visibleTargets = new Set(namespaces.flatMap((ns) => ns.operations.map((op) => `${ns.name}.${op.name}`)))
+  const visibleTargets = new Set(namespaces.flatMap((ns) => ns.kind === 'openapi'
+    ? ns.operations.map((op) => `${ns.name}.${op.name}`)
+    : ns.tools.map((tool) => `${ns.name}.${tool.name}`)))
 
   return {
     codemode: {
@@ -381,13 +399,21 @@ function buildApiModule(
         return doc
       },
     },
-    namespaces: Object.fromEntries(namespaces.map((namespace) => [namespace.name, {
-      request: async (...args: unknown[]) => live.request(args[0]),
-      ...Object.fromEntries(namespace.operations.map((op) => [
-        op.name,
-        async (...args: unknown[]) => live.operation(namespace, op.name, args[0]),
-      ])),
-    }])),
+    // Namespaces are typed methods ONLY — no escape hatches, no marker of
+    // whether a namespace wraps an OpenAPI spec or an MCP server. The
+    // backing protocol is a host concern; the agent just calls methods.
+    namespaces: Object.fromEntries(namespaces.map((namespace) => [
+      namespace.name,
+      namespace.kind === 'openapi'
+        ? Object.fromEntries(namespace.operations.map((op) => [
+            op.name,
+            async (...args: unknown[]) => live.operation(namespace, op.name, args[0]),
+          ]))
+        : Object.fromEntries(namespace.tools.map((tool) => [
+            tool.name,
+            async (...args: unknown[]) => live.mcpCall(namespace, tool.toolName, args[0]),
+          ])),
+    ])),
   }
 }
 
@@ -396,7 +422,7 @@ function buildApiModule(
 // ─────────────────────────────────────────────────────────────────────────
 
 interface CodemodeRuntime {
-  resolved: ResolvedSpecs
+  resolved: TenantCapabilities
   namespaces: CodemodeNamespace[]
   restrictions: readonly RestrictionRule[]
   allowRules: readonly AllowRule[]
@@ -414,7 +440,8 @@ function resolveRuntime(): CodemodeRuntime {
   }
   const restrictions = custom?.restrictions ?? []
   const allowRules = custom?.allowRules ?? []
-  return { resolved, restrictions, allowRules, namespaces: buildNamespaces(resolved, restrictions, allowRules) }
+  const noMcp = custom?.noMcp
+  return { resolved, restrictions, allowRules, namespaces: buildNamespaces(resolved, restrictions, allowRules, noMcp) }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -446,16 +473,33 @@ function withCliTenantMarker(text: string, tenantUrl: string | null): string {
 export async function execute(functionCode: string): Promise<string> {
   const { resolved, namespaces, restrictions, allowRules } = resolveRuntime()
 
+  // Both views of every service exist per connection: MCP-preferred (default)
+  // and the noMcp spec fallback. The cached, connection-independent artifacts
+  // must cover the union so any connection's visible-targets predicate finds
+  // its methods in the index.
+  const SPEC_VIEW: NoMcpConfig = { all: true, contextPaths: new Set() }
+
   // The docs index (topic/overview documentation only — no endpoints, so no
   // per-connection policy concerns) is cached per resolved-specs object; its
-  // entries come from an unfiltered namespace list so the cache stays
-  // policy-independent.
+  // entries come from the spec view so tag topics stay available regardless
+  // of whether a service is wrapped as MCP (MCP tools carry no tag docs).
   const docsIndex = getDocsIndex(resolved, () =>
-    buildNamespaces(resolved).map((ns) => ({ namespace: ns.name, spec: ns.spec })))
-  // Same pattern for the method index: built from an unfiltered namespace
-  // list (policy-independent, cached per tenant); the connection's policy is
-  // applied at query time via the visible-targets predicate.
-  const methodIndex = getMethodIndex(resolved, () => toSearchableMethods(buildNamespaces(resolved)))
+    buildNamespaces(resolved, [], [], SPEC_VIEW)
+      .filter((ns): ns is OpenApiNamespace => ns.kind === 'openapi')
+      .map((ns) => ({ namespace: ns.name, spec: ns.spec })))
+  // Method index: union of the MCP-preferred and spec views (policy- and
+  // opt-out-independent, cached per tenant); the connection's policy and
+  // noMcp choice are applied at query time via the visible-targets predicate.
+  const methodIndex = getMethodIndex(resolved, () => {
+    const byTarget = new Map<string, SearchableMethod>()
+    for (const item of [
+      ...toSearchableMethods(buildNamespaces(resolved)),
+      ...toSearchableMethods(buildNamespaces(resolved, [], [], SPEC_VIEW)),
+    ]) {
+      byTarget.set(item.target, item)
+    }
+    return [...byTarget.values()]
+  })
 
   // In CLI mode discovery must keep working before a tenant is active (the
   // bundled-only fallback), so a missing tenant degrades the live-call
@@ -465,8 +509,9 @@ export async function execute(functionCode: string): Promise<string> {
   try {
     const auth = await resolveC8yAuth()
     tenantUrl = auth.tenantUrl
-    const safeFetch = createCumulocitySafeFetch(auth.tenantUrl, createC8yAuthHeaders(auth), restrictions, allowRules)
-    live = createLiveCalls(safeFetch, auth.tenantUrl)
+    const authHeaders = createC8yAuthHeaders(auth)
+    const safeFetch = createCumulocitySafeFetch(auth.tenantUrl, authHeaders, restrictions, allowRules)
+    live = createLiveCalls(safeFetch, auth.tenantUrl, authHeaders)
   } catch (error) {
     live = createUnauthenticatedCalls(error instanceof Error ? error.message : String(error))
   }
@@ -480,7 +525,7 @@ export async function execute(functionCode: string): Promise<string> {
       [API_MODULE_SPECIFIER]: buildApiModule(namespaces, methodIndex, docsIndex, live),
       [AGENT_MODULE_SPECIFIER]: buildAgentModule(functionCode),
     },
-  })
+  }).finally(() => live.dispose())
 
   if (!result.ok) {
     // User error or blocked-policy throw — surface the raw message so the

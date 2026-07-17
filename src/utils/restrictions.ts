@@ -3,6 +3,8 @@ export const RESTRICTION_QUERY_KEYS = ['restriction', 'restrict', 'r'] as const
 export const ALLOW_QUERY_KEYS = ['allowed', 'allow', 'a'] as const
 export const RESTRICTION_HEADER = 'mc8yp-restriction'
 export const ALLOW_HEADER = 'mc8yp-allow'
+export const NO_MCP_QUERY_KEYS = ['noMcp'] as const
+export const NO_MCP_HEADER = 'mc8yp-no-mcp'
 
 export type HttpMethod = (typeof HTTP_METHODS)[number]
 export type RestrictionMethod = HttpMethod | '*'
@@ -36,6 +38,64 @@ export function collectServerAllowSources(query: Record<string, unknown>, header
     ...collectRuleSources(ALLOW_QUERY_KEYS.map((key) => query[key])),
     ...collectHeaderRuleSources(headers.get(ALLOW_HEADER)),
   ]
+}
+
+/**
+ * Per-connection MCP-wrapping opt-out. When a service is opted out (or the
+ * blanket opt-out is set), its namespace falls back to the service's OpenAPI
+ * spec instead of the MCP server; a service with no spec simply gets no
+ * namespace.
+ */
+export interface NoMcpConfig {
+  /**
+   * Disable MCP wrapping for the whole connection.
+   */
+  all: boolean
+  /**
+   * Context paths whose MCP wrapping is disabled.
+   */
+  contextPaths: ReadonlySet<string>
+}
+
+export function collectServerNoMcpSources(query: Record<string, unknown>, headers: Headers): string[] {
+  const raw: string[] = []
+  for (const key of NO_MCP_QUERY_KEYS) {
+    const value = query[key]
+    if (typeof value === 'string')
+      raw.push(value)
+    else if (Array.isArray(value))
+      raw.push(...value.filter((v): v is string => typeof v === 'string'))
+    else if (value !== undefined)
+      raw.push('') // bare ?noMcp → blanket opt-out
+  }
+  const header = headers.get(NO_MCP_HEADER)
+  if (header !== null)
+    raw.push(header)
+  return raw
+}
+
+/**
+ * Parse opt-out sources: an empty value, `*`, or `true` means the blanket
+ * opt-out; anything else is a comma-separated contextPath list.
+ * @param sources Raw values from query params, headers, or CLI flags.
+ */
+export function parseNoMcp(sources: readonly (string | boolean)[]): NoMcpConfig {
+  let all = false
+  const contextPaths = new Set<string>()
+  for (const source of sources) {
+    if (source === true || source === '' || source === '*' || source === 'true') {
+      all = true
+      continue
+    }
+    if (typeof source !== 'string')
+      continue
+    for (const entry of source.split(',').map((e) => e.trim()).filter(Boolean)) {
+      if (entry === '*')
+        all = true
+      else contextPaths.add(entry)
+    }
+  }
+  return { all, contextPaths }
 }
 
 interface BaseRule {

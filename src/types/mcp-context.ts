@@ -1,5 +1,5 @@
-import type { ResolvedSpecs } from '../utils/spec-resolution'
-import type { AllowRule, RestrictionRule } from '../utils/restrictions'
+import type { TenantCapabilities } from '../utils/capability-resolution'
+import type { AllowRule, NoMcpConfig, RestrictionRule } from '../utils/restrictions'
 
 /**
  * Auth credentials for the current tenant.
@@ -26,6 +26,11 @@ export interface C8yMcpCustomContext extends Record<string, unknown> {
    */
   allowRules?: AllowRule[]
   /**
+   * Connection-level MCP-wrapping opt-out (`mc8yp-no-mcp` header, `noMcp`
+   * query param, `--no-mcp` CLI flag). Absent means MCP wrapping is on.
+   */
+  noMcp?: NoMcpConfig
+  /**
    * Resolved specs for the query sandbox: always-available `core` plus a
    * service-spec map keyed by contextPath (bundled service entries + any
    * non-bundled discovered services). Paths are already prefixed.
@@ -35,7 +40,7 @@ export interface C8yMcpCustomContext extends Record<string, unknown> {
    * without a parseable tenant context. In that case no specs are set, and
    * the query/execute tools throw a clear error if they are invoked.
    */
-  specs?: ResolvedSpecs
+  specs?: TenantCapabilities
   /**
    * Tenant auth for the current connection.
    * Always set in server mode (per-request from the Authorization header).
