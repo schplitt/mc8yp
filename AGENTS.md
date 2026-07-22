@@ -4,11 +4,13 @@
 
 **mc8yp** is a Cumulocity IoT MCP server.
 
-The project exposes a small code-mode surface to AI agents instead of a large fixed toolset:
+The project exposes a single code-mode tool to AI agents instead of a large fixed toolset:
 
-- `query` inspects the bundled Cumulocity OpenAPI specs
-- `execute` calls the live Cumulocity API through a sandboxed request helper
-- `status` is available only in CLI mode: it lists the active tenant, stored credentials, and the specs currently visible to `query`. It accepts `{ refresh: true }` to force a fresh API discovery on demand (noop when no tenant is active). Server mode has no in-protocol equivalent yet — use the `POST /refresh-apis` HTTP route for ops-driven refresh; an in-protocol server-side flow will land in a separate PR.
+- `codemode` runs an async JavaScript function in a sandbox where API discovery, documentation search, and typed live API calls are all available as globals:
+  - `codemode.search(query)` / `codemode.describe(target?)` — ranked method search and on-demand TypeScript interface rendering over operations derived from the OpenAPI specs
+  - `docs.search(query, opts?)` / `docs.read(id)` — MiniSearch-backed fuzzy full-text search over spec prose (tag docs like query-language grammars, info blocks, operation/parameter descriptions)
+  - `c8y` (core, always present) plus one namespace per service available on the tenant (e.g. `dtm`) — one typed method per derived operation plus a `request({ method, path, params?, body?, headers? })` escape hatch with tenant-relative paths
+- `status` is available only in CLI mode: it lists the active tenant, stored credentials, and the API namespaces currently visible. It accepts `{ refresh: true }` to force a fresh API discovery on demand (noop when no tenant is active). Server mode has no in-protocol equivalent yet — use the `POST /refresh-apis` HTTP route for ops-driven refresh; an in-protocol server-side flow will land in a separate PR.
 
 The repository supports two runtime modes:
 
@@ -32,17 +34,22 @@ src/
         list.ts               List stored credentials
         remove.ts             Remove stored credentials
   codemode/
-    execute.ts                Sandboxed query/execute runtime generation
-    network-permissions.ts    Secure-exec network permission decisions for execute mode
-    semaphore.ts              Concurrency limiter for sandbox execution
+    execute.ts                Sandbox runtime: module assembly, host-side request dispatch, safeFetch wiring
+    derive-operations.ts      OpenAPI spec → derived typed operations (cached by spec identity)
+    namespaces.ts             Per-connection namespace assembly with policy filtering
+    describe.ts               codemode.describe rendering (overview / namespace listing / method types)
+    method-search.ts          MiniSearch-backed fuzzy method search (codemode.search), index cached per tenant
+    docs-index.ts             Host-side MiniSearch index over spec tag topics + overviews (docs.search / docs.read)
+    operation-naming.ts       Method naming policy: sanitized operationId, readable method+path synthesis fallback
+    type-render.ts            JSON Schema → TypeScript declaration rendering
   ctx/
     auth.ts                   Per-request auth context for server mode
   prompts/
     codemode.ts               `code-mode-guide` prompt
     index.ts                  Prompt registration
   tools/
-    codemode.ts               `query` and `execute` tool definitions
-    status.ts                 `status` tool (CLI only: active tenant + stored credentials + visible specs + on-demand refresh)
+    codemode.ts               `codemode` tool definition
+    status.ts                 `status` tool (CLI only: active tenant + stored credentials + visible namespaces + on-demand refresh)
     index.ts                  Tool registration
   types/
     mcp-context.ts            MCP custom context shape
@@ -57,11 +64,15 @@ src/
     schema.ts                 Shared schema helpers
     spec-resolution.ts        `resolveSpecs` plus the shared `Spec`/`PathItem`/`OperationInfo` types
 test/
-  excute.test.ts
+  excute.test.ts              Integration tests against the real sandbox (dispatch, policy, discovery, markers)
+  derive-operations.test.ts
+  describe.test.ts
+  docs-index.test.ts
+  method-search.test.ts
+  type-render.test.ts
   restriction-core.test.ts
   restrictions.test.ts
   restrictions.bench.ts
-  semaphore.test.ts
 openapi.json                 Self-describing OpenAPI for mc8yp's non-MCP HTTP surface; referenced from cumulocity.json so the deployed microservice is discoverable via the standard openApiSpec discovery flow
 openapi/
   core/
@@ -84,7 +95,7 @@ src/openapi-modules.d.ts      Ambient type declarations for the `#core-openapi` 
 #### CLI mode
 
 1. `src/cli/index.ts` parses CLI arguments and access-policy flags (`-r`, `--restrict`, `--restriction`, `-a`, `--allow`, and `--allowed`).
-2. It accepts `--spec` / `-s` to select the bundled core-versioned OpenAPI build exposed by `query`.
+2. It accepts `--spec` / `-s` to select the bundled core-versioned OpenAPI build the `c8y` namespace derives from.
 3. It sets `globalThis.executionEnvironment = 'cli'`.
 4. It exposes credential lookup helpers on `globalThis` for tools and subcommands.
 5. It starts the shared MCP server over stdio transport.
@@ -102,24 +113,27 @@ src/openapi-modules.d.ts      Ambient type declarations for the `#core-openapi` 
 
 - `src/server.ts` creates the MCP server, registers tools and prompts, and conditionally enables `status` and `set-active-tenant` only in CLI mode.
 - `openapi/core/` and `openapi/dtm/` contain the bundled OpenAPI snapshots consumed by the build.
-- `src/tools/codemode.ts` defines the `query` and `execute` tools.
+- `src/tools/codemode.ts` defines the `codemode` tool.
 - `src/prompts/codemode.ts` defines the `code-mode-guide` prompt.
 
 ## Codemode Behavior
 
 `src/codemode/execute.ts` is the main control surface for sandbox execution.
 
-- `query` executes JavaScript against the bundled OpenAPI specs with network access disabled.
-- `execute` executes JavaScript with a provided `cumulocity.request()` helper.
-- Both runtimes use [`@iso4/sandbox`](https://www.npmjs.com/package/@iso4/sandbox) — a V8-isolate sandbox running in a separate Rust subprocess — with a 128 MB memory limit and 50 second CPU time limit. A single lazy-initialised `Sandbox` is shared across all `query`/`execute` calls; iso4's connection pool serialises runs across isolate slots.
-- `execute` exposes the tenant API to sandbox code through a single bridged global: `cumulocity.request({ method, path, body, headers })`. The host-side handler (`createCumulocityRequestHandler` in `src/codemode/execute.ts`) injects auth headers, evaluates restriction/allow rules, performs the live request through [`@iso4/fetch`](https://www.npmjs.com/package/@iso4/fetch)'s `createSafeFetch` (which adds DNS-pinning and SSRF protection at the network layer), and returns plain parsed data. The sandbox never sees raw `fetch`.
+- The runtime uses [`@iso4/sandbox`](https://www.npmjs.com/package/@iso4/sandbox) (>= 0.2.x) — a V8-isolate sandbox running in a separate Rust subprocess — with a 128 MB memory limit, 50 s CPU / 120 s wall time, and 200 bridge calls per run. A single lazy-initialised `Sandbox` is shared across all `codemode` calls; iso4's connection pool serialises runs across isolate slots.
+- Execution is module-based, not string-preamble-based: a **static entry module** imports the `mc8yp:api` host module and the `mc8yp:agent` source module, wires the API exports onto `globalThis` (`codemode`, `docs`, one global per namespace), and calls the agent function. The agent's code is wrapped into its own ESM module (`mc8yp:agent`) — the only string interpolation left in the pipeline.
+- `mc8yp:api` is an iso4 **host module**: a plain object whose function leaves become bridge stubs inside a generated ESM module. Its shape is `{ codemode: { search, describe }, docs: { search, read }, namespaces: { c8y: { <method>..., request }, ... } }`, assembled per run by `buildApiModule`.
+- Every live call — derived namespace method or `.request` escape hatch — dispatches host-side through `performRequest`, which builds the URL and invokes the `createSafeFetch` handler directly. The safeFetch middleware injects auth headers (last write wins so the agent cannot override), evaluates restriction/allow rules, and parses/unwraps responses. The sandbox has **no fetch surface at all**.
+- Operation derivation (`deriveOperations`) is cached in a WeakMap by spec object identity and MUST stay policy-independent; per-connection policy filtering happens in `buildNamespaces` at namespace-assembly time. The docs index (`getDocsIndex`) is likewise cached by resolved-specs identity with policy applied at query time via an `isHidden` predicate.
+- Operations annotated `x-mc8yp-exclude: true` in a spec are skipped by derivation and the docs index (discoverability-only exclusion — the `.request` escape hatch is still governed solely by the connection access policy).
 - Input code is normalized before execution so fenced code blocks can still run.
+- In CLI mode with no active tenant, execution degrades instead of failing: discovery (search/describe/docs) works against the bundled reference specs while the live-call dispatchers throw the missing-auth error.
 
 ### Bundled OpenAPI Selection
 
 There are exactly two virtual modules:
 
-- **`#core-openapi`** — the always-available core spec. Exports `specs`, `getCoreOpenApiSpec()`, `getCoreOpenApiVersion()`, `setCoreOpenApiVersion()`, `getCoreOpenApiLabel()`. Core is the only spec with a named sandbox binding (`coreSpec`).
+- **`#core-openapi`** — the always-available core spec. Exports `specs`, `getCoreOpenApiSpec()`, `getCoreOpenApiVersion()`, `setCoreOpenApiVersion()`, `getCoreOpenApiLabel()`. Core is the only spec with a fixed namespace name (`c8y`, `CORE_NAMESPACE` in `src/codemode/namespaces.ts`).
 - **`#bundled-services`** — a generic registry of all bundled service-backed specs (DTM today). Exports `BUNDLED_SERVICE_SPECS: ReadonlyArray<BundledServiceSpec>` where each entry has `{ contextPath, appLabel, specLabel, servicePrefix, spec }`. The plugin loops every entry in `openapi-builds.json` `sources.*` that has a `servicePrefix` and inlines the resolved version for that build, with paths already rewritten via `rewriteSpecPaths`.
 
 Both modules return `Spec`-typed data (not `unknown`); the `Spec`/`PathItem`/`OperationInfo` types live in `src/utils/spec-resolution.ts` and are referenced from `src/openapi-modules.d.ts`.
@@ -135,14 +149,19 @@ Build-time behaviour:
   - The packaging script writes a temporary generated Dockerfile under `.c8y/`, builds from the repository root, copies the selected `.output/<version>/` bundle into `/app/server/`, and installs production dependencies inside the Linux image with pnpm before copying them into the runtime stage.
   - The packaging script builds Docker images for `linux/amd64` by default so release zips created on Apple Silicon remain deployable in typical Cumulocity environments; override with `DOCKER_PLATFORM` only when you intentionally need a different target.
 
-### Query vs Execute
+### The Sandbox Surface
 
-- `query` expects a JavaScript function expression and returns strings directly or other values as JSON text.
-- `query` injects two deterministic top-level bindings into the sandbox: `coreSpec` and `serviceSpecs`.
-- `coreSpec` is the main Cumulocity REST surface (always present). `serviceSpecs` is a `Record<string, Spec>` keyed by contextPath; bundled and discovered service specs like DTM land here as `serviceSpecs.dtm` only when actually available on the tenant.
-- An unavailable spec is **absent** from `serviceSpecs`, not `null`. Agent code should check `serviceSpecs.dtm` (or `'dtm' in serviceSpecs`) before reaching into an optional surface.
-- `execute` expects a JavaScript function expression and returns successful results in Toon format.
-- Visible operations remain raw OpenAPI data; blocked live requests fail before network access.
+- `codemode` expects an async JavaScript function expression and returns successful results in Toon format.
+- Discovery, documentation, and live calls compose inside one run: `codemode.search` → `codemode.describe` → `c8y.<method>({...})` without leaving the sandbox.
+- Namespace names: `c8y` for core (always present) plus `sanitizeToolName(contextPath)` per available service. An unavailable service simply has **no global** — agent code checks `typeof dtm !== 'undefined'` before reaching into an optional surface.
+- Method names come from `operationName` in `src/codemode/operation-naming.ts`: the sanitized `operationId` when present (all bundled specs have full coverage; Cumulocity's convention embeds the HTTP verb, e.g. `getAlarmCollectionResource` vs `postAlarmCollectionResource` on the same path), otherwise a readable camelCase synthesis from method+path where `{param}` segments become `By<Param>` (`GET /alarm/alarms/{id}` → `getAlarmAlarmsById`). Method input is a single flat object: path/query/header parameters as top-level keys, request payload under `body`. Output types render from the first 2xx JSON response schema.
+- Rendered property JSDoc carries the description plus one compact tag line: `@minimum`/`@maximum`, `@example`, and `@format` (e.g. `@format c8y:query`, the docs.search hook). Deliberately excluded: `@default`, `@minLength` (113× `minLength: 1` noise in core), and `@explode` — serialization is handled host-side, so the tag would only invite the agent to pre-encode values.
+- Query serialization honours per-parameter `explode`: arrays for `explode: false` params (nearly all Cumulocity multi-value params — the spec prose says "comma-separate the values") are comma-joined into one key by `toRequest`; the OpenAPI default stays repeated keys. The `.request` escape hatch has no parameter metadata and always uses repeated keys for arrays.
+- Reserved namespaces: `codemode`, `docs`, `c8y`, `cumulocity` (`RESERVED_NAMESPACES`); reserved method name per namespace: `request`. Colliding services/operations are skipped with a warning.
+- `codemode.describe("<ns>")` deliberately returns a one-line-per-method **listing**, not full types — core has ~250 operations and a full typed block would flood context. Full input/output types are method-level (`describe("<ns>.<method>")`).
+- Policy-blocked operations are omitted from namespaces, search results, describe output, and docs hits; blocked live requests additionally fail in the middleware before network access (two layers, both required — the second also covers `.request` and template-vs-concrete path gaps).
+- The set of operation keys walked during derivation/doc-indexing is `OPERATION_KEYS` in `derive-operations.ts`, derived from the shared `HTTP_METHODS` constant in `src/utils/restrictions.ts` (which includes the new `QUERY` method) — one source of truth for spec walking, restriction parsing, and `.request` method validation.
+- `docs.search` contains ONLY tag topics and spec info overviews — endpoints contribute nothing to the docs index. Per-endpoint prose (operation description, parameter docs) is delivered by `codemode.describe("<ns>.<method>")`, and finding endpoints is `codemode.search`'s job. The discovery chain for domain syntax is: param JSDoc says "details in Query language" → the agent turns that phrase into `docs.search("query language")` → the topic title match ranks first → `docs.read` returns the grammar (pinned by a real-spec test). No cross-reference/anchor tracing exists by design.
 
 ### Restrictions
 
@@ -152,13 +171,13 @@ Restrictions and allow rules both use the format `[METHOD:]<path-pattern>`.
 - Allow rules are allow-list entries. When any allow rule exists, requests must match at least one allow rule unless a restriction blocks them first.
 - Restrictions take priority over allow rules.
 - In microservice mode, prefer the project-scoped `mc8yp-restriction` and `mc8yp-allow` headers for HTTP policy transport; repeated headers and comma-separated values are both accepted.
-- Bundled services that are not installed on the tenant are simply absent from `serviceSpecs`. There is no pre-emptive auto-restriction layer — if an `execute` call ends up hitting an uninstalled service route, the Cumulocity API itself returns the failure and the sandbox propagates it. The connection-level restriction/allow policy is the only layer above that.
+- Bundled services that are not installed on the tenant simply get no namespace. There is no pre-emptive auto-restriction layer — if a live call ends up hitting an uninstalled service route via `.request`, the Cumulocity API itself returns the failure and the sandbox propagates it. The connection-level restriction/allow policy is the only layer above that.
 
 The restriction system is implemented in two places:
 
 - `src/utils/restrictions.ts` parses both deny rules and allow rules and handles CLI/query input.
 - `src/utils/restriction-matcher.ts` owns rule compilation, path matching, and restriction-vs-allow precedence.
-- Restriction and allow-rule enforcement live entirely on the host inside `createCumulocityRequestHandler`. There is no separate network-permission layer file — `evaluateAccessPolicy` from `src/utils/restriction-matcher.ts` is called directly before any HTTP request leaves the host.
+- Enforcement lives on the host in two spots: `buildNamespaces` (`src/codemode/namespaces.ts`) filters blocked operations out of discovery, and the safeFetch middleware in `src/codemode/execute.ts` calls `evaluateAccessPolicy` before any HTTP request leaves the host. Discovery filtering is a UX optimization; the middleware is the actual security boundary.
 
 ## Authentication And Credentials
 
@@ -168,7 +187,7 @@ The restriction system is implemented in two places:
 - `src/utils/credentials.ts` is the source of truth for storing, listing, resolving, and deleting tenant credentials.
 - Stored credentials are normalized by tenant URL.
 - User/password credentials may resolve and persist the tenant ID if it is not provided.
-- The active tenant is persisted to `~/.config/mc8yp/active-tenant.json` by the `set-active-tenant` MCP tool. `src/cli/active-tenant.ts` owns read/write. Any read error or bad JSON shape returns null silently. Tools that require a tenant (`query`, `execute`) throw a descriptive error when null.
+- The active tenant is persisted to `~/.config/mc8yp/active-tenant.json` by the `set-active-tenant` MCP tool. `src/cli/active-tenant.ts` owns read/write. Any read error or bad JSON shape returns null silently. With no tenant, `codemode` runs in discovery-only mode and live calls throw a descriptive missing-auth error.
 
 ### Microservice mode
 
@@ -224,8 +243,8 @@ pnpm prerelease    # lint + typecheck + build
 
 - If a change affects tool behavior, inspect both the tool definition and the codemode runtime.
 - If a change affects bundled OpenAPI selection, update the `#core-openapi` / `#bundled-services` plugins in `tsdown.config.ts`, the ambient declarations in `src/openapi-modules.d.ts`, and the source/build matrix in `openapi-builds.json`.
-- If you add a new bundled **service-backed** OpenAPI spec in the future: drop the JSON under `openapi/<key>/<version>.json` and add one entry under `sources.<key>` in `openapi-builds.json` with a `servicePrefix` (e.g. `"servicePrefix": "/service/<key>"`). `bundledServicesPlugin` picks it up automatically; `resolveSpecs`, `buildQueryScript`, and the auto-restriction logic all handle new entries generically. No code edits required.
-- If you add a new always-available (non-service-backed) bundled spec like core: that needs a new virtual module wired into `tsdown.config.ts`, `src/openapi-modules.d.ts`, and a new named binding in `buildQueryScript`. This is a much bigger change and the bundled-services flow is _not_ the right place for it.
+- If you add a new bundled **service-backed** OpenAPI spec in the future: drop the JSON under `openapi/<key>/<version>.json` and add one entry under `sources.<key>` in `openapi-builds.json` with a `servicePrefix` (e.g. `"servicePrefix": "/service/<key>"`). `bundledServicesPlugin` picks it up automatically; `resolveSpecs`, `buildNamespaces`, derivation, and the docs index all handle new entries generically. No code edits required.
+- If you add a new always-available (non-service-backed) bundled spec like core: that needs a new virtual module wired into `tsdown.config.ts`, `src/openapi-modules.d.ts`, and a new fixed namespace in `src/codemode/namespaces.ts`. This is a much bigger change and the bundled-services flow is _not_ the right place for it.
 - If a change affects restrictions or allow rules, verify both policy messaging and live request blocking.
 - If a change affects auth, verify the CLI and server paths separately.
 - If a change affects public MCP behavior, update `README.md` as well as this file.
@@ -238,8 +257,14 @@ pnpm prerelease    # lint + typecheck + build
 - Use `*.test.ts` for tests and `*.bench.ts` for benchmarks
 - Prefer adding targeted tests near the affected behavior:
   - restriction/allow parsing or matching changes: `test/restriction-core.test.ts` or `test/restrictions.test.ts`
-  - codemode runtime changes: `test/excute.test.ts`
-  - concurrency behavior: `test/semaphore.test.ts`
+  - codemode runtime changes (real-sandbox integration): `test/excute.test.ts`
+  - operation derivation: `test/derive-operations.test.ts`
+  - namespace assembly / describe rendering: `test/describe.test.ts`
+  - method search ranking: `test/method-search.test.ts`
+  - method naming policy: `test/operation-naming.test.ts`
+  - derivation/rendering against the real bundled specs: `test/real-spec.test.ts`
+  - docs indexing/search: `test/docs-index.test.ts`
+  - JSON Schema → TS rendering: `test/type-render.test.ts`
   - spec resolution logic: `test/spec-resolution.test.ts`
   - active tenant persistence: `test/active-tenant.test.ts`
 
@@ -263,7 +288,7 @@ When working on this project:
 1. Start from the actual controlling surface. For most feature work that is `src/tools/`, `src/prompts/`, `src/codemode/execute.ts`, or restriction/auth utilities.
 2. Treat CLI mode and microservice mode as separate execution environments with different auth and tool availability.
 3. Run focused tests first when changing a narrow subsystem, then run the full validation set if the change is broader. Use this exact validation order: `pnpm test:run`, then `pnpm lint:fix`, then `pnpm typecheck`.
-4. The `query` sandbox reads `ResolvedSpecs` (`{ core: Spec, specs: Record<string, Spec> }`) from `c8yMcpServer.ctx.custom?.specs`. In server mode it is computed per-request by the H3 handler via `resolveSpecs(discoveredSpecs, installedContextPaths)`. In CLI mode it is set on tenant activation by `setCliTenantContext` and falls back to `getBundledOnlySpecs()` (every bundled snapshot, no removal) before any tenant is active. Spec removal is unconditional inside `resolveSpecs`: when a tenant is active the agent only sees what is reachable on that tenant. The no-tenant CLI fallback is the only path that exposes all bundled snapshots, and `execute` errors loudly on missing auth in that state. In CLI mode only, the `query` tool appends a one-line footer to every result naming the active tenant (or noting there is none) and `execute` prepends an `Executed against tenant: <url>` marker, so the agent can verify which tenant the result reflects. Server mode omits both — the tenant is fixed by deployment/request auth there, so the marker would just be noise. Both hints read from `c8yMcpServer.ctx.custom.auth.tenantUrl` — no extra metadata is threaded. `buildQueryScript` is pure injection — no resolution logic belongs there.
+4. The codemode runtime reads `ResolvedSpecs` (`{ core: Spec, specs: Record<string, Spec> }`) from `c8yMcpServer.ctx.custom?.specs`. In server mode it is computed per-request by the H3 handler via `resolveSpecs(discoveredSpecs, installedContextPaths)`. In CLI mode it is set on tenant activation by `setCliTenantContext` and falls back to `getBundledOnlySpecs()` (every bundled snapshot, no removal) before any tenant is active. Spec removal is unconditional inside `resolveSpecs`: when a tenant is active the agent only sees what is reachable on that tenant. The no-tenant CLI fallback is the only path that exposes all bundled snapshots, and in that state `codemode` runs discovery-only — live calls throw the missing-auth error and the result marker says `No active tenant — discovery only`. In CLI mode only, every `codemode` result starts with a marker line (`Executed against tenant: <url>` or the no-tenant notice) so the agent can verify which tenant the result reflects. Server mode omits it — the tenant is fixed by deployment/request auth there, so the marker would just be noise. The marker reads from `c8yMcpServer.ctx.custom.auth.tenantUrl` — no extra metadata is threaded.
 5. Keep public MCP tool and prompt descriptions aligned with actual runtime behavior.
 6. Preserve the current sandbox limits and request boundary logic unless the task explicitly changes them.
 7. Record recurring project-specific lessons in the section below when they are likely to prevent future mistakes.
@@ -279,8 +304,9 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 
 ### Tools & Dependencies
 
-- `@iso4/sandbox` is the execution boundary for both `query` and `execute`. It spawns a long-lived Rust child process on first use; `disposeSandbox()` shuts it down (called from the `excute.test.ts` `afterAll` hook and via a `process.once('exit')` handler in `execute.ts`).
-- `@iso4/fetch` provides the hardened `safeFetch` used by the `cumulocity.request` host handler.
+- `@iso4/sandbox` (>= 0.2.x) is the execution boundary for `codemode`. It spawns a long-lived Rust child process on first use; `disposeSandbox()` shuts it down (called from the `excute.test.ts` `afterAll` hook and via a `process.once('exit')` handler in `execute.ts`). 0.2.x adds `imports` (source modules + host modules) — the runtime is built on those instead of string preambles, and its `ResourceLimits` include `wallTimeMs` (default 30 s — must be raised explicitly when `cpuTimeMs` exceeds it).
+- `@iso4/fetch` provides the hardened `safeFetch`. Its `handler` is invoked directly host-side by `performRequest` (it is no longer installed as a sandbox global); the middleware carries policy enforcement, auth injection, and response unwrapping.
+- `minisearch` powers the `docs.search` prose index; it is a devDependency inlined at build time.
 - `tsdown` produces separate server and CLI bundles.
 - `@napi-rs/keyring` is used for local(cli) credential storage.
 - `@clack/prompts` is used for interactive CLI credential entry so password input is masked.
@@ -288,11 +314,11 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 
 ### Patterns & Conventions
 
-- `execute` uses a generated ESM module entry and reads the default export from sandbox execution.
-- `query` and `execute` accept function-expression style code and normalize fenced code input before evaluation.
+- `codemode` runs a static entry module that imports the `mc8yp:api` host module and the agent's `mc8yp:agent` source module, and reads the default export from sandbox execution.
+- `codemode` accepts function-expression style code and normalizes fenced code input before evaluation.
 - `#core-openapi` and `#bundled-services` are virtual modules synthesized by tsdown plugins; consumers must not import the JSON snapshots directly.
 - The CLI build inlines all bundled core snapshots plus the default version of every service-backed source (currently DTM `release`); each server build inlines exactly the configured combination for that build.
-- Bundled service specs land in the query sandbox as `serviceSpecs[contextPath]`, alongside any non-bundled services discovered live on the tenant. Core is the only named binding (`coreSpec`).
+- Service specs land in the sandbox as one typed namespace per contextPath (bundled and live-discovered alike). Core is the only fixed namespace name (`c8y`).
 - `resolveSpecs` returns a single `{ core, specs }` object. An absent key in `specs` means the spec is unavailable for this tenant; there are no `null` values.
 - API discovery lists applications via paginated `GET /application/applications?tenant=<id>&type=MICROSERVICE` (100 per page), NOT `applicationsByTenant`. The unpaginated `applicationsByTenant?pageSize=2000` response included every HOSTED web-app manifest and got cut off by the internal gateway mid-body ("Premature close") on app-heavy tenants, permanently breaking discovery for that tenant. HOSTED/EXTERNAL apps can never contribute specs (spec download goes through `/service/<contextPath>/`, microservices only), so `installedContextPaths` intentionally contains only microservice context paths.
 - `@iso4/fetch` is pure JS (`rou3` + `undici`) and is bundled into both CLI and server outputs. Only `@iso4/sandbox` must stay external in all builds.
@@ -302,13 +328,19 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 - If the user asks to open a PR from an already-active feature branch, treat that existing branch as the PR head by default and target `main` unless they say otherwise.
 - Server-mode auth must stay request-local.
 - For deployed microservice mode, prefer POST-only streamable HTTP over long-lived GET/SSE. The optional SSE channel can go inactive behind Cumulocity ingress and break later tool calls even when initialization and tool discovery succeeded.
-- The `status` tool is the in-protocol on-demand refresh path for CLI mode. It busts the per-tenant discovery cache via `refreshApiSpecs`, re-resolves specs, and patches both `getCliTenantContext().specs` and `c8yMcpServer.ctx.custom.specs` so the very next `query`/`execute` sees the new surface. There is no rate-limit — a local human-driven session has no runaway-agent risk and a forced refresh after a deploy should always work.
+- The `status` tool is the in-protocol on-demand refresh path for CLI mode. It busts the per-tenant discovery cache via `refreshApiSpecs`, re-resolves specs, and patches both `getCliTenantContext().specs` and `c8yMcpServer.ctx.custom.specs` so the very next `codemode` call sees the new surface. There is no rate-limit — a local human-driven session has no runaway-agent risk and a forced refresh after a deploy should always work.
 - Server mode has no in-protocol `status` tool yet; only the `POST /refresh-apis` HTTP route exists for ops/CI use. An in-protocol server-side equivalent (with rate-limiting) is planned for a separate PR and will need to re-introduce a tenant-ID stash on `c8yMcpServer.ctx.custom` and a global cooldown timestamp in `src/utils/api-discovery.ts`.
-- mc8yp ships its own `openapi.json` (repo root) describing the non-MCP HTTP surface (`/refresh-apis`, `/health`). It is referenced from `cumulocity.json#openApiSpec` and served by the H3 server at `GET /openapi.json` via a `with { type: 'json' }` import in `src/index.ts` so it inlines into every server bundle. When mc8yp is subscribed on a tenant, the standard discovery loop in `src/utils/api-discovery.ts` picks it up and exposes it to agents as `serviceSpecs['mc8yp-server']`. The MCP endpoint at `/mcp` is intentionally NOT documented in this spec — MCP discovery is out-of-band via `tools/list`. Keep `openapi.json` in sync with any change to the HTTP surface, and never list `/mcp` there.
+- mc8yp ships its own `openapi.json` (repo root) describing the non-MCP HTTP surface (`/refresh-apis`, `/health`). It is referenced from `cumulocity.json#openApiSpec` and served by the H3 server at `GET /openapi.json` via a `with { type: 'json' }` import in `src/index.ts` so it inlines into every server bundle. When mc8yp is subscribed on a tenant, the standard discovery loop in `src/utils/api-discovery.ts` picks it up and exposes it to agents as the `mc8yp_server` namespace (contextPath `mc8yp-server`, sanitized). The MCP endpoint at `/mcp` is intentionally NOT documented in this spec — MCP discovery is out-of-band via `tools/list`. Keep `openapi.json` in sync with any change to the HTTP surface, and never list `/mcp` there.
 - CLI mode is a single stdio process; there is no IPC channel from a second terminal into the running CLI. Out-of-process triggers (e.g. "refresh from a shell after deploying") are intentionally not supported. Refresh has to flow through the in-protocol `status` tool.
+
+- The namespace/discovery layer: host-side derivation of one typed method per OpenAPI operation, `search`/`describe` as the discovery SDK, a `request` escape hatch per namespace. Design choices to know: namespace-level describe is deliberately rejected (core is too big for full type dumps), output types are derived from response schemas, and prose docs get their own MiniSearch-backed `docs` global because name-oriented method search scores long prose poorly.
+- Caches in the codemode layer (`deriveOperations` WeakMap, `getDocsIndex` WeakMap) are keyed by spec/resolved-specs object identity and MUST stay policy-independent — restrictions differ per connection in server mode. Apply policy at assembly/query time (`buildNamespaces` filter, `isHidden` predicate), never inside the cached artifact.
+- `codemode.search` is MiniSearch-backed (same engine as docs), replacing the hand-tuned CF token scorer: fuzzy matching absorbs singular/plural drift and OR-combination keeps recall when a query word has no counterpart in the spec vocabulary ("list assets" still ranks `getAssets`). It accepts `string | string[]` — the calling agent is the semantic layer and passes phrasing variants in one call. The index is policy-independent and cached per tenant (same WeakMap pattern as docs/derivation); the connection's policy filters hits at query time via a visible-targets predicate. Search RESULTS are deliberately never cached: they are policy-dependent, the query keyspace is unbounded, and a query over ~300 entries costs well under a millisecond. Host main-thread impact is negligible (agent code runs in the separate Rust sandbox process); if a tenant ever surfaces thousands of operations, moving index+query into a worker_thread is a clean follow-up.
+- The whole cache chain hangs on object identity: per-tenant discovery cache (30-min TTL in `api-discovery.ts`) → memoized `resolveSpecs` (WeakMap on the (discoveredSpecs, installedContextPaths) pair, so the server's per-request call returns the same `ResolvedSpecs` for a tenant until refresh) → `deriveOperations`/`getDocsIndex` keyed on those stable objects. A discovery refresh mints new objects, everything downstream repopulates lazily, and old entries are GC'd. Do NOT "clean up" the `resolveSpecs` memoization — removing it silently turns the docs index into a per-request rebuild.
 
 ### Common Mistakes To Avoid
 
+- Do not assume the runtime specs are dereferenced — `preprocessOpenApi` runs with `dereference: false` at both call sites (tsdown plugin and live discovery). Parameter entries, requestBody, and response objects may still be structural `$ref`s into `components`, Cumulocity content is keyed by vendor media types (`application/vnd.com.nsn.cumulocity.*+json`, so match any `json`-bearing media type, never just `application/json`), and `{id}` path parameters are declared at the **path-item** level, not on the operation. `derive-operations.ts` handles all three (`derefObject`, `jsonContentSchema`, path-item parameter merge); any new spec-reading code must too. `test/real-spec.test.ts` exists precisely because synthetic fixtures cannot catch this class of bug.
 - Do not assume tests live in `tests/`; this repository uses `test/`.
 - Do not add tenant URL handling to server mode user flows; deployed mode derives tenant context from the environment and request auth.
 - Do not bypass `src/codemode/execute.ts` when changing execution behavior; that file is the main runtime boundary.

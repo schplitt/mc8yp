@@ -30,7 +30,7 @@ const main = defineCommand({
     },
     spec: {
       type: 'string',
-      description: `Bundled core OpenAPI snapshot to expose to query. Available: ${specs.map((e) => `${e.version} (${e.label})`).join(', ')}.`,
+      description: `Bundled core OpenAPI snapshot to expose to codemode. Available: ${specs.map((e) => `${e.version} (${e.label})`).join(', ')}.`,
       alias: 's',
       default: getCoreOpenApiVersion(),
     },
@@ -102,7 +102,7 @@ const main = defineCommand({
         }
       }
     } else {
-      consola.info('No active tenant set. Call set-active-tenant to connect before using query or execute. Discovery will run once a tenant is activated.')
+      consola.info('No active tenant set. Call set-active-tenant to connect before making live API calls through codemode. Discovery will run once a tenant is activated.')
     }
 
     setupMcpServer('cli')
@@ -114,9 +114,9 @@ const main = defineCommand({
       env: 'cli' as const,
       restrictions,
       allowRules: parsedAllowRules,
-      // No active tenant: expose every bundled spec so the query tool stays
-      // useful as a reference. execute throws a clear missing-auth error so
-      // the agent cannot misuse this state for real calls.
+      // No active tenant: expose every bundled spec so codemode discovery
+      // stays useful as a reference. Live API calls throw a clear
+      // missing-auth error so the agent cannot misuse this state.
       specs: active?.specs ?? getBundledOnlySpecs(),
       auth: active ? { tenantUrl: active.tenantUrl, authorizationHeader: active.authorizationHeader } : undefined,
     })

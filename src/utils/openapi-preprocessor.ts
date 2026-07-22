@@ -1,6 +1,9 @@
 import { resolveInternalRefs } from './resolve-refs.ts'
 
-const PRESERVED_EXTENSION = 'x-codemode'
+// `x-mc8yp-exclude` hides an operation from codemode derivation/discovery —
+// stripping it here would silently disable the feature at runtime, since both
+// runtime call sites preprocess with dropVendorExtensions enabled.
+const PRESERVED_EXTENSIONS = new Set(['x-codemode', 'x-mc8yp-exclude'])
 
 // `required: false` matches only the parameter boolean form — the schema's
 // `required: string[]` array never compares equal to `false`.
@@ -23,7 +26,7 @@ export interface PreprocessOptions {
   dereference?: boolean
   // Keep only 2xx responses (falls back to `default` when none).
   dropNon2xxResponses?: boolean
-  // Drop `x-*` keys except `x-codemode`.
+  // Drop `x-*` keys except `x-codemode` and `x-mc8yp-exclude`.
   dropVendorExtensions?: boolean
   // Drop the JSON Schema dialect marker `$schema`. `example` / `examples` are preserved.
   dropSchemaMeta?: boolean
@@ -81,7 +84,7 @@ function cleanValues(node: unknown, opts: Required<PreprocessOptions>): void {
   if (!isObject(node))
     return
   for (const key of Object.keys(node)) {
-    if (opts.dropVendorExtensions && key.startsWith('x-') && key !== PRESERVED_EXTENSION) {
+    if (opts.dropVendorExtensions && key.startsWith('x-') && !PRESERVED_EXTENSIONS.has(key)) {
       delete node[key]
       continue
     }

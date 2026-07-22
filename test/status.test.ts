@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { c8yMcpServer } from '../src/server-instance'
 import { createStatusTool } from '../src/tools/status'
-import { bustApiSpecCache, setCachedApiSpecs } from '../src/utils/api-discovery'
+import { bustApiSpecCache } from '../src/utils/api-discovery'
 
 // Stub @c8y/client so the refresh path can build a client without a real
 // HTTP stack. discovery itself is stubbed below.
@@ -122,7 +122,7 @@ describe('status tool', () => {
     const out = await callStatus({ refresh: false })
     expect(out).toContain('Active tenant: (none)')
     expect(out).toContain('Stored credentials: (none)')
-    expect(out).toContain('coreSpec')
+    expect(out).not.toContain('Visible API namespaces')
   })
 
   it('is a noop when refresh:true is requested without an active tenant', async () => {
@@ -144,32 +144,20 @@ describe('status tool', () => {
     expect(out).toContain('call set-active-tenant')
   })
 
-  it('enriches visible service specs with appLabel/specLabel from the discovery cache', async () => {
-    // Seed the discovery cache for a tenant the CLI is currently active on
-    // by stashing matching creds and pointing the active context at it.
+  it('does not list API namespaces — discovery belongs to the codemode tool', async () => {
     globalThis._getStoredC8yAuth = vi.fn(async () => [
       { tenantUrl: 'https://t1.cumulocity.com', tenantId: 't1', user: 'u', password: 'p' },
     ])
-    globalThis._getCredentialsByTenantUrl = vi.fn(async () => ({
-      tenantUrl: 'https://t1.cumulocity.com',
-      tenantId: 't1',
-      user: 'u',
-      password: 'p',
-    }))
-    setCachedApiSpecs(
-      't1',
-      [{ contextPath: 'dtm', appLabel: 'Digital Twin Manager', specLabel: 'DTM REST', servicePrefix: '/service/dtm', spec: { paths: {} } }],
-    )
     setCustomContext({
       auth: { tenantUrl: 'https://t1.cumulocity.com', authorizationHeader: 'Basic xxx' },
       specs: { core: { paths: {} }, specs: { dtm: { paths: {} } } },
     })
-    // Mark the CLI tenant context as active so the label-enrichment path
-    // looks up the tenantId via _getCredentialsByTenantUrl.
     setActiveCliTenant('https://t1.cumulocity.com')
 
     const out = await callStatus({ refresh: false })
-    expect(out).toContain('serviceSpecs.dtm — Digital Twin Manager / DTM REST')
+    expect(out).toContain('Active tenant: https://t1.cumulocity.com')
+    expect(out).not.toContain('Visible API namespaces')
+    expect(out).not.toContain('dtm')
   })
 
   it('runs a fresh discovery when refresh:true is requested with an active tenant', async () => {
@@ -197,7 +185,7 @@ describe('status tool', () => {
     const out = await callStatus({ refresh: true })
     expect(out).toContain('Refreshed API discovery for https://t1.cumulocity.com')
     expect(out).toContain('1 spec(s) downloaded')
-    expect(out).toContain('serviceSpecs.newsvc')
+    expect(out).not.toContain('Visible API namespaces')
   })
 
   it('surfaces refresh failures without crashing the status output', async () => {

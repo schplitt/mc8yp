@@ -1,4 +1,4 @@
-export const HTTP_METHODS = ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE'] as const
+export const HTTP_METHODS = ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'QUERY', 'TRACE'] as const
 export const RESTRICTION_QUERY_KEYS = ['restriction', 'restrict', 'r'] as const
 export const ALLOW_QUERY_KEYS = ['allowed', 'allow', 'a'] as const
 export const RESTRICTION_HEADER = 'mc8yp-restriction'

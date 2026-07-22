@@ -4,25 +4,26 @@
 ![License](https://img.shields.io/npm/l/mc8yp)
 ![Node Version](https://img.shields.io/node/v/mc8yp)
 
-mc8yp is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gives AI agents access to the **full Cumulocity API surface** through just two code-mode tools instead of a huge fixed tool inventory:
+mc8yp is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gives AI agents access to the **full Cumulocity API surface** through a single code-mode tool instead of a huge fixed tool inventory:
 
-- **`query`** — inspect the OpenAPI specs available on the current tenant
-- **`execute`** — call the live Cumulocity API
+- **`codemode`** — run an async JavaScript function in a sandbox where API discovery, documentation search, and typed live API calls are all available as globals
 
-The agent sees not only the bundled **Core** and **DTM** specs, but **any microservice installed on the tenant** that declares an OpenAPI spec in its manifest — mc8yp discovers those live and exposes them alongside the bundled ones. No code changes or rebuild required to support a new service.
+Inside the sandbox the agent sees one **typed namespace per API**: `c8y` for the Cumulocity core REST surface plus one namespace per microservice available on the tenant (e.g. `dtm`), each with one method per operation derived from the OpenAPI specs — `c8y.getAlarmCollectionResource({ pageSize: 10 })` instead of hand-built REST calls. Discovery happens in-sandbox through `codemode.search`/`codemode.describe` (ranked method search + on-demand TypeScript interfaces) and `docs.search`/`docs.read` (fuzzy full-text search over the specs' prose documentation, e.g. query-language grammars).
+
+The agent sees not only the bundled **Core** and **DTM** specs, but **any microservice installed on the tenant** that declares an OpenAPI spec in its manifest — mc8yp discovers those live and derives namespaces for them alongside the bundled ones. No code changes or rebuild required to support a new service.
 
 Operators stay in control through per-connection **restrictions** and **allow rules**, so the same broad capability can be deployed as a read-only agent, a non-destructive production agent, or anything in between.
 
 ## How it works
 
-1. mc8yp discovers every microservice installed on the tenant that declares an OpenAPI spec, and exposes those alongside the bundled Core (+ DTM) specs.
-2. The agent uses `query` to inspect the available specs and pick an endpoint.
-3. The agent uses `execute` to call the live Cumulocity API.
-4. mc8yp enforces configured restrictions and allow rules before the request leaves the host.
+1. mc8yp discovers every microservice installed on the tenant that declares an OpenAPI spec, and derives typed method namespaces from those alongside the bundled Core (+ DTM) specs.
+2. Inside a `codemode` run, the agent finds the right method with `codemode.search`, inspects its exact input/output types with `codemode.describe`, and reads prose documentation (domain query languages, parameter syntax) with `docs.search`/`docs.read`.
+3. In the same run, the agent calls the live Cumulocity API through the derived methods (`c8y.<method>({ ... })`) or the low-level `<namespace>.request()` escape hatch.
+4. mc8yp enforces configured restrictions and allow rules before any request leaves the host — blocked operations are also omitted from discovery entirely.
 
 ### Live microservice API discovery
 
-When a tenant is active, mc8yp asks Cumulocity which applications the tenant is subscribed to, reads the `openApiSpec` declaration from each application manifest, fetches the spec, prefixes its paths with the service's `contextPath`, and exposes it to the sandbox as `serviceSpecs[contextPath]`. Results are cached per tenant for 30 minutes.
+When a tenant is active, mc8yp asks Cumulocity which applications the tenant is subscribed to, reads the `openApiSpec` declaration from each application manifest, fetches the spec, prefixes its paths with the service's `contextPath`, and exposes it to the sandbox as a typed namespace named after the contextPath. Results are cached per tenant for 30 minutes.
 
 The practical effect: **any Cumulocity microservice that ships an OpenAPI spec is automatically usable by the agent**, whether it is one of the bundled snapshots, a Cumulocity-provided service, or a custom microservice built in-house. The bundled specs are just guaranteed offline coverage; the discovery layer fills in everything else.
 
@@ -87,7 +88,7 @@ The sandboxed V8 runtime ([`@iso4/sandbox`](https://www.npmjs.com/package/@iso4/
 # Run directly (recommended)
 pnpm dlx mc8yp
 
-# Pick a specific bundled core OpenAPI build for `query`
+# Pick a specific bundled core OpenAPI build for the codemode tool
 pnpm dlx mc8yp --spec 2025
 
 # Or install globally
@@ -185,13 +186,13 @@ After this, `mc8yp creds add` will work.
 
 ### Activate a tenant
 
-Adding credentials does **not** auto-activate a tenant. `execute` only runs against a live tenant once one has been selected, and the agent does that itself through MCP tools:
+Adding credentials does **not** auto-activate a tenant. Live API calls only run against a tenant once one has been selected, and the agent does that itself through MCP tools:
 
-1. The agent calls `status` to see stored credentials, the current active tenant, and the specs currently visible to `query`.
+1. The agent calls `status` to see stored credentials, the current active tenant, and the API namespaces currently visible.
 2. The agent calls `set-active-tenant` with one of the tenant URLs. The selection is written to `~/.config/mc8yp/active-tenant.json` and reused across CLI restarts.
-3. The agent runs `query` and `execute` as needed. Each result includes a footer or marker line showing which tenant it ran against.
+3. The agent runs `codemode` as needed. Each result starts with a marker line showing which tenant it ran against.
 
-To switch tenants, call `set-active-tenant` again. To stop targeting any tenant (browse bundled specs only), call it with `tenantUrl: null` — `query` keeps working, `execute` returns a missing-auth error so the agent cannot accidentally hit a tenant.
+To switch tenants, call `set-active-tenant` again. To stop targeting any tenant (browse bundled specs only), call it with `tenantUrl: null` — discovery (`codemode.search`/`describe`, `docs`) keeps working against the bundled reference snapshots, while live API calls return a missing-auth error so the agent cannot accidentally hit a tenant.
 
 If the active tenant's credentials are removed via `mc8yp creds remove`, the next `status` call clears the active tenant automatically.
 
@@ -235,42 +236,53 @@ With read-only access rules:
 
 ## Tools and prompts
 
-| Tool                | Description                                                                                                                                                                                                                                                                                                                                               |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `query`             | Inspect the bundled and discovered OpenAPI specs by running a JavaScript function expression in a sandbox. Exposes `coreSpec` and `serviceSpecs` (keyed by `contextPath`). Returns JSON text.                                                                                                                                                             |
-| `execute`           | Run an async JavaScript function expression that calls the live Cumulocity API via `cumulocity.request({ method, path, body?, headers? })`. Returns the function result in [Toon format](https://github.com/nicepkg/toon).                                                                                                                                |
-| `status`            | _(CLI only)_ Show the active tenant, stored credentials, and the specs currently visible to `query`. Auto-clears the active tenant if its credentials are gone. Pass `refresh: true` to bust the 30-minute discovery cache and re-run discovery for the active tenant — useful right after (un)subscribing a microservice. Noop when no tenant is active. |
-| `set-active-tenant` | _(CLI only)_ Select the tenant `query` and `execute` operate against. Pass `tenantUrl: null` to clear.                                                                                                                                                                                                                                                    |
+| Tool                | Description                                                                                                                                                                                                                                                                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `codemode`          | Run an async JavaScript function in a sandbox with discovery (`codemode.search`/`describe`), documentation (`docs.search`/`read`), and typed API namespaces (`c8y`, per-service globals) available. Returns the function result in [Toon format](https://github.com/nicepkg/toon).                                                                      |
+| `status`            | _(CLI only)_ Show the active tenant, stored credentials, and the API namespaces currently visible. Auto-clears the active tenant if its credentials are gone. Pass `refresh: true` to bust the 30-minute discovery cache and re-run discovery for the active tenant — useful right after (un)subscribing a microservice. Noop when no tenant is active. |
+| `set-active-tenant` | _(CLI only)_ Select the tenant `codemode` operates against. Pass `tenantUrl: null` to clear.                                                                                                                                                                                                                                                            |
 
-Both code-mode tools run in a sandboxed V8 runtime ([`@iso4/sandbox`](https://github.com/schplitt/iso4)) hosted in a separate Rust subprocess. The sandbox has no `fetch` global — the only path to the tenant is the host-bridged `cumulocity.request` helper, which is DNS-pinned and SSRF-hardened via [`@iso4/fetch`](https://www.npmjs.com/package/@iso4/fetch).
+The codemode tool runs in a sandboxed V8 runtime ([`@iso4/sandbox`](https://github.com/schplitt/iso4)) hosted in a separate Rust subprocess. The sandbox has no `fetch` global — every live call is dispatched host-side through a hardened request funnel built on [`@iso4/fetch`](https://www.npmjs.com/package/@iso4/fetch), which injects auth, enforces the access policy, and parses responses before anything reaches the sandbox.
 
-The **`code-mode-guide`** prompt contains the full reference for `query` and `execute`, including types, examples, and the active access policy for the current connection.
+The **`code-mode-guide`** prompt contains the full reference for the codemode tool, including types, examples, and the active access policy for the current connection.
 
-### `execute` input shape
-
-`execute` expects an async function expression:
+### The sandbox surface
 
 ```js
 async () => {
-  return await cumulocity.request({
-    method: 'GET',
-    path: '/inventory/managedObjects?pageSize=5',
-  })
-}
-```
+  // 1. Find the method
+  const { results } = await codemode.search('managed objects')
 
-You can do intermediate work before returning:
+  // 2. Inspect its exact typed interface (input/output types, per-field docs)
+  const { content } = await codemode.describe(results[0].target)
 
-```js
-async () => {
-  const devices = await cumulocity.request({
-    method: 'GET',
-    path: '/inventory/managedObjects?pageSize=20&withTotalPages=true',
+  // 3. When parameter syntax is unknown, search the prose documentation
+  const hits = await docs.search('inventory query language')
+  const grammar = await docs.read(hits[0].id)
+
+  // 4. Call it — path/query/header params and `body` share one flat object
+  const devices = await c8y.getManagedObjectCollectionResource({
+    query: '$filter=(type eq \'c8y_Device\')',
+    pageSize: 20,
   })
 
   return devices.managedObjects?.map((d) => ({ id: d.id, name: d.name }))
 }
 ```
+
+Every namespace also carries a low-level escape hatch for anything not covered by a derived method:
+
+```js
+async () => {
+  return await c8y.request({
+    method: 'GET',
+    path: '/inventory/managedObjects',
+    params: { pageSize: 5 },
+  })
+}
+```
+
+Operations can be hidden from derivation and discovery by annotating them in the OpenAPI spec with the vendor extension `x-mc8yp-exclude: true` (the `.request` escape hatch is still governed by the connection access policy).
 
 ---
 
@@ -291,7 +303,7 @@ If both apply to the same operation, **restrictions win**. This is how you expos
 ```
 
 - No method prefix → matches all HTTP methods.
-- With a method prefix → only that method. Supported: `DELETE`, `GET`, `HEAD`, `OPTIONS`, `PATCH`, `POST`, `PUT`, `TRACE`, or `*`. Case-insensitive.
+- With a method prefix → only that method. Supported: `DELETE`, `GET`, `HEAD`, `OPTIONS`, `PATCH`, `POST`, `PUT`, `QUERY`, `TRACE`, or `*`. Case-insensitive.
 - Patterns must start with `/`. Query strings and fragments are not allowed in patterns.
 - Wildcards: `*` matches within a single path segment; `**` matches zero or more whole segments and must be its own segment.
 
@@ -365,22 +377,22 @@ mc8yp-restriction: /inventory/**
 mc8yp-allow: GET:/measurement/**
 ```
 
-When `execute` is blocked by connection policy, the tool returns explanatory text, no request is sent to Cumulocity, and retrying through the same connection will not help.
+When a live call is blocked by connection policy, the codemode run returns explanatory text, no request is sent to Cumulocity, and retrying through the same connection will not help. Blocked operations are additionally omitted from `codemode.search`/`describe` and the docs index, so the agent never plans around a method it cannot call.
 
 ---
 
 ## OpenAPI coverage
 
-What the agent sees through `query` comes from two layers:
+What the agent sees through codemode discovery comes from two layers:
 
-1. **Live-discovered specs** — every microservice subscribed on the active tenant whose manifest declares an `openApiSpec`. Discovered at runtime, cached for 30 minutes per tenant, exposed as `serviceSpecs[contextPath]`. This works for any service, not just the ones bundled here.
+1. **Live-discovered specs** — every microservice subscribed on the active tenant whose manifest declares an `openApiSpec`. Discovered at runtime, cached for 30 minutes per tenant, exposed as a typed namespace named after the contextPath. This works for any service, not just the ones bundled here.
 2. **Bundled snapshots** — shipped with the build so Core and DTM are always available even when discovery hasn't run yet:
    - **Core** snapshots: `release`, `2026`, `2025`, `2024`
    - **DTM** snapshot bundled alongside each supported core build
 
-With an active tenant, services not installed on that tenant are dropped from the sandbox so the agent only sees what is actually reachable.
+With an active tenant, services not installed on that tenant get no namespace at all, so the agent only sees what is actually reachable.
 
-In CLI mode, pick which **core** snapshot `query` exposes:
+In CLI mode, pick which **core** snapshot the `c8y` namespace derives from:
 
 ```sh
 mc8yp              # default: latest bundled release
@@ -388,7 +400,7 @@ mc8yp --spec 2025  # use the 2025 snapshot
 mc8yp -s 2024      # short form
 ```
 
-This only affects the bundled core view. `execute` always hits the live Cumulocity API of the selected tenant or deployed service environment.
+This only affects the bundled core view. Live calls always hit the Cumulocity API of the selected tenant or deployed service environment.
 
 ---
 
