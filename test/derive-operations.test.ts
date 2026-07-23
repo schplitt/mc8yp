@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { deriveOperations, toRequest } from '../src/codemode/derive-operations'
-import type { Spec } from '../src/utils/spec-resolution'
+import type { Spec } from '../src/utils/capability-resolution'
 
 function specOf(paths: Record<string, Record<string, unknown>>): Spec {
   return { paths } as unknown as Spec
@@ -76,9 +76,8 @@ describe('deriveOperations', () => {
     expect(deriveOperations(spec).map((o) => o.name)).toEqual(['getX'])
   })
 
-  it('skips reserved and duplicate method names', () => {
+  it('skips duplicate method names', () => {
     const spec = specOf({
-      '/a': { get: { operationId: 'request' } },
       '/b': { get: { operationId: 'getThing' } },
       '/c': { get: { operationId: 'getThing' } },
     })

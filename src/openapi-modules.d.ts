@@ -1,5 +1,5 @@
 declare module '#bundled-services' {
-  import type { Spec } from './utils/spec-resolution'
+  import type { Spec } from './utils/capability-resolution'
 
   export interface BundledServiceSpec {
     contextPath: string
@@ -12,7 +12,7 @@ declare module '#bundled-services' {
 }
 
 declare module '#core-openapi' {
-  import type { Spec } from './utils/spec-resolution'
+  import type { Spec } from './utils/capability-resolution'
 
   export interface CoreOpenApiEntry {
     version: string

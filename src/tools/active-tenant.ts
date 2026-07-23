@@ -4,7 +4,7 @@ import * as v from 'valibot'
 import { c8yMcpServer } from '../server-instance'
 import { clearActiveTenant, writeActiveTenant } from '../cli/active-tenant'
 import { clearCliTenantContext, setCliTenantContext } from '../cli/tenant-context'
-import { getBundledOnlySpecs } from '../utils/spec-resolution'
+import { getBundledOnlyCapabilities } from '../utils/capability-resolution'
 
 /**
  * Clear the active tenant everywhere it is recorded: persistence file,
@@ -22,7 +22,7 @@ export function resetActiveTenant(): void {
   const custom = c8yMcpServer.ctx.custom
   if (custom) {
     custom.auth = undefined
-    custom.specs = getBundledOnlySpecs()
+    custom.specs = getBundledOnlyCapabilities()
   }
 }
 

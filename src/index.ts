@@ -10,13 +10,15 @@ import {
   RESTRICTION_HEADER,
   RESTRICTION_QUERY_KEYS,
   collectServerAllowSources,
+  collectServerNoMcpSources,
   collectServerRestrictionSources,
   parseAllowRule,
+  parseNoMcp,
   parseRestrictionRule,
 } from './utils/restrictions'
 import { BasicAuth, Client, MicroserviceClientRequestAuth } from '@c8y/client'
-import { getCachedDiscovery, refreshApiSpecs } from './utils/api-discovery'
-import { resolveSpecs } from './utils/spec-resolution'
+import { getCachedDiscovery, refreshCapabilities } from './utils/capability-discovery'
+import { resolveCapabilities } from './utils/capability-resolution'
 import { getServiceUserCredentials, startSubscriptionsRefresh } from './utils/subscriptions'
 
 // Microservice mode requires bootstrap credentials. The subscriptions cache
@@ -63,12 +65,12 @@ const app = new H3().all('/mcp', async (event) => {
   // Pre-warmed discovery cache lookup. On rejection the discovery cache has
   // already self-cleaned, so the client can retry and a fresh attempt runs
   // on the next subscriptions refresh.
-  let specs: ReturnType<typeof resolveSpecs> | undefined
+  let specs: ReturnType<typeof resolveCapabilities> | undefined
   if (tenantId) {
     const cached = getCachedDiscovery(tenantId)
     if (cached) {
       const result = await cached
-      specs = resolveSpecs(result.specs, result.installedContextPaths)
+      specs = resolveCapabilities(result.specs, result.installedContextPaths, result.mcpServers)
     }
   }
 
@@ -97,6 +99,8 @@ const app = new H3().all('/mcp', async (event) => {
     })
   }
 
+  const noMcp = parseNoMcp(collectServerNoMcpSources(query, event.req.headers))
+
   return transport.respond(event.req, {
     env: 'server' as const,
     // execute uses authorizationHeader to forward the user's auth to
@@ -108,6 +112,7 @@ const app = new H3().all('/mcp', async (event) => {
       : undefined,
     restrictions,
     allowRules: parsedAllowRules,
+    noMcp,
     specs,
   })
 })
@@ -148,7 +153,7 @@ app.post('/refresh-apis', async (event) => {
       })
     }
 
-    const result = await refreshApiSpecs(
+    const result = await refreshCapabilities(
       tenantId,
       new Client(new BasicAuth(subscribedCred), C8Y_BASEURL),
     )

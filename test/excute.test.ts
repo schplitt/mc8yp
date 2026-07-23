@@ -4,8 +4,8 @@ import type { AddressInfo } from 'node:net'
 import { encode } from '@toon-format/toon'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BLOCKED_REQUEST_PREFIX, disposeSandbox, execute } from '../src/codemode/execute'
-import type { Spec } from '../src/utils/spec-resolution'
-import { bustApiSpecCache, setCachedApiSpecs } from '../src/utils/api-discovery'
+import type { Spec } from '../src/utils/capability-resolution'
+import { bustCapabilityCache, setCachedCapabilities } from '../src/utils/capability-discovery'
 import { c8yMcpServer } from '../src/server-instance'
 import { parseAllowRule, parseRestrictionRule } from '../src/utils/restrictions'
 import type { AllowRule, RestrictionRule } from '../src/utils/restrictions'
@@ -70,25 +70,6 @@ function expectedRestrictedRequestMessage(method: string, path: string, matching
   ].join('\n')
 }
 
-function expectedAllowedRequestMessage(method: string, path: string, allowRules: readonly string[]): string {
-  return [
-    BLOCKED_REQUEST_PREFIX,
-    '',
-    'This operation is intentionally blocked because it is not included in the current MCP connection allow list.',
-    'It did not fail at the Cumulocity API and it was not executed against the tenant.',
-    'Retrying or trying the same operation again through this connection will not succeed.',
-    '',
-    'Report this to the user as a connection-level access restriction.',
-    'If the operation is needed, the MCP allow list for this connection must be updated by whoever manages that configuration.',
-    '',
-    'Blocked operation:',
-    `Method: ${method}`,
-    `Path: ${path}`,
-    'Configured allow rules:',
-    ...allowRules.map((rule) => `- ${rule}`),
-  ].join('\n')
-}
-
 // ─────────────────────────────────────────────────────────────────────────
 // Test spec — a small core spec exercising derivation, discovery, docs,
 // and policy filtering inside the real sandbox.
@@ -105,7 +86,23 @@ const TEST_CORE_SPEC = {
         operationId: 'getAlarmCollectionResource',
         summary: 'Retrieve all alarms',
         tags: ['Alarms'],
-        parameters: [{ name: 'pageSize', in: 'query', schema: { type: 'number' }, description: 'Page size' }],
+        parameters: [
+          { name: 'pageSize', in: 'query', schema: { type: 'number' }, description: 'Page size' },
+          { name: 'withTotalPages', in: 'query', schema: { type: 'boolean' } },
+          { name: 'Authorization', in: 'header', schema: { type: 'string' } },
+        ],
+      },
+      post: {
+        operationId: 'postAlarmCollectionResource',
+        summary: 'Create an alarm',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } },
+      },
+    },
+    '/inventory/managedObjects': {
+      get: {
+        operationId: 'getManagedObjectCollectionResource',
+        summary: 'Retrieve all managed objects',
+        parameters: [{ name: 'pageSize', in: 'query', schema: { type: 'number' } }],
       },
     },
     '/alarm/alarms/{id}': {
@@ -156,12 +153,12 @@ function mockAuth(tenantUrl: string, authorizationHeader = 'Bearer test'): void 
 }
 
 beforeEach(() => {
-  setCachedApiSpecs(TEST_TENANT, [])
+  setCachedCapabilities(TEST_TENANT, [])
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
-  bustApiSpecCache()
+  bustCapabilityCache()
 })
 
 afterAll(async () => {
@@ -179,104 +176,58 @@ function stripCliTenantMarker(text: string): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// request escape hatch — input validation (host-side, before any network).
+// Policy enforcement — two layers. Discovery filtering removes blocked
+// operations from the namespace entirely (the method does not exist in the
+// sandbox); the safeFetch middleware remains the security boundary for
+// template-vs-concrete gaps, where a rule targets a concrete id that the
+// templated method's visibility check cannot see.
 // ─────────────────────────────────────────────────────────────────────────
 
-describe('c8y.request — input validation', () => {
-  it('rejects requests without an explicit method', async () => {
-    const restore = stubExecuteCtx()
-    try {
-      mockAuth(TEST_TENANT)
-      const result = await execute(`async () => await c8y.request({ path: '/event/events' })`)
-      expect(stripCliTenantMarker(result)).toBe('request method must be a non-empty string')
-    } finally {
-      restore()
-    }
-  })
-
-  it('rejects unsupported request methods', async () => {
-    const restore = stubExecuteCtx()
-    try {
-      mockAuth(TEST_TENANT)
-      const result = await execute(`async () => await c8y.request({ method: 'MERGE', path: '/event/events' })`)
-      expect(stripCliTenantMarker(result)).toBe('request method must be one of: DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT, QUERY, TRACE')
-    } finally {
-      restore()
-    }
-  })
-
-  it('rejects non-object options', async () => {
-    const restore = stubExecuteCtx()
-    try {
-      mockAuth(TEST_TENANT)
-      const result = await execute(`async () => await c8y.request('hello')`)
-      expect(stripCliTenantMarker(result)).toBe('request options must be an object')
-    } finally {
-      restore()
-    }
-  })
-
-  it('rejects empty paths', async () => {
-    const restore = stubExecuteCtx()
-    try {
-      mockAuth(TEST_TENANT)
-      const result = await execute(`async () => await c8y.request({ method: 'GET', path: '' })`)
-      expect(stripCliTenantMarker(result)).toBe('request path must be a non-empty string')
-    } finally {
-      restore()
-    }
-  })
-})
-
-// ─────────────────────────────────────────────────────────────────────────
-// safeFetch middleware — restriction and allow-list enforcement.
-// These run host-side and throw before undici is touched, so they need no
-// HTTP server.
-// ─────────────────────────────────────────────────────────────────────────
-
-describe('c8y.request — policy enforcement (middleware)', () => {
-  it('blocks restricted requests before any HTTP call', async () => {
-    const restore = stubExecuteCtx({ restrictions: [parseSingleRule('GET:/inventory/**')] })
+describe('policy enforcement', () => {
+  it('removes blocked operations from the namespace and from search', async () => {
+    const restore = stubExecuteCtx({ core: TEST_CORE_SPEC, restrictions: [parseSingleRule('GET:/inventory/**')] })
     try {
       mockAuth(TEST_TENANT)
       const result = await execute(
-        `async () => await c8y.request({ method: 'GET', path: '/inventory/managedObjects', params: { pageSize: 5 } })`,
+        `async () => ({
+          methodType: typeof c8y.getManagedObjectCollectionResource,
+          targets: (await codemode.search('managed objects')).results.map((r) => r.target),
+        })`,
       )
-      expect(stripCliTenantMarker(result)).toBe(
-        expectedRestrictedRequestMessage('GET', '/inventory/managedObjects', ['GET:/inventory/**']),
-      )
+      const body = stripCliTenantMarker(result)
+      expect(body).toContain('methodType: undefined')
+      expect(body).not.toContain('getManagedObjectCollectionResource')
     } finally {
       restore()
     }
   })
 
-  it('blocks requests outside the configured allow list', async () => {
-    const restore = stubExecuteCtx({ allowRules: [parseSingleAllowRule('GET:/inventory/**')] })
+  it('middleware blocks template-vs-concrete gaps before any HTTP call', async () => {
+    // The rule targets a concrete id, so the templated method stays visible —
+    // the middleware is the layer that must catch the actual call.
+    const restore = stubExecuteCtx({ core: TEST_CORE_SPEC, restrictions: [parseSingleRule('GET:/alarm/alarms/123')] })
     try {
       mockAuth(TEST_TENANT)
-      const result = await execute(
-        `async () => await c8y.request({ method: 'GET', path: '/alarm/alarms?pageSize=5' })`,
-      )
+      const result = await execute(`async () => await c8y.getAlarmResource({ id: '123' })`)
       expect(stripCliTenantMarker(result)).toBe(
-        expectedAllowedRequestMessage('GET', '/alarm/alarms', ['GET:/inventory/**']),
+        expectedRestrictedRequestMessage('GET', '/alarm/alarms/123', ['GET:/alarm/alarms/123']),
       )
     } finally {
       restore()
     }
   })
 
-  it('lets restrictions take priority over matching allow rules', async () => {
+  it('lets restrictions take priority over matching allow rules in the middleware', async () => {
     const restore = stubExecuteCtx({
-      restrictions: [parseSingleRule('GET:/inventory/managedObjects')],
-      allowRules: [parseSingleAllowRule('GET:/inventory/**')],
+      core: TEST_CORE_SPEC,
+      restrictions: [parseSingleRule('GET:/alarm/alarms/123')],
+      allowRules: [parseSingleAllowRule('GET:/alarm/**')],
     })
     try {
       mockAuth(TEST_TENANT)
-      const result = await execute(
-        `async () => await c8y.request({ method: 'GET', path: '/inventory/managedObjects?pageSize=5' })`,
-      )
+      const result = await execute(`async () => await c8y.getAlarmResource({ id: '123' })`)
       expect(stripCliTenantMarker(result)).toBe(
-        expectedRestrictedRequestMessage('GET', '/inventory/managedObjects', ['GET:/inventory/managedObjects']),
+        expectedRestrictedRequestMessage('GET', '/alarm/alarms/123', ['GET:/alarm/alarms/123']),
       )
     } finally {
       restore()
@@ -369,31 +320,31 @@ describe('live requests — success path', () => {
   })
 
   it('issues the request, injects auth, and returns the parsed JSON body', async () => {
-    const restore = stubExecuteCtx({ restrictions: [parseSingleRule('GET:/forbidden/**')] })
+    const restore = stubExecuteCtx({ core: TEST_CORE_SPEC, restrictions: [parseSingleRule('GET:/forbidden/**')] })
     try {
       mockAuth(testServer.url, 'Bearer host-token')
       const result = await execute(
-        `async () => await c8y.request({ method: 'POST', path: '/event/events' })`,
+        `async () => await c8y.postAlarmCollectionResource({ body: { type: 'thing' } })`,
       )
 
       expect(stripCliTenantMarker(result)).toBe(encode({ ok: true }))
       expect(testServer.requests).toHaveLength(1)
       expect(testServer.requests[0]!.method).toBe('POST')
-      expect(testServer.requests[0]!.url).toBe('/event/events')
+      expect(testServer.requests[0]!.url).toBe('/alarm/alarms')
       expect(testServer.requests[0]!.headers.authorization).toBe('Bearer host-token')
     } finally {
       restore()
     }
   })
 
-  it('serializes request params into the query string', async () => {
-    const restore = stubExecuteCtx()
+  it('serializes declared query params into the query string', async () => {
+    const restore = stubExecuteCtx({ core: TEST_CORE_SPEC })
     try {
       mockAuth(testServer.url)
       await execute(
-        `async () => await c8y.request({ method: 'GET', path: '/inventory/managedObjects', params: { pageSize: 5, withTotalPages: true } })`,
+        `async () => await c8y.getAlarmCollectionResource({ pageSize: 5, withTotalPages: true })`,
       )
-      expect(testServer.requests[0]!.url).toBe('/inventory/managedObjects?pageSize=5&withTotalPages=true')
+      expect(testServer.requests[0]!.url).toBe('/alarm/alarms?pageSize=5&withTotalPages=true')
     } finally {
       restore()
     }
@@ -420,11 +371,11 @@ describe('live requests — success path', () => {
   })
 
   it('allows requests that match the configured allow list', async () => {
-    const restore = stubExecuteCtx({ allowRules: [parseSingleAllowRule('GET:/inventory/**')] })
+    const restore = stubExecuteCtx({ core: TEST_CORE_SPEC, allowRules: [parseSingleAllowRule('GET:/inventory/**')] })
     try {
       mockAuth(testServer.url)
       const result = await execute(
-        `async () => await c8y.request({ method: 'GET', path: '/inventory/managedObjects?pageSize=5' })`,
+        `async () => await c8y.getManagedObjectCollectionResource({ pageSize: 5 })`,
       )
 
       expect(stripCliTenantMarker(result)).toBe(encode({ ok: true }))
@@ -435,16 +386,12 @@ describe('live requests — success path', () => {
     }
   })
 
-  it('does not let sandbox-supplied headers override the configured auth header', async () => {
-    const restore = stubExecuteCtx()
+  it('does not let sandbox-supplied header params override the configured auth header', async () => {
+    const restore = stubExecuteCtx({ core: TEST_CORE_SPEC })
     try {
       mockAuth(testServer.url, 'Bearer host-only')
       await execute(
-        `async () => await c8y.request({
-          method: 'GET',
-          path: '/inventory/managedObjects',
-          headers: { Authorization: 'Bearer agent-injected' },
-        })`,
+        `async () => await c8y.getAlarmCollectionResource({ Authorization: 'Bearer agent-injected' })`,
       )
 
       expect(testServer.requests[0]!.headers.authorization).toBe('Bearer host-only')
@@ -454,11 +401,11 @@ describe('live requests — success path', () => {
   })
 
   it('JSON-encodes object bodies and sets a JSON content-type when absent', async () => {
-    const restore = stubExecuteCtx()
+    const restore = stubExecuteCtx({ core: TEST_CORE_SPEC })
     try {
       mockAuth(testServer.url)
       await execute(
-        `async () => await c8y.request({ method: 'POST', path: '/event/events', body: { type: 'thing' } })`,
+        `async () => await c8y.postAlarmCollectionResource({ body: { type: 'thing' } })`,
       )
 
       expect(testServer.requests[0]!.body).toBe(JSON.stringify({ type: 'thing' }))
@@ -469,12 +416,12 @@ describe('live requests — success path', () => {
   })
 
   it('surfaces non-2xx Cumulocity responses as failed execution', async () => {
-    const restore = stubExecuteCtx()
+    const restore = stubExecuteCtx({ core: TEST_CORE_SPEC })
     try {
       testServer.setResponse({ status: 404, body: { message: 'no such resource' } })
       mockAuth(testServer.url)
       const result = await execute(
-        `async () => await c8y.request({ method: 'GET', path: '/inventory/managedObjects' })`,
+        `async () => await c8y.getManagedObjectCollectionResource({})`,
       )
 
       expect(result).toMatch(/Cumulocity request failed with 404[\s\S]*no such resource/)

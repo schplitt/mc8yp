@@ -1,6 +1,6 @@
 import { BUNDLED_SERVICE_SPECS } from '#bundled-services'
 import { getCoreOpenApiSpec } from '#core-openapi'
-import type { DiscoveredApiSpec } from './api-discovery'
+import type { DiscoveredApiSpec, DiscoveredMcpServer } from './capability-discovery'
 
 interface OperationInfo {
   summary?: string
@@ -32,18 +32,25 @@ export interface Spec {
 export type ServiceSpecs = Record<string, Spec>
 
 /**
- * Everything the query sandbox needs in one object.
+ * The full set of capabilities resolved for a tenant — everything the query
+ * sandbox needs in one object.
  * `core` is always populated from the bundled core OpenAPI snapshot.
  * `specs` carries bundled service specs (e.g. dtm) plus any non-bundled
  * services discovered live on the tenant.
+ * `mcpServers` carries the MCP servers discovered on the tenant, keyed by
+ * contextPath. The prefer-MCP-over-OpenAPI rule is NOT applied here — both
+ * views stay available so per-connection opt-outs (`noMcp`) can fall back
+ * to the spec at namespace-assembly time.
+ * Additional capability kinds can be added as new fields alongside these.
  */
-export interface ResolvedSpecs {
+export interface TenantCapabilities {
   core: Spec
   specs: ServiceSpecs
+  mcpServers: Record<string, DiscoveredMcpServer>
 }
 
 /**
- * Resolve every spec for the current tenant.
+ * Resolve every capability for the current tenant into a {@link TenantCapabilities}.
  *
  * For each bundled service spec (#bundled-services):
  *   - live discovery available           → use the live spec
@@ -56,29 +63,30 @@ export interface ResolvedSpecs {
  * unconditional: when the agent has an active tenant context, the query
  * sandbox must only see what is actually reachable on that tenant. To
  * deliberately browse all bundled snapshots regardless of installation,
- * use {@link getBundledOnlySpecs} (the CLI's no-tenant fallback).
+ * use {@link getBundledOnlyCapabilities} (the CLI's no-tenant fallback).
  * @param discoveredSpecs Result of live API discovery for the tenant.
  * @param installedContextPaths Context paths of microservices the tenant owns
  *   or is subscribed to (discovery filters to type=MICROSERVICE).
  */
 // Memoized per (discoveredSpecs, installedContextPaths) object pair — both
 // come from the same per-tenant discovery cache entry, so in server mode the
-// H3 handler gets the SAME ResolvedSpecs object back for every request of a
+// H3 handler gets the SAME TenantCapabilities object back for every request of a
 // tenant until its discovery refreshes. That identity is what the codemode
 // layer's WeakMap caches (derived operations, docs index) key on; without it
 // they would rebuild on every request. A refresh produces a fresh discovery
 // result → fresh resolved object → caches repopulate lazily and old entries
 // are garbage-collected.
-const resolvedSpecsCache = new WeakMap<object, WeakMap<object, ResolvedSpecs>>()
+const tenantCapabilitiesCache = new WeakMap<object, WeakMap<object, TenantCapabilities>>()
 
-export function resolveSpecs(
+export function resolveCapabilities(
   discoveredSpecs: readonly DiscoveredApiSpec[],
   installedContextPaths: ReadonlySet<string>,
-): ResolvedSpecs {
-  let byInstalled = resolvedSpecsCache.get(discoveredSpecs)
+  discoveredMcpServers: readonly DiscoveredMcpServer[] = [],
+): TenantCapabilities {
+  let byInstalled = tenantCapabilitiesCache.get(discoveredSpecs)
   if (!byInstalled) {
     byInstalled = new WeakMap()
-    resolvedSpecsCache.set(discoveredSpecs, byInstalled)
+    tenantCapabilitiesCache.set(discoveredSpecs, byInstalled)
   }
   const cached = byInstalled.get(installedContextPaths)
   if (cached)
@@ -104,7 +112,12 @@ export function resolveSpecs(
     }
   }
 
-  const resolved: ResolvedSpecs = { core: getCoreOpenApiSpec(), specs }
+  const mcpServers: Record<string, DiscoveredMcpServer> = {}
+  for (const server of discoveredMcpServers) {
+    mcpServers[server.contextPath] = server
+  }
+
+  const resolved: TenantCapabilities = { core: getCoreOpenApiSpec(), specs, mcpServers }
   byInstalled.set(installedContextPaths, resolved)
   return resolved
 }
@@ -116,10 +129,11 @@ export function resolveSpecs(
  * sandbox running on this output must not be used to plan execute calls —
  * visibility here does not imply the service exists on any tenant.
  */
-export function getBundledOnlySpecs(): ResolvedSpecs {
+export function getBundledOnlyCapabilities(): TenantCapabilities {
   const specs: ServiceSpecs = {}
   for (const bundled of BUNDLED_SERVICE_SPECS) {
     specs[bundled.contextPath] = bundled.spec
   }
-  return { core: getCoreOpenApiSpec(), specs }
+  // No bundled MCP servers exist — MCP namespaces are live-discovery only.
+  return { core: getCoreOpenApiSpec(), specs, mcpServers: {} }
 }

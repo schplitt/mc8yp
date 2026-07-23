@@ -10,7 +10,7 @@ mc8yp is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) serve
 
 Inside the sandbox the agent sees one **typed namespace per API**: `c8y` for the Cumulocity core REST surface plus one namespace per microservice available on the tenant (e.g. `dtm`), each with one method per operation derived from the OpenAPI specs — `c8y.getAlarmCollectionResource({ pageSize: 10 })` instead of hand-built REST calls. Discovery happens in-sandbox through `codemode.search`/`codemode.describe` (ranked method search + on-demand TypeScript interfaces) and `docs.search`/`docs.read` (fuzzy full-text search over the specs' prose documentation, e.g. query-language grammars).
 
-The agent sees not only the bundled **Core** and **DTM** specs, but **any microservice installed on the tenant** that declares an OpenAPI spec in its manifest — mc8yp discovers those live and derives namespaces for them alongside the bundled ones. No code changes or rebuild required to support a new service.
+The agent sees not only the bundled **Core** and **DTM** specs, but **any microservice installed on the tenant** that declares an OpenAPI spec in its manifest — mc8yp discovers those live and derives namespaces for them alongside the bundled ones. Services that expose an **MCP server** (`exposeMcpServers` in their manifest) are wrapped as MCP namespaces instead — one typed method per MCP tool, with MCP preferred over the OpenAPI spec when a service declares both. No code changes or rebuild required to support a new service.
 
 Operators stay in control through per-connection **restrictions** and **allow rules**, so the same broad capability can be deployed as a read-only agent, a non-destructive production agent, or anything in between.
 
@@ -18,7 +18,7 @@ Operators stay in control through per-connection **restrictions** and **allow ru
 
 1. mc8yp discovers every microservice installed on the tenant that declares an OpenAPI spec, and derives typed method namespaces from those alongside the bundled Core (+ DTM) specs.
 2. Inside a `codemode` run, the agent finds the right method with `codemode.search`, inspects its exact input/output types with `codemode.describe`, and reads prose documentation (domain query languages, parameter syntax) with `docs.search`/`docs.read`.
-3. In the same run, the agent calls the live Cumulocity API through the derived methods (`c8y.<method>({ ... })`) or the low-level `<namespace>.request()` escape hatch.
+3. In the same run, the agent calls the live Cumulocity API through the derived methods (`c8y.<method>({ ... })`). The namespaces are the complete surface — there is no raw-request escape hatch.
 4. mc8yp enforces configured restrictions and allow rules before any request leaves the host — blocked operations are also omitted from discovery entirely.
 
 ### Live microservice API discovery
@@ -26,6 +26,8 @@ Operators stay in control through per-connection **restrictions** and **allow ru
 When a tenant is active, mc8yp asks Cumulocity which applications the tenant is subscribed to, reads the `openApiSpec` declaration from each application manifest, fetches the spec, prefixes its paths with the service's `contextPath`, and exposes it to the sandbox as a typed namespace named after the contextPath. Results are cached per tenant for 30 minutes.
 
 The practical effect: **any Cumulocity microservice that ships an OpenAPI spec is automatically usable by the agent**, whether it is one of the bundled snapshots, a Cumulocity-provided service, or a custom microservice built in-house. The bundled specs are just guaranteed offline coverage; the discovery layer fills in everything else.
+
+The same discovery run also picks up MCP servers declared via `exposeMcpServers` (type `http`) and fetches their tool lists. A service exposing both an MCP server and an OpenAPI spec is wrapped as an MCP namespace; per connection you can opt services back to their spec with the `mc8yp-no-mcp` header / `noMcp` query param (server mode) or `--no-mcp` (CLI) — pass `*` for all services or a comma-separated contextPath list. Wrapped MCP tools run with the end user's credentials; elicitation and sampling are NOT forwarded (mc8yp advertises no such capabilities, so compliant servers use their fallbacks).
 
 When a new service is subscribed mid-session, CLI agents can call the `status` tool with `refresh: true` to bust the cache without waiting for the 30-minute window. Server mode does not yet expose an in-protocol refresh trigger — use the `POST /refresh-apis` HTTP route from ops/CI scripts that sit outside the MCP protocol.
 
@@ -270,19 +272,9 @@ async () => {
 }
 ```
 
-Every namespace also carries a low-level escape hatch for anything not covered by a derived method:
+There is deliberately no raw-request escape hatch — the typed namespaces are the complete surface. Whether a namespace wraps an OpenAPI spec or an MCP server is invisible to the agent; the backing protocol is an operator concern.
 
-```js
-async () => {
-  return await c8y.request({
-    method: 'GET',
-    path: '/inventory/managedObjects',
-    params: { pageSize: 5 },
-  })
-}
-```
-
-Operations can be hidden from derivation and discovery by annotating them in the OpenAPI spec with the vendor extension `x-mc8yp-exclude: true` (the `.request` escape hatch is still governed by the connection access policy).
+Operations can be hidden from derivation and discovery by annotating them in the OpenAPI spec with the vendor extension `x-mc8yp-exclude: true` — with no escape hatch, exclusion is absolute for the sandbox.
 
 ---
 
@@ -378,6 +370,8 @@ mc8yp-allow: GET:/measurement/**
 ```
 
 When a live call is blocked by connection policy, the codemode run returns explanatory text, no request is sent to Cumulocity, and retrying through the same connection will not help. Blocked operations are additionally omitted from `codemode.search`/`describe` and the docs index, so the agent never plans around a method it cannot call.
+
+> **Note:** path-based restriction/allow rules apply to OpenAPI-derived namespaces only. Wrapped MCP tools have no METHOD:path identity and are not covered by these rules — use the `noMcp` opt-out to disable MCP wrapping for a connection if that matters for your deployment.
 
 ---
 

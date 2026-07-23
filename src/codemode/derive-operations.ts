@@ -2,7 +2,7 @@ import consola from 'consola'
 import { operationName } from './operation-naming'
 import type { JsonSchema, JsonSchemaDefinition } from './type-render'
 import { HTTP_METHODS } from '../utils/restrictions'
-import type { Spec } from '../utils/spec-resolution'
+import type { Spec } from '../utils/capability-resolution'
 
 // ─────────────────────────────────────────────────────────────────────────
 // OpenAPI spec → derived operations.
@@ -30,11 +30,6 @@ export const OPERATION_KEYS = HTTP_METHODS.map((m) => m.toLowerCase())
  */
 const EXCLUDE_EXTENSION = 'x-mc8yp-exclude'
 
-/**
- * Names every namespace reserves for its own surface.
- */
-export const RESERVED_METHOD_NAMES = new Set(['request'])
-
 interface OpenApiParameter {
   name: string
   in: 'path' | 'query' | 'header' | 'cookie'
@@ -52,7 +47,7 @@ interface OpenApiParameter {
 
 /**
  * Loose runtime view of one operation. The narrow `OperationInfo` type in
- * spec-resolution omits `operationId` and vendor extensions, but they survive
+ * capability-resolution omits `operationId` and vendor extensions, but they survive
  * preprocessing and are present at runtime.
  */
 interface OpenApiOperation {
@@ -141,11 +136,8 @@ function buildOperations(doc: { paths?: Record<string, Record<string, unknown>> 
         continue
 
       const name = operationName(method, path, operation.operationId)
-      if (RESERVED_METHOD_NAMES.has(name) || used.has(name)) {
-        consola.warn(
-          `[codemode] operation ${method.toUpperCase()} ${path} maps to method name "${name}", which is `
-          + `${RESERVED_METHOD_NAMES.has(name) ? 'reserved' : 'already used'} — skipping. Set a unique operationId to expose it.`,
-        )
+      if (used.has(name)) {
+        consola.warn(`[codemode] operation ${method.toUpperCase()} ${path} maps to the already-used method name "${name}" — skipping. Set a unique operationId to expose it.`)
         continue
       }
       used.add(name)

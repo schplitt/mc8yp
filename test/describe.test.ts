@@ -3,7 +3,7 @@ import { describeTarget } from '../src/codemode/describe'
 import { getMethodIndex } from '../src/codemode/method-search'
 import { buildNamespaces, toSearchableMethods } from '../src/codemode/namespaces'
 import { parseRestrictionRule } from '../src/utils/restrictions'
-import type { ResolvedSpecs, Spec } from '../src/utils/spec-resolution'
+import type { TenantCapabilities, Spec } from '../src/utils/capability-resolution'
 
 const CORE_SPEC = {
   info: { title: 'Cumulocity Core', description: 'The core REST surface: inventory, alarms, events.' },
@@ -32,7 +32,7 @@ const DTM_SPEC = {
   },
 } as unknown as Spec
 
-function resolved(): ResolvedSpecs {
+function resolved(): TenantCapabilities {
   return { core: CORE_SPEC, specs: { dtm: DTM_SPEC } }
 }
 
@@ -44,7 +44,7 @@ describe('buildNamespaces', () => {
   })
 
   it('skips services that collide with reserved namespaces', () => {
-    const withReserved: ResolvedSpecs = { core: CORE_SPEC, specs: { codemode: DTM_SPEC, docs: DTM_SPEC } }
+    const withReserved: TenantCapabilities = { core: CORE_SPEC, specs: { codemode: DTM_SPEC, docs: DTM_SPEC } }
     expect(buildNamespaces(withReserved).map((ns) => ns.name)).toEqual(['c8y'])
   })
 

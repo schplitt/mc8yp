@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { c8yMcpServer } from '../src/server-instance'
 import { createStatusTool } from '../src/tools/status'
-import { bustApiSpecCache } from '../src/utils/api-discovery'
+import { bustCapabilityCache } from '../src/utils/capability-discovery'
 
 // Stub @c8y/client so the refresh path can build a client without a real
 // HTTP stack. discovery itself is stubbed below.
@@ -19,18 +19,18 @@ vi.mock('@c8y/client', () => {
   return { BasicAuth: FakeBasicAuth, Client: FakeClient }
 })
 
-// refreshApiSpecs walks the platform's application list and downloads spec
+// refreshCapabilities walks the platform's application list and downloads spec
 // files — replace with a deterministic fake so refresh tests stay
 // hermetic.
-let mockRefreshResult: { specs: Array<{ contextPath: string, appLabel: string, specLabel: string, servicePrefix: string, spec: unknown }>, installedContextPaths: Set<string> }
-  = { specs: [], installedContextPaths: new Set() }
+let mockRefreshResult: { specs: Array<{ contextPath: string, appLabel: string, specLabel: string, servicePrefix: string, spec: unknown }>, mcpServers: never[], installedContextPaths: Set<string> }
+  = { specs: [], mcpServers: [], installedContextPaths: new Set() }
 let refreshShouldThrow = false
 
-vi.mock('../src/utils/api-discovery', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/utils/api-discovery')>()
+vi.mock('../src/utils/capability-discovery', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/utils/capability-discovery')>()
   return {
     ...actual,
-    refreshApiSpecs: vi.fn(async () => {
+    refreshCapabilities: vi.fn(async () => {
       if (refreshShouldThrow)
         throw new Error('discovery exploded')
       return mockRefreshResult
@@ -101,9 +101,9 @@ async function callStatus(input: { refresh?: boolean } = {}): Promise<string> {
 }
 
 beforeEach(() => {
-  bustApiSpecCache()
+  bustCapabilityCache()
   mockCliTenant = null
-  mockRefreshResult = { specs: [], installedContextPaths: new Set() }
+  mockRefreshResult = { specs: [], mcpServers: [], installedContextPaths: new Set() }
   refreshShouldThrow = false
   globalThis._getStoredC8yAuth = vi.fn(async () => [])
   globalThis._getCredentialsByTenantUrl = vi.fn(async () => {
@@ -174,6 +174,7 @@ describe('status tool', () => {
       specs: [
         { contextPath: 'newsvc', appLabel: 'New Service', specLabel: 'New Service', servicePrefix: '/service/newsvc', spec: { paths: { '/service/newsvc/x': {} } } },
       ],
+      mcpServers: [],
       installedContextPaths: new Set(['newsvc']),
     }
     setCustomContext({

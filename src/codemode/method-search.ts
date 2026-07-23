@@ -30,13 +30,15 @@ export interface SearchableMethod {
   namespace: string
   method: string
   /**
-   * Uppercase HTTP method of the underlying operation.
+   * Uppercase HTTP method of the underlying operation. Absent for methods
+   * without a REST identity.
    */
-  httpMethod: string
+  httpMethod?: string
   /**
-   * REST path of the underlying operation, e.g. `/alarm/alarms`.
+   * REST path of the underlying operation, e.g. `/alarm/alarms`. Absent
+   * for methods without a REST identity.
    */
-  apiPath: string
+  apiPath?: string
   summary?: string
 }
 
