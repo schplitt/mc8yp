@@ -276,6 +276,25 @@ There is deliberately no raw-request escape hatch — the typed namespaces are t
 
 Operations can be hidden from derivation and discovery by annotating them in the OpenAPI spec with the vendor extension `x-mc8yp-exclude: true` — with no escape hatch, exclusion is absolute for the sandbox.
 
+### Sandbox surface (`sandbox`) — microservice mode only
+
+> **Experimental.** Available in deployed microservice mode; not exposed in the local CLI (agent harnesses there bring their own file I/O).
+
+In microservice mode, codemode has one more global — `sandbox` — an in-memory shell with a virtual filesystem for wrangling data you fetched from the API (`jq`, `awk`, `sed`, `grep`, `sort`, `uniq`, `cut`, `sqlite3`, …). It has **no network access and no host filesystem access** — it never reaches Cumulocity. Fetch with `c8y`/service namespaces, process in the sandbox, read the result back.
+
+```js
+async () => {
+  const alarms = await c8y.getAlarmCollectionResource({ pageSize: 2000 })
+  await sandbox.writeFile('/alarms.json', JSON.stringify(alarms.alarms ?? []))
+  const { stdout } = await sandbox.exec('jq "group_by(.severity) | map({severity: .[0].severity, count: length})" /alarms.json')
+  return JSON.parse(stdout)
+}
+```
+
+The surface mirrors [Flue's `SandboxApi`](https://flueframework.com/docs/api/sandbox-api/): `readFile`, `readFileBuffer`, `writeFile`, `stat`, `readdir`, `exists`, `mkdir`, `rm`, `exec`, plus an mc8yp-specific `clear()` that wipes the filesystem. It is backed by a swappable adapter (currently [`just-bash`](https://github.com/vercel-labs/just-bash), core shell only) so the provider can be replaced later without changing agent-facing code.
+
+**Lifecycle:** one in-memory sandbox per MCP session, so files persist across `codemode` calls within a session. It is evicted from memory 15 minutes after its last use (or immediately via `sandbox.clear()`). Nothing is ever written to disk, and sessions never share state. (Cross-call persistence relies on your MCP client maintaining the `mcp-session-id`, which standard clients do.)
+
 ---
 
 ## Access policy

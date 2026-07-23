@@ -213,9 +213,11 @@ const serverBuilds = OPENAPI_CONFIG.builds.map((build) => ({
   format: 'module' as const,
   plugins: [coreOpenApiPlugin({ mode: 'server', build }), bundledServicesPlugin({ mode: 'server', build })],
   // Bundle all non-native deps so the Docker image only needs @iso4/sandbox
-  // (and its per-platform Rust binary) installed at runtime via pnpm install --prod.
-  // @napi-rs/* is excluded defensively (not used in server mode anyway).
-  noExternal: [/^(?!@iso4\/sandbox$|@napi-rs\/)/],
+  // (and its per-platform Rust binary) plus just-bash installed at runtime via
+  // pnpm install --prod. just-bash stays external: it lazy-loads WASM runtimes
+  // (quickjs-emscripten, sql.js) for its optional python/js/sqlite commands, so
+  // static inlining is fragile. @napi-rs/* is excluded defensively (unused in server mode).
+  noExternal: [/^(?!@iso4\/sandbox$|@napi-rs\/|just-bash(?:$|\/))/],
   outDir: `.output/${build.version}`,
 }))
 
@@ -233,8 +235,10 @@ export default defineConfig([
     // @iso4/sandbox must stay external: it resolves per-platform Rust binaries
     // (@iso4/v8-*) at runtime and cannot be statically inlined.
     // @napi-rs/* must stay external for the same reason (N-API native bindings).
+    // just-bash stays external too: it lazy-loads WASM runtimes for its optional
+    // commands, so static inlining is fragile (we only use the pure-JS core shell).
     // @iso4/fetch is pure JS (rou3 + undici) and is safe to bundle.
-    noExternal: [/^(?!@iso4\/sandbox$|@napi-rs\/)/],
+    noExternal: [/^(?!@iso4\/sandbox$|@napi-rs\/|just-bash(?:$|\/))/],
     outDir: 'dist',
   },
 ])

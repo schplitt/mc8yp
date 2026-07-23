@@ -32,10 +32,11 @@ export const CORE_NAMESPACE = 'c8y'
 
 /**
  * Namespaces that can never be taken by a discovered service contextPath.
- * `codemode`/`docs` are the platform SDK, `c8y` is core, and `cumulocity` is
- * reserved so a service cannot impersonate the historical request global.
+ * `codemode`/`docs` are the platform SDK, `sandbox` is the (opt-in) scratch
+ * compute surface, `c8y` is core, and `cumulocity` is reserved so a service
+ * cannot impersonate the historical request global.
  */
-export const RESERVED_NAMESPACES = new Set(['codemode', 'docs', 'c8y', 'cumulocity'])
+export const RESERVED_NAMESPACES = new Set(['codemode', 'docs', 'sandbox', 'c8y', 'cumulocity'])
 
 /**
  * One wrapped MCP tool: the sandbox method name plus the raw wire name.

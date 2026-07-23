@@ -48,7 +48,8 @@
   },
   "dependencies": {
     "@iso4/sandbox": "catalog:",
-    "@napi-rs/keyring": "catalog:"
+    "@napi-rs/keyring": "catalog:",
+    "just-bash": "catalog:"
   },
   "devDependencies": {
     "@apidevtools/json-schema-ref-parser": "catalog:",
@@ -58,6 +59,7 @@
     "@iso4/fetch": "catalog:",
     "@schplitt/eslint-config": "catalog:",
     "@tmcp/adapter-valibot": "catalog:",
+    "@tmcp/session-manager": "catalog:",
     "@tmcp/transport-http": "catalog:",
     "@tmcp/transport-stdio": "catalog:",
     "@toon-format/toon": "catalog:",

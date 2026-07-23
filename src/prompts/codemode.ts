@@ -2,6 +2,7 @@ import { definePrompt } from 'tmcp/prompt'
 import { prompt } from 'tmcp/utils'
 import { c8yMcpServer } from '../server-instance'
 import { buildNamespaces } from '../codemode/namespaces'
+import { SANDBOX_INTERFACE_TS } from '../codemode/sandbox/types'
 
 function getRuntimeSection(): string {
   return c8yMcpServer.ctx.custom?.env === 'cli'
@@ -26,6 +27,28 @@ export function createCodeModeGuidePrompt() {
     ]
     const restrictionSection = policyLines.length > 0
       ? `\n## Current Connection Access Policy\n${policyLines.join('\n')}\n\nOperations blocked by these rules are omitted from discovery (search/describe) entirely, and any live request that matches a deny rule (or misses the allow list) fails before reaching the tenant.\n`
+      : ''
+
+    const sandboxSection = c8yMcpServer.ctx.custom?.env === 'server'
+      ? `\n## Sandbox (scratch compute)
+
+\`sandbox\` is your workspace: a persistent in-memory filesystem + Unix shell, separate from the API. It is where you keep files and process data. When the user asks to save or write a file, write it here (\`sandbox.writeFile\`) — never dump a file into the chat instead. Use the shell for text/data processing that is awkward in plain JS — \`jq\`, \`awk\`, \`sed\`, \`grep\`, \`sort\`, \`uniq\`, \`cut\`, \`sqlite3\`, etc. via \`sandbox.exec\`. It has NO network access and NO host filesystem access; it never reaches Cumulocity. Fetch data with \`c8y\`/namespaces, write it into the sandbox, process it, read the result back.
+
+\`\`\`ts
+${SANDBOX_INTERFACE_TS}
+\`\`\`
+
+Files persist across codemode calls within this session; the workspace is evicted from memory 15 minutes after its last use (or call \`sandbox.clear()\` to wipe it now).
+
+\`\`\`js
+async () => {
+  const alarms = await c8y.getAlarmCollectionResource({ pageSize: 2000 })
+  await sandbox.writeFile('/alarms.json', JSON.stringify(alarms.alarms ?? []))
+  const { stdout } = await sandbox.exec("jq -r 'group_by(.severity)[] | \\"\\\\(.length) \\\\(.[0].severity)\\"' /alarms.json | sort -rn")
+  return stdout
+}
+\`\`\`
+`
       : ''
 
     return prompt.message(
@@ -93,7 +116,7 @@ async () => {
 \`\`\`
 
 ${getRuntimeSection()}
-${restrictionSection}`,
+${sandboxSection}${restrictionSection}`,
     )
   })
 }
