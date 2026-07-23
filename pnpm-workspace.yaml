@@ -44,3 +44,4 @@ catalog:
   vitest: ^4.1.8
 allowBuilds:
   '@mongodb-js/zstd': false
+  node-liblzma: false
