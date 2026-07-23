@@ -3504,6 +3504,9 @@
           },
           "404": {
             "$ref": "#/components/responses/applicationNotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/applicationSubscribedByTenants"
           }
         }
       }
@@ -22901,6 +22904,21 @@
           }
         }
       },
+      "applicationSubscribedByTenants": {
+        "description": "Application was not deleted because it is subscribed by other tenants. Set `force=true` to unsubscribe all tenants before deletion.",
+        "content": {
+          "application/vnd.com.nsn.cumulocity.error+json": {
+            "schema": {
+              "$ref": "#/components/schemas/error"
+            },
+            "example": {
+              "error": "applications/Conflict",
+              "message": "Failed to delete application.  : Cannot remove application subscribed to other tenants: [t231, t11134]",
+              "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting"
+            }
+          }
+        }
+      },
       "groupNotFound": {
         "description": "Group not found.",
         "content": {
@@ -23567,7 +23585,7 @@
             "format": "date-time"
           },
           "text": {
-            "description": "Description of the alarm.",
+            "description": "Description of the alarm. If not specified, a new alarm will be created with an empty string.",
             "type": "string"
           }
         },
