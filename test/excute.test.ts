@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net'
 import { encode } from '@toon-format/toon'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BLOCKED_REQUEST_PREFIX, disposeSandbox, execute } from '../src/codemode/execute'
+import { disposeAllSandboxSessions } from '../src/codemode/sandbox'
 import type { Spec } from '../src/utils/capability-resolution'
 import { bustCapabilityCache, setCachedCapabilities } from '../src/utils/capability-discovery'
 import { c8yMcpServer } from '../src/server-instance'
@@ -135,8 +136,10 @@ function stubExecuteCtx(opts: {
   auth?: { tenantUrl: string, authorizationHeader: string } | undefined
   core?: Spec
   services?: Record<string, Spec>
+  sessionId?: string
 } = {}): () => void {
   const ctxSpy = vi.spyOn(c8yMcpServer, 'ctx', 'get').mockReturnValue({
+    sessionId: opts.sessionId,
     custom: {
       env: opts.env ?? 'cli',
       restrictions: opts.restrictions ?? [],
@@ -159,6 +162,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks()
   bustCapabilityCache()
+  // Drop all sandbox sessions so cross-call/isolation tests start clean.
+  disposeAllSandboxSessions()
 })
 
 afterAll(async () => {
@@ -705,6 +710,189 @@ describe('execute — CLI tenant marker', () => {
       expect(result.startsWith('Executed against tenant:')).toBe(false)
     } finally {
       restore()
+    }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// Sandbox surface — server-only `sandbox` global (in-memory shell + virtual
+// FS), one per MCP session. CLI never exposes it.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('sandbox surface', () => {
+  it('is absent in CLI mode', async () => {
+    const restore = stubExecuteCtx({ env: 'cli' })
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute('async () => typeof sandbox')
+      expect(stripCliTenantMarker(result)).toBe(encode('undefined'))
+    } finally {
+      restore()
+    }
+  })
+
+  it('is absent in server mode without a session id', async () => {
+    const restore = stubExecuteCtx({ env: 'server' })
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute('async () => typeof sandbox')
+      expect(result).toBe(encode('undefined'))
+    } finally {
+      restore()
+    }
+  })
+
+  it('exposes an in-memory shell in server mode', async () => {
+    const restore = stubExecuteCtx({ env: 'server', sessionId: 's1' })
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute(
+        `async () => {
+          await sandbox.writeFile('/n.txt', '3\\n1\\n2\\n')
+          const { stdout } = await sandbox.exec('sort -n /n.txt')
+          return stdout.trim().split('\\n')
+        }`,
+      )
+      expect(result).toBe(encode(['1', '2', '3']))
+    } finally {
+      restore()
+    }
+  })
+
+  it('reads binary buffers back across the bridge', async () => {
+    const restore = stubExecuteCtx({ env: 'server', sessionId: 's1' })
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute(
+        `async () => {
+          await sandbox.writeFile('/b.bin', 'AB')
+          const buf = await sandbox.readFileBuffer('/b.bin')
+          return { isU8: buf instanceof Uint8Array, bytes: Array.from(buf) }
+        }`,
+      )
+      expect(result).toBe(encode({ isU8: true, bytes: [65, 66] }))
+    } finally {
+      restore()
+    }
+  })
+
+  it('round-trips a Uint8Array through writeFile (iso4 0.3.x)', async () => {
+    const restore = stubExecuteCtx({ env: 'server', sessionId: 's1' })
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute(
+        `async () => {
+          await sandbox.writeFile('/src.bin', 'hello')
+          const buf = await sandbox.readFileBuffer('/src.bin')
+          await sandbox.writeFile('/copy.txt', buf)
+          return await sandbox.readFile('/copy.txt')
+        }`,
+      )
+      expect(result).toBe(encode('hello'))
+    } finally {
+      restore()
+    }
+  })
+
+  it('exposes stat().mtime as epoch millis (Date cannot cross the bridge)', async () => {
+    const restore = stubExecuteCtx({ env: 'server', sessionId: 's1' })
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute(
+        `async () => {
+          await sandbox.writeFile('/f.txt', 'x')
+          const s = await sandbox.stat('/f.txt')
+          return { isFile: s.isFile, mtimeType: typeof s.mtime }
+        }`,
+      )
+      expect(result).toBe(encode({ isFile: true, mtimeType: 'number' }))
+    } finally {
+      restore()
+    }
+  })
+
+  it('persists files across codemode calls within a session', async () => {
+    const restore = stubExecuteCtx({ env: 'server', sessionId: 'sess-keep' })
+    try {
+      mockAuth(TEST_TENANT)
+      await execute(`async () => { await sandbox.writeFile('/keep.txt', 'kept'); return 'ok' }`)
+      mockAuth(TEST_TENANT)
+      const result = await execute(
+        `async () => (await sandbox.exists('/keep.txt')) ? await sandbox.readFile('/keep.txt') : 'gone'`,
+      )
+      expect(result).toBe(encode('kept'))
+    } finally {
+      restore()
+    }
+  })
+
+  it('isolates the workspace between sessions', async () => {
+    const a = stubExecuteCtx({ env: 'server', sessionId: 'sess-A' })
+    try {
+      mockAuth(TEST_TENANT)
+      await execute(`async () => { await sandbox.writeFile('/only-a.txt', '1'); return 'ok' }`)
+    } finally {
+      a()
+    }
+    const b = stubExecuteCtx({ env: 'server', sessionId: 'sess-B' })
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute(`async () => await sandbox.exists('/only-a.txt')`)
+      expect(result).toBe(encode(false))
+    } finally {
+      b()
+    }
+  })
+
+  it('resets the filesystem with clear()', async () => {
+    const restore = stubExecuteCtx({ env: 'server', sessionId: 'sess-clear' })
+    try {
+      mockAuth(TEST_TENANT)
+      await execute(`async () => { await sandbox.writeFile('/x.txt', '1'); return 'ok' }`)
+      mockAuth(TEST_TENANT)
+      const result = await execute(
+        `async () => { await sandbox.clear(); return await sandbox.exists('/x.txt') }`,
+      )
+      expect(result).toBe(encode(false))
+    } finally {
+      restore()
+    }
+  })
+
+  it('appears in codemode.describe in server mode, not in CLI', async () => {
+    const server = stubExecuteCtx({ core: TEST_CORE_SPEC, env: 'server', sessionId: 's1' })
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute(
+        `async () => {
+          const overview = await codemode.describe()
+          const surface = await codemode.describe('sandbox')
+          const method = await codemode.describe('sandbox.exec')
+          return [
+            overview.content.includes('sandbox'),
+            surface.content.includes('readFileBuffer'),
+            method.content.includes('exec'),
+          ].join('|')
+        }`,
+      )
+      expect(result).toContain('true|true|true')
+    } finally {
+      server()
+    }
+
+    const cli = stubExecuteCtx({ core: TEST_CORE_SPEC, env: 'cli' })
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute(
+        `async () => {
+          const overview = await codemode.describe()
+          const surface = await codemode.describe('sandbox')
+          return { inOverview: overview.content.includes('\`sandbox\`'), surfaceRedirects: surface.content.includes('not a method target') }
+        }`,
+      )
+      expect(stripCliTenantMarker(result)).toBe(encode({ inOverview: false, surfaceRedirects: true }))
+    } finally {
+      cli()
     }
   })
 })

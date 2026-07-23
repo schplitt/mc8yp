@@ -11,6 +11,7 @@ import { getMethodIndex, searchMethods } from './method-search'
 import type { MethodIndex, SearchableMethod } from './method-search'
 import { buildNamespaces, toSearchableMethods } from './namespaces'
 import type { CodemodeNamespace, McpNamespace, OpenApiNamespace } from './namespaces'
+import { buildSandboxApi, disposeAllSandboxSessions } from './sandbox'
 import type { DocsSearchOptions } from './docs-index'
 import { createC8yAuthHeaders, resolveC8yAuth } from '../utils/client'
 import { McpHttpClient } from '../utils/mcp-client'
@@ -56,6 +57,7 @@ export async function disposeSandbox(): Promise<void> {
 
 // Best-effort shutdown for CLI stdio mode where there is no explicit teardown.
 process.once('exit', () => {
+  disposeAllSandboxSessions()
   if (sandboxPromise) {
     sandboxPromise.then((s) => s.dispose()).catch(() => undefined)
   }
@@ -266,6 +268,9 @@ const ENTRY_SOURCE = [
   `import __run from '${AGENT_MODULE_SPECIFIER}'`,
   'globalThis.codemode = __api.codemode',
   'globalThis.docs = __api.docs',
+  // `sandbox` is opt-in: the host omits the key when the surface is disabled,
+  // so agent code guards with `typeof sandbox !== "undefined"`.
+  'if (__api.sandbox) globalThis.sandbox = __api.sandbox',
   'for (const [name, namespace] of Object.entries(__api.namespaces)) globalThis[name] = namespace',
   'export default await __run()',
 ].join('\n')
@@ -350,12 +355,16 @@ function buildApiModule(
   methodIndex: MethodIndex,
   docsIndex: ReturnType<typeof getDocsIndex>,
   live: LiveCalls,
+  sandbox: HostModuleObject | undefined,
 ): HostModuleObject {
   const visibleTargets = new Set(namespaces.flatMap((ns) => ns.kind === 'openapi'
     ? ns.operations.map((op) => `${ns.name}.${op.name}`)
     : ns.tools.map((tool) => `${ns.name}.${tool.name}`)))
 
+  const sandboxEnabled = sandbox !== undefined
+
   return {
+    ...(sandbox ? { sandbox } : {}),
     codemode: {
       search: async (...args: unknown[]) => {
         const [query] = args
@@ -377,9 +386,9 @@ function buildApiModule(
             throw new TypeError('codemode.describe(targets): pass method targets like "c8y.getAlarmCollectionResource"')
           if (targets.length > 5)
             throw new TypeError(`codemode.describe(targets): at most 5 targets per call (got ${targets.length}) — shortlist candidates via search first`)
-          return targets.map((t) => describeTarget(namespaces, methodIndex, t))
+          return targets.map((t) => describeTarget(namespaces, methodIndex, t, sandboxEnabled))
         }
-        return describeTarget(namespaces, methodIndex, target == null ? undefined : String(target))
+        return describeTarget(namespaces, methodIndex, target == null ? undefined : String(target), sandboxEnabled)
       },
     },
     docs: {
@@ -516,13 +525,20 @@ export async function execute(functionCode: string): Promise<string> {
     live = createUnauthenticatedCalls(error instanceof Error ? error.message : String(error))
   }
 
+  // Server-only scratch workspace, one in-memory sandbox per MCP session
+  // (persists across codemode calls, idle-evicted). CLI mode never exposes it.
+  const sessionId = c8yMcpServer.ctx.sessionId
+  const sandboxApi = c8yMcpServer.ctx.custom?.env === 'server' && sessionId
+    ? buildSandboxApi(sessionId)
+    : undefined
+
   const sandbox = await getSandbox()
   const result = await sandbox.run({
     code: ENTRY_SOURCE,
     filename: EXECUTE_ENTRY_PATH,
     limits: SANDBOX_LIMITS,
     imports: {
-      [API_MODULE_SPECIFIER]: buildApiModule(namespaces, methodIndex, docsIndex, live),
+      [API_MODULE_SPECIFIER]: buildApiModule(namespaces, methodIndex, docsIndex, live, sandboxApi),
       [AGENT_MODULE_SPECIFIER]: buildAgentModule(functionCode),
     },
   }).finally(() => live.dispose())

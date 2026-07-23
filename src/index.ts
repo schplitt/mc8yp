@@ -3,6 +3,7 @@ import consola from 'consola'
 import { getQuery, H3, HTTPError, serve } from 'h3'
 import openApiSpec from '../openapi.json' with { type: 'json' }
 import { c8yMcpServer, setupMcpServer } from './server'
+import { createSandboxEvictingInfoSessionManager } from './codemode/sandbox/session-eviction'
 import process from 'node:process'
 import {
   ALLOW_HEADER,
@@ -32,6 +33,10 @@ setupMcpServer('server')
 const transport = new HttpTransport(c8yMcpServer, {
   path: '/mcp',
   disableSse: true,
+  // Evict a session's sandbox the moment the client closes cleanly (DELETE);
+  // the 15-min idle TTL backstops sessions that never send one. `streams`
+  // defaults to the transport's InMemoryStreamSessionManager.
+  sessionManager: { info: createSandboxEvictingInfoSessionManager() },
 })
 
 const C8Y_BASEURL = process.env.C8Y_BASEURL!

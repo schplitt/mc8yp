@@ -1,5 +1,6 @@
 import { searchMethods } from './method-search'
 import { renderMethodDeclaration } from './type-render'
+import { SANDBOX_INTERFACE_TS } from './sandbox/types'
 import type { MethodIndex } from './method-search'
 import type { CodemodeNamespace, McpNamespace, McpNamespaceTool, OpenApiNamespace } from './namespaces'
 import type { DerivedOperation } from './derive-operations'
@@ -34,8 +35,12 @@ function truncateLine(text: string | undefined): string | undefined {
   return flattened.length > 220 ? `${flattened.slice(0, 220)}…` : flattened
 }
 
-function renderOverview(namespaces: readonly CodemodeNamespace[]): string {
-  const lines = ['Available API namespaces on this tenant (do not assume capabilities from prior knowledge — search each relevant domain):']
+// Count the method leaves in the sandbox interface so its overview line shows
+// a method count like every namespace, without hardcoding a drifting number.
+const SANDBOX_METHOD_COUNT = (SANDBOX_INTERFACE_TS.match(/^ {2}\w+:/gm) ?? []).length
+
+function renderOverview(namespaces: readonly CodemodeNamespace[], sandboxEnabled: boolean): string {
+  const lines = ['Available namespaces on this tenant (do not assume capabilities from prior knowledge — search each relevant domain):']
   for (const ns of namespaces) {
     // One flattened, truncated line of the service's own description —
     // enough to route a problem domain to its namespace without flooding
@@ -49,6 +54,12 @@ function renderOverview(namespaces: readonly CodemodeNamespace[]): string {
       lines.push(`- ${ns.name} — ${ns.server.mcpName} (${ns.tools.length} methods)${short ? `: ${short}` : ''}`)
     }
   }
+  // Listed as a peer of the API namespaces, same bullet format, so the agent
+  // treats it with the same confidence. Its methods are a fixed set surfaced by
+  // describe("sandbox") rather than by search (they are not spec-derived).
+  if (sandboxEnabled) {
+    lines.push(`- sandbox — in-memory shell + virtual filesystem (${SANDBOX_METHOD_COUNT} methods): jq/awk/grep/sed/sort/sqlite over data you fetched; no network, no host FS. codemode.describe("sandbox") for its methods.`)
+  }
   lines.push(
     '',
     'Workflow:',
@@ -58,6 +69,19 @@ function renderOverview(namespaces: readonly CodemodeNamespace[]): string {
     '- <namespace>.<method>({ ...params, body }) — call the API',
   )
   return lines.join('\n')
+}
+
+// The sandbox surface is a fixed, small hand-written interface (not spec-
+// derived), so — unlike API namespaces — describing the whole thing in one
+// block is cheap and useful. Any `sandbox`-prefixed target returns it.
+function renderSandbox(): string {
+  return [
+    'sandbox — in-memory shell + virtual filesystem for wrangling data you fetched (no network, no host FS; it never reaches Cumulocity).',
+    '',
+    '```ts',
+    SANDBOX_INTERFACE_TS,
+    '```',
+  ].join('\n')
 }
 
 function renderOperation(namespace: OpenApiNamespace, op: DerivedOperation): string {
@@ -129,15 +153,20 @@ function renderSearchRedirect(target: string, namespaces: readonly CodemodeNames
  * @param namespaces
  * @param methodIndex
  * @param target
+ * @param sandboxEnabled - whether the opt-in `sandbox` surface is exposed this run.
  */
-export function describeTarget(namespaces: readonly CodemodeNamespace[], methodIndex: MethodIndex, target?: string): DescribeOutput {
+export function describeTarget(namespaces: readonly CodemodeNamespace[], methodIndex: MethodIndex, target?: string, sandboxEnabled = false): DescribeOutput {
   const trimmed = target?.trim() ?? ''
   if (trimmed === '')
-    return { target: '', kind: 'overview', content: renderOverview(namespaces) }
+    return { target: '', kind: 'overview', content: renderOverview(namespaces, sandboxEnabled) }
 
   const [maybeNamespace, maybeMethod] = trimmed.includes('.')
     ? [trimmed.slice(0, trimmed.indexOf('.')), trimmed.slice(trimmed.indexOf('.') + 1)]
     : [trimmed, undefined]
+
+  // The sandbox surface is described as one whole block (small, fixed shape).
+  if (sandboxEnabled && maybeNamespace === 'sandbox')
+    return { target: 'sandbox', kind: 'method', content: renderSandbox() }
 
   const namespace = namespaces.find((ns) => ns.name === maybeNamespace)
 

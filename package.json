@@ -48,16 +48,17 @@
   },
   "dependencies": {
     "@iso4/sandbox": "catalog:",
-    "@napi-rs/keyring": "catalog:"
+    "@napi-rs/keyring": "catalog:",
+    "just-bash": "catalog:"
   },
   "devDependencies": {
     "@apidevtools/json-schema-ref-parser": "catalog:",
     "@c8y/client": "catalog:",
     "@clack/prompts": "catalog:",
-    "@huggingface/transformers": "catalog:",
     "@iso4/fetch": "catalog:",
     "@schplitt/eslint-config": "catalog:",
     "@tmcp/adapter-valibot": "catalog:",
+    "@tmcp/session-manager": "catalog:",
     "@tmcp/transport-http": "catalog:",
     "@tmcp/transport-stdio": "catalog:",
     "@toon-format/toon": "catalog:",
@@ -76,8 +77,7 @@
     "ufo": "catalog:",
     "unctx": "catalog:",
     "valibot": "catalog:",
-    "vitest": "catalog:",
-    "zbsearch": "catalog:"
+    "vitest": "catalog:"
   },
   "engines": {
     "node": ">=24.0.0"
