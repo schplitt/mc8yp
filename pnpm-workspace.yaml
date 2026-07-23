@@ -42,8 +42,5 @@ catalog:
   unctx: ^2.5.0
   valibot: ^1.4.1
   vitest: ^4.1.8
-onlyBuiltDependencies:
-  - better-sqlite3
-  - cbor-extract
 allowBuilds:
   '@mongodb-js/zstd': false
