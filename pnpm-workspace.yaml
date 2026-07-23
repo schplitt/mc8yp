@@ -45,14 +45,5 @@ catalog:
 onlyBuiltDependencies:
   - better-sqlite3
   - cbor-extract
-  - esbuild
-  - isolated-vm
 allowBuilds:
   '@mongodb-js/zstd': false
-  better-sqlite3: false
-  cbor-extract: true
-  esbuild: true
-  node-liblzma: true
-  onnxruntime-node: true
-  protobufjs: true
-  sharp: false
