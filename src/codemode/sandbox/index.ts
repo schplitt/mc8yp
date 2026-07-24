@@ -1,3 +1,4 @@
+import consola from 'consola'
 import { createJustBashAdapter } from './just-bash-adapter'
 import type { HostModuleObject } from '@iso4/sandbox'
 import type { SandboxAdapter, SandboxExecOptions } from './types'
@@ -13,13 +14,13 @@ export type { SandboxAdapter } from './types'
 //
 // One in-memory sandbox per MCP session, keyed by `ctx.sessionId`, so files
 // persist across codemode calls within a session. Nothing touches disk.
-// Eviction:
+// Eviction (each path logs the session id and reason):
 //   • idle TTL — a per-session 15-minute timer, reset on every use. This is the
 //     guarantee: sessions that go quiet (including ones whose client never
 //     sends a clean DELETE) are dropped 15 minutes after their last call.
+//   • clean close — the transport's session manager wrapper
+//     (./session-eviction.ts) evicts immediately on client DELETE /mcp.
 //   • process exit — disposeAllSandboxSessions() clears everything.
-// (A clean-close DELETE hook via the transport's session manager is a possible
-// future optimization; the TTL already covers that case, just later.)
 //
 // Two type layers, on purpose:
 //   • SandboxAdapter (./types) — the swappable backend contract (Flue shape).
@@ -42,7 +43,7 @@ function armIdleTimer(sessionId: string): void {
     return
   if (session.timer)
     clearTimeout(session.timer)
-  session.timer = setTimeout(() => evictSandboxSession(sessionId), IDLE_TTL_MS)
+  session.timer = setTimeout(() => evictSandboxSession(sessionId, 'idle-timeout'), IDLE_TTL_MS)
   // Never let the eviction timer keep a process alive on its own.
   session.timer.unref?.()
 }
@@ -65,12 +66,15 @@ function resetSessionAdapter(sessionId: string): void {
   armIdleTimer(sessionId)
 }
 
+export type SandboxEvictionReason = 'session-close' | 'idle-timeout' | 'shutdown'
+
 /**
- * Drop a session's sandbox and its timer. Exported for a future clean-close
- * (DELETE) hook and used by the process-exit teardown.
+ * Drop a session's sandbox and its timer. Called by the clean-close (DELETE)
+ * hook, the idle timer, and the process-exit teardown.
  * @param sessionId - MCP session id.
+ * @param reason - Why the sandbox is being dropped; included in the eviction log line.
  */
-export function evictSandboxSession(sessionId: string): void {
+export function evictSandboxSession(sessionId: string, reason: SandboxEvictionReason): void {
   const session = sessions.get(sessionId)
   if (!session)
     return
@@ -78,6 +82,7 @@ export function evictSandboxSession(sessionId: string): void {
     clearTimeout(session.timer)
   session.adapter.dispose?.()
   sessions.delete(sessionId)
+  consola.info(`[sandbox] evicted workspace for session ${sessionId} (reason: ${reason})`)
 }
 
 /**
@@ -85,7 +90,7 @@ export function evictSandboxSession(sessionId: string): void {
  */
 export function disposeAllSandboxSessions(): void {
   for (const sessionId of [...sessions.keys()])
-    evictSandboxSession(sessionId)
+    evictSandboxSession(sessionId, 'shutdown')
 }
 
 /**

@@ -24,7 +24,7 @@ export function createSandboxEvictingInfoSessionManager(): InMemoryInfoSessionMa
   const manager = new InMemoryInfoSessionManager()
   const inner = manager.delete.bind(manager)
   manager.delete = (id: string): void => {
-    evictSandboxSession(id)
+    evictSandboxSession(id, 'session-close')
     inner(id)
   }
   return manager

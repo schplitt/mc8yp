@@ -126,7 +126,7 @@ describe('sandbox session store', () => {
     await a.writeFile('/f', '1')
     await b.writeFile('/f', '2')
     expect(getSandboxSessionCount()).toBe(2)
-    evictSandboxSession('A')
+    evictSandboxSession('A', 'session-close')
     expect(getSandboxSessionCount()).toBe(1)
   })
 
