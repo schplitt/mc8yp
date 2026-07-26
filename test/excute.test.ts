@@ -137,6 +137,7 @@ function stubExecuteCtx(opts: {
   core?: Spec
   services?: Record<string, Spec>
   sessionId?: string
+  enableSandbox?: boolean
 } = {}): () => void {
   const ctxSpy = vi.spyOn(c8yMcpServer, 'ctx', 'get').mockReturnValue({
     sessionId: opts.sessionId,
@@ -146,6 +147,7 @@ function stubExecuteCtx(opts: {
       allowRules: opts.allowRules ?? [],
       specs: { core: opts.core ?? ({ paths: {} } as unknown as Spec), specs: opts.services ?? {} },
       auth: opts.auth,
+      enableSandbox: opts.enableSandbox,
     },
   } as unknown as ReturnType<typeof c8yMcpServer['ctx']['valueOf']>)
   return () => ctxSpy.mockRestore()
@@ -716,7 +718,8 @@ describe('execute — CLI tenant marker', () => {
 
 // ─────────────────────────────────────────────────────────────────────────
 // Sandbox surface — server-only `sandbox` global (in-memory shell + virtual
-// FS), one per MCP session. CLI never exposes it.
+// FS), one per MCP session. Disabled by default; a connection must opt in
+// via `enableSandbox`. CLI never exposes it regardless.
 // ─────────────────────────────────────────────────────────────────────────
 
 describe('sandbox surface', () => {
@@ -732,7 +735,7 @@ describe('sandbox surface', () => {
   })
 
   it('is absent in server mode without a session id', async () => {
-    const restore = stubExecuteCtx({ env: 'server' })
+    const restore = stubExecuteCtx({ env: 'server', enableSandbox: true })
     try {
       mockAuth(TEST_TENANT)
       const result = await execute('async () => typeof sandbox')
@@ -742,8 +745,19 @@ describe('sandbox surface', () => {
     }
   })
 
-  it('exposes an in-memory shell in server mode', async () => {
+  it('is absent by default in server mode even with a session id (opt-in required)', async () => {
     const restore = stubExecuteCtx({ env: 'server', sessionId: 's1' })
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute('async () => typeof sandbox')
+      expect(result).toBe(encode('undefined'))
+    } finally {
+      restore()
+    }
+  })
+
+  it('exposes an in-memory shell in server mode once the connection opts in via enableSandbox', async () => {
+    const restore = stubExecuteCtx({ env: 'server', sessionId: 's1', enableSandbox: true })
     try {
       mockAuth(TEST_TENANT)
       const result = await execute(
@@ -760,7 +774,7 @@ describe('sandbox surface', () => {
   })
 
   it('reads binary buffers back across the bridge', async () => {
-    const restore = stubExecuteCtx({ env: 'server', sessionId: 's1' })
+    const restore = stubExecuteCtx({ env: 'server', sessionId: 's1', enableSandbox: true })
     try {
       mockAuth(TEST_TENANT)
       const result = await execute(
@@ -777,7 +791,7 @@ describe('sandbox surface', () => {
   })
 
   it('round-trips a Uint8Array through writeFile (iso4 0.3.x)', async () => {
-    const restore = stubExecuteCtx({ env: 'server', sessionId: 's1' })
+    const restore = stubExecuteCtx({ env: 'server', sessionId: 's1', enableSandbox: true })
     try {
       mockAuth(TEST_TENANT)
       const result = await execute(
@@ -795,7 +809,7 @@ describe('sandbox surface', () => {
   })
 
   it('exposes stat().mtime as epoch millis (Date cannot cross the bridge)', async () => {
-    const restore = stubExecuteCtx({ env: 'server', sessionId: 's1' })
+    const restore = stubExecuteCtx({ env: 'server', sessionId: 's1', enableSandbox: true })
     try {
       mockAuth(TEST_TENANT)
       const result = await execute(
@@ -812,7 +826,7 @@ describe('sandbox surface', () => {
   })
 
   it('persists files across codemode calls within a session', async () => {
-    const restore = stubExecuteCtx({ env: 'server', sessionId: 'sess-keep' })
+    const restore = stubExecuteCtx({ env: 'server', sessionId: 'sess-keep', enableSandbox: true })
     try {
       mockAuth(TEST_TENANT)
       await execute(`async () => { await sandbox.writeFile('/keep.txt', 'kept'); return 'ok' }`)
@@ -827,14 +841,14 @@ describe('sandbox surface', () => {
   })
 
   it('isolates the workspace between sessions', async () => {
-    const a = stubExecuteCtx({ env: 'server', sessionId: 'sess-A' })
+    const a = stubExecuteCtx({ env: 'server', sessionId: 'sess-A', enableSandbox: true })
     try {
       mockAuth(TEST_TENANT)
       await execute(`async () => { await sandbox.writeFile('/only-a.txt', '1'); return 'ok' }`)
     } finally {
       a()
     }
-    const b = stubExecuteCtx({ env: 'server', sessionId: 'sess-B' })
+    const b = stubExecuteCtx({ env: 'server', sessionId: 'sess-B', enableSandbox: true })
     try {
       mockAuth(TEST_TENANT)
       const result = await execute(`async () => await sandbox.exists('/only-a.txt')`)
@@ -845,7 +859,7 @@ describe('sandbox surface', () => {
   })
 
   it('resets the filesystem with clear()', async () => {
-    const restore = stubExecuteCtx({ env: 'server', sessionId: 'sess-clear' })
+    const restore = stubExecuteCtx({ env: 'server', sessionId: 'sess-clear', enableSandbox: true })
     try {
       mockAuth(TEST_TENANT)
       await execute(`async () => { await sandbox.writeFile('/x.txt', '1'); return 'ok' }`)
@@ -860,7 +874,7 @@ describe('sandbox surface', () => {
   })
 
   it('appears in codemode.describe in server mode, not in CLI', async () => {
-    const server = stubExecuteCtx({ core: TEST_CORE_SPEC, env: 'server', sessionId: 's1' })
+    const server = stubExecuteCtx({ core: TEST_CORE_SPEC, env: 'server', sessionId: 's1', enableSandbox: true })
     try {
       mockAuth(TEST_TENANT)
       const result = await execute(

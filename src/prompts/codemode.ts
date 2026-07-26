@@ -29,7 +29,7 @@ export function createCodeModeGuidePrompt() {
       ? `\n## Current Connection Access Policy\n${policyLines.join('\n')}\n\nOperations blocked by these rules are omitted from discovery (search/describe) entirely, and any live request that matches a deny rule (or misses the allow list) fails before reaching the tenant.\n`
       : ''
 
-    const sandboxSection = c8yMcpServer.ctx.custom?.env === 'server'
+    const sandboxSection = c8yMcpServer.ctx.custom?.env === 'server' && c8yMcpServer.ctx.custom?.enableSandbox
       ? `\n## Sandbox (scratch compute)
 
 \`sandbox\` is your workspace: a persistent in-memory filesystem + Unix shell, separate from the API. It is where you keep files and process data. When the user asks to save or write a file, write it here (\`sandbox.writeFile\`) — never dump a file into the chat instead. Use the shell for text/data processing that is awkward in plain JS — \`jq\`, \`awk\`, \`sed\`, \`grep\`, \`sort\`, \`uniq\`, \`cut\`, \`sqlite3\`, etc. via \`sandbox.exec\`. It has NO network access and NO host filesystem access; it never reaches Cumulocity. Fetch data with \`c8y\`/namespaces, write it into the sandbox, process it, read the result back.

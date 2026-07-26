@@ -11,9 +11,11 @@ import {
   RESTRICTION_HEADER,
   RESTRICTION_QUERY_KEYS,
   collectServerAllowSources,
+  collectServerEnableSandboxSources,
   collectServerNoMcpSources,
   collectServerRestrictionSources,
   parseAllowRule,
+  parseEnableSandbox,
   parseNoMcp,
   parseRestrictionRule,
 } from './utils/restrictions'
@@ -105,6 +107,7 @@ const app = new H3().all('/mcp', async (event) => {
   }
 
   const noMcp = parseNoMcp(collectServerNoMcpSources(query, event.req.headers))
+  const enableSandbox = parseEnableSandbox(collectServerEnableSandboxSources(query, event.req.headers))
 
   return transport.respond(event.req, {
     env: 'server' as const,
@@ -118,6 +121,7 @@ const app = new H3().all('/mcp', async (event) => {
     restrictions,
     allowRules: parsedAllowRules,
     noMcp,
+    enableSandbox,
     specs,
   })
 })

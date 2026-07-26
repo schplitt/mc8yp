@@ -16,17 +16,20 @@ function getSafetyPreface(env: Env): string {
 }
 
 /**
- * Purpose framing for the `sandbox` workspace. Server-only: deployed sessions
- * always have it, so the always-read tool description can state it plainly. CLI
- * has no sandbox. This is deliberately about PURPOSE (files/data processing
- * live here), not procedure — the observed failure was the agent not realizing
- * the sandbox is where files go and dumping output to chat.
+ * Purpose framing for the `sandbox` workspace. Server-only, and disabled by
+ * default — a connection must opt in (`mc8yp-enable-sandbox` header /
+ * `enableSandbox` query param) before the `sandbox` global exists, so this
+ * always-read tool description cannot assert it is present the way it can
+ * for `codemode`/`docs`. CLI never has a sandbox regardless. This is
+ * deliberately about PURPOSE (files/data processing live here), not
+ * procedure — the observed failure was the agent not realizing the sandbox
+ * is where files go and dumping output to chat.
  * @param env - execution environment.
  */
 function getSandboxNote(env: Env): string {
   if (env !== 'server')
     return ''
-  return '\nYour workspace — `sandbox`: this session has a persistent in-memory filesystem + Unix shell, separate from the API. It is where you keep files and process data. When the user asks to save or write a file, or when you need to filter/transform/aggregate fetched data (jq, awk, grep, sort, sqlite), do it here — `sandbox.writeFile(path, text)`, `sandbox.readFile(path)`, `sandbox.exec(command)` — never dump a file into the chat instead. Files persist across codemode calls in this session. Full method list: `codemode.describe("sandbox")`.\n'
+  return '\nYour workspace — `sandbox`: if this connection has it enabled (check `typeof sandbox !== \'undefined\'`), it is a persistent in-memory filesystem + Unix shell, separate from the API, for keeping files and processing data. When the user asks to save or write a file, or when you need to filter/transform/aggregate fetched data (jq, awk, grep, sort, sqlite), do it here — `sandbox.writeFile(path, text)`, `sandbox.readFile(path)`, `sandbox.exec(command)` — never dump a file into the chat instead. Files persist across codemode calls in this session. Full method list: `codemode.describe("sandbox")`.\n'
 }
 
 export function createCodemodeTool(env: Env) {

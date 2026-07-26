@@ -526,9 +526,12 @@ export async function execute(functionCode: string): Promise<string> {
   }
 
   // Server-only scratch workspace, one in-memory sandbox per MCP session
-  // (persists across codemode calls, idle-evicted). CLI mode never exposes it.
+  // (persists across codemode calls, idle-evicted). CLI mode never exposes
+  // it. Disabled by default — a connection must opt in via the
+  // `mc8yp-enable-sandbox` header or `enableSandbox` query param (parsed into
+  // ctx.custom.enableSandbox in src/index.ts).
   const sessionId = c8yMcpServer.ctx.sessionId
-  const sandboxApi = c8yMcpServer.ctx.custom?.env === 'server' && sessionId
+  const sandboxApi = c8yMcpServer.ctx.custom?.env === 'server' && sessionId && c8yMcpServer.ctx.custom?.enableSandbox
     ? buildSandboxApi(sessionId)
     : undefined
 
