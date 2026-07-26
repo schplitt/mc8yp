@@ -31,6 +31,13 @@ export interface C8yMcpCustomContext extends Record<string, unknown> {
    */
   noMcp?: NoMcpConfig
   /**
+   * Connection-level opt-in for the server-mode scratch `sandbox` workspace
+   * (`mc8yp-enable-sandbox` header, `enableSandbox` query param). Server mode
+   * only — CLI mode never builds a sandbox regardless of this flag.
+   * Disabled by default: absent or `false` means no `sandbox` global.
+   */
+  enableSandbox?: boolean
+  /**
    * Resolved specs for the query sandbox: always-available `core` plus a
    * service-spec map keyed by contextPath (bundled service entries + any
    * non-bundled discovered services). Paths are already prefixed.

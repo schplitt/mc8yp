@@ -5,6 +5,8 @@ export const RESTRICTION_HEADER = 'mc8yp-restriction'
 export const ALLOW_HEADER = 'mc8yp-allow'
 export const NO_MCP_QUERY_KEYS = ['noMcp'] as const
 export const NO_MCP_HEADER = 'mc8yp-no-mcp'
+export const ENABLE_SANDBOX_QUERY_KEYS = ['enableSandbox'] as const
+export const ENABLE_SANDBOX_HEADER = 'mc8yp-enable-sandbox'
 
 export type HttpMethod = (typeof HTTP_METHODS)[number]
 export type RestrictionMethod = HttpMethod | '*'
@@ -96,6 +98,40 @@ export function parseNoMcp(sources: readonly (string | boolean)[]): NoMcpConfig 
     }
   }
   return { all, contextPaths }
+}
+
+// Per-connection opt-in for the server-mode scratch `sandbox` workspace. It
+// is disabled by default (a general-purpose shell + virtual FS is a bigger
+// blast radius than any single API call, so it must be explicitly requested
+// rather than opted out of). Unlike `noMcp` there is nothing to scope to a
+// subset of — the sandbox is a single per-session workspace, not one
+// namespace per service — so this is a plain boolean rather than a config
+// object.
+export function collectServerEnableSandboxSources(query: Record<string, unknown>, headers: Headers): string[] {
+  const raw: string[] = []
+  for (const key of ENABLE_SANDBOX_QUERY_KEYS) {
+    const value = query[key]
+    if (typeof value === 'string')
+      raw.push(value)
+    else if (Array.isArray(value))
+      raw.push(...value.filter((v): v is string => typeof v === 'string'))
+    else if (value !== undefined)
+      raw.push('') // bare ?enableSandbox → opt-in
+  }
+  const header = headers.get(ENABLE_SANDBOX_HEADER)
+  if (header !== null)
+    raw.push(header)
+  return raw
+}
+
+/**
+ * Parse sandbox opt-in sources: an empty value, `*`, or `true` enables the
+ * connection's scratch sandbox; anything else (including no sources at all)
+ * leaves it disabled.
+ * @param sources Raw values from query params or headers.
+ */
+export function parseEnableSandbox(sources: readonly (string | boolean)[]): boolean {
+  return sources.some((source) => source === true || source === '' || source === '*' || source === 'true')
 }
 
 interface BaseRule {

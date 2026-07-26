@@ -276,11 +276,13 @@ There is deliberately no raw-request escape hatch — the typed namespaces are t
 
 Operations can be hidden from derivation and discovery by annotating them in the OpenAPI spec with the vendor extension `x-mc8yp-exclude: true` — with no escape hatch, exclusion is absolute for the sandbox.
 
-### Sandbox surface (`sandbox`) — microservice mode only
+### Sandbox surface (`sandbox`) — microservice mode only, opt-in
 
-> **Experimental.** Available in deployed microservice mode; not exposed in the local CLI (agent harnesses there bring their own file I/O).
+> **Experimental.** Available in deployed microservice mode only, and **disabled by default**; not exposed in the local CLI (agent harnesses there bring their own file I/O).
 
-In microservice mode, codemode has one more global — `sandbox` — an in-memory shell with a virtual filesystem for wrangling data you fetched from the API (`jq`, `awk`, `sed`, `grep`, `sort`, `uniq`, `cut`, `sqlite3`, …). It has **no network access and no host filesystem access** — it never reaches Cumulocity. Fetch with `c8y`/service namespaces, process in the sandbox, read the result back.
+In microservice mode, codemode has one more optional global — `sandbox` — an in-memory shell with a virtual filesystem for wrangling data you fetched from the API (`jq`, `awk`, `sed`, `grep`, `sort`, `uniq`, `cut`, `sqlite3`, …). It has **no network access and no host filesystem access** — it never reaches Cumulocity. Fetch with `c8y`/service namespaces, process in the sandbox, read the result back.
+
+**It is off unless you turn it on.** Enable it per connection with the `mc8yp-enable-sandbox` header or the `enableSandbox` query param (any of empty, `*`, or `true`). Without it, `sandbox` is absent — same as CLI mode.
 
 ```js
 async () => {
