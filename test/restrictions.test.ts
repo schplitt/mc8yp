@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { findBlockingRestrictions, findMatchingRules } from '../src/utils/restriction-matcher'
 import {
   ALLOW_HEADER,
+  NO_SANDBOX_HEADER,
   RESTRICTION_HEADER,
   collectServerAllowSources,
+  collectServerNoSandboxSources,
   collectServerRestrictionSources,
   parseAllowRule,
+  parseNoSandbox,
   parseRestrictionRule,
 } from '../src/utils/restrictions'
 
@@ -268,6 +271,35 @@ describe('server access policy input collection', () => {
         { rule: '*:', reason: 'Allow path pattern must not be empty.' },
       ],
     })
+  })
+})
+
+describe('server sandbox opt-out input collection', () => {
+  it('collects a bare noSandbox query flag as a blanket opt-out', () => {
+    expect(collectServerNoSandboxSources({ noSandbox: '' }, new Headers())).toEqual([''])
+  })
+
+  it('collects an explicit noSandbox query value and the header', () => {
+    const headers = new Headers({ [NO_SANDBOX_HEADER]: 'true' })
+    expect(collectServerNoSandboxSources({ noSandbox: 'false' }, headers)).toEqual(['false', 'true'])
+  })
+
+  it('returns no sources when neither the query flag nor the header is present', () => {
+    expect(collectServerNoSandboxSources({}, new Headers())).toEqual([])
+  })
+})
+
+describe('parseNoSandbox', () => {
+  it('treats empty, star, and boolean-true values as an opt-out', () => {
+    expect(parseNoSandbox([''])).toBe(true)
+    expect(parseNoSandbox(['*'])).toBe(true)
+    expect(parseNoSandbox([true])).toBe(true)
+    expect(parseNoSandbox(['true'])).toBe(true)
+  })
+
+  it('leaves the sandbox enabled for no sources or unrecognized values', () => {
+    expect(parseNoSandbox([])).toBe(false)
+    expect(parseNoSandbox(['false'])).toBe(false)
   })
 })
 

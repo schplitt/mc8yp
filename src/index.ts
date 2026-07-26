@@ -12,9 +12,11 @@ import {
   RESTRICTION_QUERY_KEYS,
   collectServerAllowSources,
   collectServerNoMcpSources,
+  collectServerNoSandboxSources,
   collectServerRestrictionSources,
   parseAllowRule,
   parseNoMcp,
+  parseNoSandbox,
   parseRestrictionRule,
 } from './utils/restrictions'
 import { BasicAuth, Client, MicroserviceClientRequestAuth } from '@c8y/client'
@@ -105,6 +107,7 @@ const app = new H3().all('/mcp', async (event) => {
   }
 
   const noMcp = parseNoMcp(collectServerNoMcpSources(query, event.req.headers))
+  const noSandbox = parseNoSandbox(collectServerNoSandboxSources(query, event.req.headers))
 
   return transport.respond(event.req, {
     env: 'server' as const,
@@ -118,6 +121,7 @@ const app = new H3().all('/mcp', async (event) => {
     restrictions,
     allowRules: parsedAllowRules,
     noMcp,
+    noSandbox,
     specs,
   })
 })

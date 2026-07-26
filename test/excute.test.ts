@@ -137,6 +137,7 @@ function stubExecuteCtx(opts: {
   core?: Spec
   services?: Record<string, Spec>
   sessionId?: string
+  noSandbox?: boolean
 } = {}): () => void {
   const ctxSpy = vi.spyOn(c8yMcpServer, 'ctx', 'get').mockReturnValue({
     sessionId: opts.sessionId,
@@ -146,6 +147,7 @@ function stubExecuteCtx(opts: {
       allowRules: opts.allowRules ?? [],
       specs: { core: opts.core ?? ({ paths: {} } as unknown as Spec), specs: opts.services ?? {} },
       auth: opts.auth,
+      noSandbox: opts.noSandbox,
     },
   } as unknown as ReturnType<typeof c8yMcpServer['ctx']['valueOf']>)
   return () => ctxSpy.mockRestore()
@@ -733,6 +735,17 @@ describe('sandbox surface', () => {
 
   it('is absent in server mode without a session id', async () => {
     const restore = stubExecuteCtx({ env: 'server' })
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute('async () => typeof sandbox')
+      expect(result).toBe(encode('undefined'))
+    } finally {
+      restore()
+    }
+  })
+
+  it('is absent in server mode when the connection opted out via noSandbox', async () => {
+    const restore = stubExecuteCtx({ env: 'server', sessionId: 's1', noSandbox: true })
     try {
       mockAuth(TEST_TENANT)
       const result = await execute('async () => typeof sandbox')

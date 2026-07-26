@@ -5,6 +5,8 @@ export const RESTRICTION_HEADER = 'mc8yp-restriction'
 export const ALLOW_HEADER = 'mc8yp-allow'
 export const NO_MCP_QUERY_KEYS = ['noMcp'] as const
 export const NO_MCP_HEADER = 'mc8yp-no-mcp'
+export const NO_SANDBOX_QUERY_KEYS = ['noSandbox'] as const
+export const NO_SANDBOX_HEADER = 'mc8yp-no-sandbox'
 
 export type HttpMethod = (typeof HTTP_METHODS)[number]
 export type RestrictionMethod = HttpMethod | '*'
@@ -96,6 +98,37 @@ export function parseNoMcp(sources: readonly (string | boolean)[]): NoMcpConfig 
     }
   }
   return { all, contextPaths }
+}
+
+// Per-connection opt-out for the server-mode scratch `sandbox` workspace.
+// Unlike `noMcp` there is nothing to scope to a subset of — the sandbox is a
+// single per-session workspace, not one namespace per service — so the
+// opt-out is a plain boolean rather than a config object.
+export function collectServerNoSandboxSources(query: Record<string, unknown>, headers: Headers): string[] {
+  const raw: string[] = []
+  for (const key of NO_SANDBOX_QUERY_KEYS) {
+    const value = query[key]
+    if (typeof value === 'string')
+      raw.push(value)
+    else if (Array.isArray(value))
+      raw.push(...value.filter((v): v is string => typeof v === 'string'))
+    else if (value !== undefined)
+      raw.push('') // bare ?noSandbox → opt-out
+  }
+  const header = headers.get(NO_SANDBOX_HEADER)
+  if (header !== null)
+    raw.push(header)
+  return raw
+}
+
+/**
+ * Parse sandbox opt-out sources: an empty value, `*`, or `true` disables the
+ * connection's scratch sandbox; anything else (including no sources at all)
+ * leaves it enabled.
+ * @param sources Raw values from query params or headers.
+ */
+export function parseNoSandbox(sources: readonly (string | boolean)[]): boolean {
+  return sources.some((source) => source === true || source === '' || source === '*' || source === 'true')
 }
 
 interface BaseRule {

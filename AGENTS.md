@@ -11,7 +11,7 @@ The project exposes a single code-mode tool to AI agents instead of a large fixe
   - `docs.search(query, opts?)` / `docs.read(id)` — MiniSearch-backed fuzzy full-text search over spec prose (tag docs like query-language grammars, info blocks, operation/parameter descriptions)
   - `c8y` (core, always present) plus one namespace per service available on the tenant (e.g. `dtm`) — one typed method per derived operation. Namespaces are the COMPLETE sandbox surface: there is no raw-request escape hatch, and the backing protocol (OpenAPI vs MCP) is deliberately invisible to the agent
   - services that declare `exposeMcpServers` in their manifest are wrapped from their **MCP server** instead (one typed method per MCP tool) — MCP is preferred over the OpenAPI spec when a service has both, with a per-connection opt-out (`mc8yp-no-mcp` header / `noMcp` query / `--no-mcp` CLI flag) that falls back to the spec
-  - `sandbox` (**server mode only**) — an in-memory shell + virtual filesystem (`just-bash`, core shell only: `jq`/`awk`/`grep`/`sed`/`sort`/`sqlite3`, no network, no host FS) for wrangling fetched data. Mirrors [Flue's `SandboxApi`](https://flueframework.com/docs/api/sandbox-api/) plus an mc8yp-only `clear()`. One sandbox per MCP session (persists across codemode calls, keyed by `ctx.sessionId`), idle-evicted after 15 minutes; nothing touches disk. CLI mode does not expose it — local harnesses bring their own file I/O. Backed by a swappable adapter so the provider can change later.
+  - `sandbox` (**server mode only**) — an in-memory shell + virtual filesystem (`just-bash`, core shell only: `jq`/`awk`/`grep`/`sed`/`sort`/`sqlite3`, no network, no host FS) for wrangling fetched data. Mirrors [Flue's `SandboxApi`](https://flueframework.com/docs/api/sandbox-api/) plus an mc8yp-only `clear()`. One sandbox per MCP session (persists across codemode calls, keyed by `ctx.sessionId`), idle-evicted after 15 minutes; nothing touches disk. CLI mode does not expose it — local harnesses bring their own file I/O. Backed by a swappable adapter so the provider can change later. Per-connection opt-out via the `mc8yp-no-sandbox` header / `noSandbox` query param (server mode only — same shape as the `noMcp` opt-out, but a plain boolean since there is only one sandbox per connection, not one per service); opted-out sessions never see the `sandbox` global at all.
 - `status` is available only in CLI mode: it lists the active tenant, stored credentials, and the API namespaces currently visible. It accepts `{ refresh: true }` to force a fresh API discovery on demand (noop when no tenant is active). Server mode has no in-protocol equivalent yet — use the `POST /refresh-apis` HTTP route for ops-driven refresh; an in-protocol server-side flow will land in a separate PR.
 
 The repository supports two runtime modes:
@@ -68,7 +68,7 @@ src/
     credentials.ts            OS keyring credential storage and lookup
     mcp-client.ts             Minimal streamable-HTTP MCP client (tools only, no elicitation/sampling)
     restriction-matcher.ts    Restriction compilation and path matching helpers
-    restrictions.ts           Restriction parsing, query handling, and the noMcp opt-out
+    restrictions.ts           Restriction parsing, query handling, and the noMcp/noSandbox opt-outs
     schema.ts                 Shared schema helpers
     capability-resolution.ts        `resolveCapabilities` plus the shared `Spec`/`PathItem`/`OperationInfo` types
 test/
@@ -115,7 +115,7 @@ src/openapi-modules.d.ts      Ambient type declarations for the `#core-openapi` 
 
 1. `src/index.ts` starts the HTTP server and exposes `/mcp` and `/health`.
 2. It sets `globalThis.executionEnvironment = 'server'`.
-3. It extracts auth from request headers, restrictions from `restriction`, `restrict`, and `r` query parameters plus the `mc8yp-restriction` header, and allow rules from `allowed`, `allow`, and `a` query parameters plus the `mc8yp-allow` header.
+3. It extracts auth from request headers, restrictions from `restriction`, `restrict`, and `r` query parameters plus the `mc8yp-restriction` header, allow rules from `allowed`, `allow`, and `a` query parameters plus the `mc8yp-allow` header, the MCP-wrapping opt-out from the `noMcp` query param plus the `mc8yp-no-mcp` header, and the scratch-sandbox opt-out from the `noSandbox` query param plus the `mc8yp-no-sandbox` header.
 4. It stores auth in request-local context and forwards the request to the shared MCP server.
 5. It configures the HTTP transport in POST-only mode (`disableSse: true`) because the optional long-lived GET/SSE channel proved unstable behind Cumulocity microservice ingress.
 
@@ -184,7 +184,9 @@ Build-time behaviour:
 
 ### The Sandbox Scratch Surface (`sandbox`)
 
-**Server mode only.** A non-tenant compute surface for agent data-wrangling, deliberately isolated from the live request path: no network, no host filesystem, never reaches Cumulocity. In CLI mode the `sandbox` global does not exist at all — local agent harnesses bring their own file I/O, so it would be dead weight. `execute()` builds it only when `custom.env === 'server'` and a `ctx.sessionId` is present; otherwise `buildApiModule` omits the key and the global is absent.
+**Server mode only.** A non-tenant compute surface for agent data-wrangling, deliberately isolated from the live request path: no network, no host filesystem, never reaches Cumulocity. In CLI mode the `sandbox` global does not exist at all — local agent harnesses bring their own file I/O, so it would be dead weight. `execute()` builds it only when `custom.env === 'server'`, a `ctx.sessionId` is present, and the connection has not opted out via `custom.noSandbox`; otherwise `buildApiModule` omits the key and the global is absent.
+
+- **Per-connection opt-out.** The `mc8yp-no-sandbox` header or `noSandbox` query param (`collectServerNoSandboxSources` / `parseNoSandbox` in `src/utils/restrictions.ts`, same source file as the restriction/allow/noMcp parsing) disables the sandbox for that connection. Parsed once per request in `src/index.ts` into `ctx.custom.noSandbox` (a plain boolean — unlike `noMcp` there is no per-service scoping since a connection has exactly one sandbox), and read at the `buildSandboxApi` call site in `execute.ts`. CLI mode has no equivalent flag; it never builds a sandbox regardless.
 
 - **Adapter seam.** `src/codemode/sandbox/types.ts` defines `SandboxAdapter`, kept intentionally identical to Flue's `SandboxApi` so the backend is swappable. `just-bash-adapter.ts` is the only backend today (`new Bash({ cwd: '/' })`, core shell only — `network`/`python`/`javascript` all default-off). The adapter stays Flue-pure; mc8yp-specific concerns live one layer up. `cwd: '/'` matters: just-bash resolves `fs.writeFile('foo')` against `/` but defaults the _shell_ cwd to `/home/user`, so without this a relative `writeFile` then `exec('cat foo')` would miss each other.
 - **`clear()` is NOT part of the adapter contract.** It is an mc8yp-only convenience on the agent-facing `sandbox` global, implemented in `index.ts` by swapping the session's adapter instance — trivial to remove later without touching the seam.

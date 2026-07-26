@@ -295,6 +295,8 @@ The surface mirrors [Flue's `SandboxApi`](https://flueframework.com/docs/api/san
 
 **Lifecycle:** one in-memory sandbox per MCP session, so files persist across `codemode` calls within a session. It is evicted from memory 15 minutes after its last use (or immediately via `sandbox.clear()`). Nothing is ever written to disk, and sessions never share state. (Cross-call persistence relies on your MCP client maintaining the `mcp-session-id`, which standard clients do.)
 
+**Opting out:** per connection, disable the sandbox entirely with the `mc8yp-no-sandbox` header or the `noSandbox` query param (any of empty, `*`, or `true`). With it set, the `sandbox` global is absent from that session — same as CLI mode.
+
 ---
 
 ## Access policy
