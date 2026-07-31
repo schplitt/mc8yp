@@ -234,6 +234,32 @@ With read-only access rules:
 }
 ```
 
+### Add to Claude Code
+
+The quickest way to register mc8yp is the [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI. Everything after `--` is passed to the mc8yp subprocess, so access-policy flags go there:
+
+```sh
+# Local CLI (stdio) — default scope is this project only
+claude mcp add mc8yp -- pnpm dlx mc8yp
+
+# Make it available in every project (user scope)
+claude mcp add -s user mc8yp -- pnpm dlx mc8yp
+
+# Pin a bundled core spec and add read-only access rules
+claude mcp add mc8yp -- pnpm dlx mc8yp --spec 2025 \
+  -a "GET:/inventory/**" -a "GET:/alarm/**" -a "GET:/measurement/**"
+```
+
+For deployed **microservice mode**, add it as an HTTP server instead:
+
+```sh
+claude mcp add --transport http mc8yp \
+  https://<tenant>.cumulocity.com/service/mc8yp-server/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+Manage the entry with `claude mcp list`, `claude mcp get mc8yp`, and `claude mcp remove mc8yp`.
+
 ---
 
 ## Tools and prompts
