@@ -19320,6 +19320,9 @@
             "$ref": "#/components/parameters/queryParam_tenant_id"
           },
           {
+            "$ref": "#/components/parameters/tfaCodeHeader"
+          },
+          {
             "$ref": "#/components/parameters/acceptHeader"
           }
         ],
@@ -19399,6 +19402,9 @@
             "$ref": "#/components/parameters/queryParam_tenant_id"
           },
           {
+            "$ref": "#/components/parameters/tfaCodeHeader"
+          },
+          {
             "$ref": "#/components/parameters/acceptHeader"
           }
         ],
@@ -19453,6 +19459,91 @@
           },
           "401": {
             "$ref": "#/components/responses/unauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/operationNotAuthorized"
+          }
+        }
+      }
+    },
+    "/tenant/oauth/certificate": {
+      "post": {
+        "operationId": "postCertificateAccessToken",
+        "x-codegen-resource-name": "obtainAccessTokenWithCertificate",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/queryParam_tenant_id"
+          },
+          {
+            "$ref": "#/components/parameters/tenantIdInHeader"
+          },
+          {
+            "$ref": "#/components/parameters/tokenResponseModeHeader"
+          },
+          {
+            "$ref": "#/components/parameters/tfaCodeHeader"
+          },
+          {
+            "$ref": "#/components/parameters/acceptHeader"
+          }
+        ],
+        "tags": [
+          "Login tokens"
+        ],
+        "security": [],
+        "summary": "Obtain an access token with a certificate",
+        "description": "Obtain a platform access token by presenting an X.509 certificate over standard HTTPS, without requiring mutual TLS (mTLS) or MQTT. This provides a REST-native, standard-port alternative for certificate-authenticated clients that cannot use MQTT or the dedicated mTLS endpoint.\n\nThe request body contains the leaf certificate, or the full certificate chain, in PEM format. By default the returned access token is encrypted as a JWE with the public key from the presented certificate, so that only the holder of the corresponding private key can decrypt it and use it as a `Bearer` token for subsequent REST API requests. The response format can be controlled with the `X-Cumulocity-Token-Response-Mode` header.\n\nThe platform derives the identity from the certificate subject, validates the certificate material against the tenant-trusted certificate authorities (including validity dates and revocation checks where configured) and confirms that the certificate is authorized for the resolved user. The tenant context must be established from the request before validation, for example through the `tenant_id` query parameter or the `X-Cumulocity-TenantId` header. The certificate is not used as the primary tenant identification mechanism.\n\nIf the resolved certificate identity is ambiguous, for example when the same certificate common name could resolve to both a regular user and a device user, the request is rejected and no token is issued. Untrusted, expired, revoked, malformed, unsupported or unmapped certificates are rejected as well.\n\nIf two-factor authentication (TFA) is active for the resolved user, it must be passed with the request as well, because the certificate replaces the password, not the second factor. Send the current TFA code in the `X-Cumulocity-TFA-Code` header. Both the TOTP and the SMS strategy are supported, in the same way as for the OAI-Secure login. Device users are never asked for a second factor.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-pem-file": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "description": "Leaf certificate or full certificate chain in PEM format.",
+                "example": "-----BEGIN CERTIFICATE-----\nMIIDTzCCAjegAwIBAgIUB1a5GM9ubBpN5tyU7YO8D3C8zUUwDQYJKoZIhvcNAQEL\n...\nzngrsOfyKr8YYlDRy6RiAR2HQode00Hs4WoakfuTpaISZIs=\n-----END CERTIFICATE-----"
+              }
+            }
+          }
+        },
+        "x-code-samples": [
+          {
+            "lang": "cURL",
+            "source": "curl --location --request POST \"https://<TENANT_DOMAIN>/tenant/oauth/certificate\" \\\n--header \"Content-Type: application/x-pem-file\" \\\n--header \"Accept: application/json\" \\\n--header \"X-Cumulocity-TenantId: <TENANT_ID>\" \\\n--header \"X-Cumulocity-Token-Response-Mode: jwe\" \\\n--data-binary \"@client-certificate.pem\"\n"
+          },
+          {
+            "lang": "C#",
+            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/oauth/certificate\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.POST);\nrequest.AddHeader(\"Content-Type\", \"application/x-pem-file\");\nrequest.AddHeader(\"Accept\", \"application/json\");\nrequest.AddHeader(\"X-Cumulocity-TenantId\", \"<TENANT_ID>\");\nrequest.AddHeader(\"X-Cumulocity-Token-Response-Mode\", \"jwe\");\nrequest.AddParameter(\"application/x-pem-file\", File.ReadAllText(\"client-certificate.pem\"), ParameterType.RequestBody);\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
+          },
+          {
+            "lang": "Java",
+            "source": "Unirest.setTimeouts(0, 0);\nString certificate = new String(Files.readAllBytes(Paths.get(\"client-certificate.pem\")), java.nio.charset.StandardCharsets.US_ASCII);\nHttpResponse<String> response = Unirest.post(\"https://<TENANT_DOMAIN>/tenant/oauth/certificate\")\n    .header(\"Content-Type\", \"application/x-pem-file\")\n    .header(\"Accept\", \"application/json\")\n    .header(\"X-Cumulocity-TenantId\", \"<TENANT_ID>\")\n    .header(\"X-Cumulocity-Token-Response-Mode\", \"jwe\")\n    .body(certificate)\n    .asString();\nSystem.out.println(response);\n"
+          },
+          {
+            "lang": "Node.js",
+            "source": "var unirest = require(\"unirest\");\nvar fs = require(\"fs\");\nvar req = unirest(\"POST\", \"https://<TENANT_DOMAIN>/tenant/oauth/certificate\")\n    .headers({\n        \"Accept\": \"application/json\",\n        \"Content-Type\": \"application/x-pem-file\",\n        \"X-Cumulocity-TenantId\": \"<TENANT_ID>\",\n        \"X-Cumulocity-Token-Response-Mode\": \"jwe\"\n    })\n    .send(fs.readFileSync(\"client-certificate.pem\"))\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
+          },
+          {
+            "lang": "Python",
+            "source": "import requests\n\nurl = \"https://<TENANT_DOMAIN>/tenant/oauth/certificate\"\nheaders = {\n  \"Accept\": \"application/json\",\n  \"Content-Type\": \"application/x-pem-file\",\n  \"X-Cumulocity-TenantId\": \"<TENANT_ID>\",\n  \"X-Cumulocity-Token-Response-Mode\": \"jwe\"\n}\nwith open(\"client-certificate.pem\", \"rb\") as certificate:\n  data = certificate.read()\n\nresponse = requests.request(\"POST\", url, headers=headers, data=data)\nprint(response.text.encode(\"utf8\"))\n"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The access token is sent in the response. By default it is a JWE encrypted with the public key from the presented certificate.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/certificateAccessToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/unableToParseCertBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/x509CertificateValidationUnauthorizedError"
           },
           "403": {
             "$ref": "#/components/responses/operationNotAuthorized"
@@ -20538,6 +20629,31 @@
         "schema": {
           "type": "string",
           "example": "t07007007"
+        }
+      },
+      "tokenResponseModeHeader": {
+        "name": "X-Cumulocity-Token-Response-Mode",
+        "in": "header",
+        "description": "Optional. Selects the format of the returned access token. `jwe` (default) returns the access token as a JWE encrypted with the public key from the presented certificate (RSA-OAEP-256 for key encryption and AES-256-GCM for content encryption), so that only the holder of the corresponding private key can decrypt it. `jwt` returns a plain, unencrypted JWT and is only available when explicitly enabled. Unsupported values are rejected.\n",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "jwe",
+            "jwt"
+          ],
+          "default": "jwe",
+          "example": "jwe"
+        }
+      },
+      "tfaCodeHeader": {
+        "name": "X-Cumulocity-TFA-Code",
+        "in": "header",
+        "description": "Optional. Current TFA code of the user, if a TFA code is required to log in. For form-based OAI-Secure login, the code can be sent as the `tfa_code` field in the request body; this header is useful for requests that cannot include that field (for example when the request body is a certificate chain). If both are sent, the request body field takes precedence.\n",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "example": "123433"
         }
       },
       "alarmId": {
@@ -30630,6 +30746,36 @@
           "info": {
             "type": "object",
             "example": null
+          }
+        }
+      },
+      "certificateAccessToken": {
+        "description": "Access token obtained by presenting an X.509 certificate. By default the token is returned as a JWE encrypted with the public key from the presented certificate, so that only the holder of the corresponding private key can decrypt it.",
+        "type": "object",
+        "properties": {
+          "access_token": {
+            "description": "The access token generated by the Cumulocity platform. A JWE compact-serialized, encrypted JWT when `response_mode` is `jwe`, or a plain, unencrypted JWT when `response_mode` is `jwt`.",
+            "type": "string",
+            "example": "eyJhbGciOiJSU0EtT0FFUC0yNTYiLCJlbmMiOiJBMjU2R0NNIn0.g_hEwksO1Ax8Qn7HoN-BVeBoa8FXe0kpyk_XdcSmxvcM5_P296JXXtoHISr_DD_M...48V95cLzdVlCyoQ"
+          },
+          "token_type": {
+            "description": "The type of the returned token.",
+            "type": "string",
+            "example": "Bearer"
+          },
+          "response_mode": {
+            "description": "The format of the returned access token.",
+            "type": "string",
+            "enum": [
+              "jwe",
+              "jwt"
+            ],
+            "example": "jwe"
+          },
+          "expires_in": {
+            "description": "The token lifetime in seconds.",
+            "type": "integer",
+            "example": 3600
           }
         }
       },
