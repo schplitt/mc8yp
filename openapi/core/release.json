@@ -17144,7 +17144,7 @@
           }
         ],
         "summary": "Add revoked certificates",
-        "description": "> **&#9432; Info:** A certificate revocation list (CRL) is a list of digital certificates\n   that have been revoked by the issuing certificate authority (CA) before expiration date.\n   In Cumulocity, a CRL check can be in online or offline mode or both.\n\nAn endpoint to add revoked certificate serial numbers for offline CRL check via payload or file.\n\nFor payload, a JSON object required with list of CRL entries, for example:\n ```json\n   {\n    \"crls\": [\n      {\n        \"serialNumberInHex\": \"1000\",\n        \"revocationDate\": \"2023-01-11T16:12:36.288Z\"\n      }\n     ]\n    }\n  ```\nEach entry is composed of:\n * serialNumberInHex: Needs to be in `Hexadecimal Value`. e.g As (1000)^16 == (4096)^10, So we have to enter 1000.\n    If duplicate serial number exists in payload, the existing entry stays</br>\n * `revocationDate` - accepted Date format: `yyyy-MM-dd'T'HH:mm:ss.SSS'Z'`, for example: `2023-01-11T16:12:36.288Z`.\n     This is an optional parameter and defaults to the current server UTC date time if not specified in the payload.\n     If specified and the date is in future then those entries will be also defaulted to current date.\n\nFor file upload, each file can hold at maximum 5000 revocation entries.\nMultiple upload is allowed.\nIn case of duplicates, the latest (last uploaded) entry is considered.\n\nSee below for a sample CSV file:\n\n| SERIAL NO.  | REVOCATION DATE |\n|--|--|\n| 1000 | 2023-01-11T16:12:36.288Z |\n\n Each entry is composed of :\n * serialNumberInHex: Needs to be in `Hexadecimal Value`. e.g (1000)^16 == (4096)^10, So we have to enter 1000.\n    If duplicate serial number exists in payload, the latest entry will be taken.</br>\n * revocationDate: Accepted Date format: `yyyy-MM-dd'T'HH:mm:ss.SSS'Z'` e.g: 2023-01-11T16:12:36.288Z.\n This is an optional and will be default to current server UTC date time if not specified in payload.\n If specified and the date is in future then those entries will be skipped.\n\nThe CRL setting for offline and online check can be enabled/disabled using <kbd><a href=\"#operation/putOptionResource\">/tenant/options</a></kbd>.\nKeys are `crl.online.check.enabled` and `crl.offline.check.enabled` under the category `configuration`.\n\n<section><h5>Required roles</h5>\n(ROLE_TENANT_MANAGEMENT_ADMIN <b>OR</b> ROLE_TENANT_ADMIN) <b>AND</b> is the current tenant\n</section>\n\n**⚠️ Important:** According to CRL policy, added serial numbers cannot be reversed.\n",
+        "description": "> **&#9432; Info:** A certificate revocation list (CRL) is a list of digital certificates\n   that have been revoked by the issuing certificate authority (CA) before expiration date.\n   In Cumulocity, a CRL check can be in online or offline mode or both.\n\nAn endpoint to add revoked certificate serial numbers for offline CRL check via payload or file.\nA file can be uploaded with either `PUT` or `POST`, a JSON payload is accepted by `PUT` only.\n\nFor payload, a JSON object required with list of CRL entries, for example:\n ```json\n   {\n    \"crls\": [\n      {\n        \"serialNumberInHex\": \"1000\",\n        \"revocationDate\": \"2023-01-11T16:12:36.288Z\"\n      }\n     ]\n    }\n  ```\nEach entry is composed of:\n * serialNumberInHex: Needs to be in `Hexadecimal Value`. e.g As (1000)^16 == (4096)^10, So we have to enter 1000.\n    If duplicate serial number exists in payload, the existing entry stays</br>\n * `revocationDate` - accepted Date format: `yyyy-MM-dd'T'HH:mm:ss.SSS'Z'`, for example: `2023-01-11T16:12:36.288Z`.\n     This is an optional parameter and defaults to the current server UTC date time if not specified in the payload.\n     If specified and the date is in future then those entries will be also defaulted to current date.\n\nFor file upload, each file can hold at maximum 5000 revocation entries.\nMultiple upload is allowed.\nIn case of duplicates, the latest (last uploaded) entry is considered.\n\nSee below for a sample CSV file:\n\n| SERIAL NO.  | REVOCATION DATE |\n|--|--|\n| 1000 | 2023-01-11T16:12:36.288Z |\n\n Each entry is composed of :\n * serialNumberInHex: Needs to be in `Hexadecimal Value`. e.g (1000)^16 == (4096)^10, So we have to enter 1000.\n    If duplicate serial number exists in payload, the latest entry will be taken.</br>\n * revocationDate: Accepted Date format: `yyyy-MM-dd'T'HH:mm:ss.SSS'Z'` e.g: 2023-01-11T16:12:36.288Z.\n This is an optional and will be default to current server UTC date time if not specified in payload.\n If specified and the date is in future then those entries will be skipped.\n\nThe CRL setting for offline and online check can be enabled/disabled using <kbd><a href=\"#operation/putOptionResource\">/tenant/options</a></kbd>.\nKeys are `crl.online.check.enabled` and `crl.offline.check.enabled` under the category `configuration`.\n\n<section><h5>Required roles</h5>\n(ROLE_TENANT_MANAGEMENT_ADMIN <b>OR</b> ROLE_TENANT_ADMIN) <b>AND</b> is the current tenant\n</section>\n\n**⚠️ Important:** According to CRL policy, added serial numbers cannot be reversed.\n",
         "x-code-samples": [
           {
             "lang": "cURL",
@@ -17175,6 +17175,82 @@
                 "$ref": "#/components/schemas/UpdateCRLEntries"
               }
             },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "description": "File to be uploaded.",
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "CRLs updated successfully."
+          },
+          "400": {
+            "$ref": "#/components/responses/unableToParseCRLEntries"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/accessDenied"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postCRLSettings",
+        "x-codegen-resource-name": "uploadCRL",
+        "tags": [
+          "Trusted certificates"
+        ],
+        "security": [
+          {
+            "Basic": []
+          },
+          {
+            "OAI-Secure": []
+          },
+          {
+            "SSO": []
+          }
+        ],
+        "summary": "Add revoked certificates",
+        "description": "> **&#9432; Info:** A certificate revocation list (CRL) is a list of digital certificates\n   that have been revoked by the issuing certificate authority (CA) before expiration date.\n   In Cumulocity, a CRL check can be in online or offline mode or both.\n\nAn endpoint to add revoked certificate serial numbers for offline CRL check via payload or file.\nA file can be uploaded with either `PUT` or `POST`, a JSON payload is accepted by `PUT` only.\n\nFor payload, a JSON object required with list of CRL entries, for example:\n ```json\n   {\n    \"crls\": [\n      {\n        \"serialNumberInHex\": \"1000\",\n        \"revocationDate\": \"2023-01-11T16:12:36.288Z\"\n      }\n     ]\n    }\n  ```\nEach entry is composed of:\n * serialNumberInHex: Needs to be in `Hexadecimal Value`. e.g As (1000)^16 == (4096)^10, So we have to enter 1000.\n    If duplicate serial number exists in payload, the existing entry stays</br>\n * `revocationDate` - accepted Date format: `yyyy-MM-dd'T'HH:mm:ss.SSS'Z'`, for example: `2023-01-11T16:12:36.288Z`.\n     This is an optional parameter and defaults to the current server UTC date time if not specified in the payload.\n     If specified and the date is in future then those entries will be also defaulted to current date.\n\nFor file upload, each file can hold at maximum 5000 revocation entries.\nMultiple upload is allowed.\nIn case of duplicates, the latest (last uploaded) entry is considered.\n\nSee below for a sample CSV file:\n\n| SERIAL NO.  | REVOCATION DATE |\n|--|--|\n| 1000 | 2023-01-11T16:12:36.288Z |\n\n Each entry is composed of :\n * serialNumberInHex: Needs to be in `Hexadecimal Value`. e.g (1000)^16 == (4096)^10, So we have to enter 1000.\n    If duplicate serial number exists in payload, the latest entry will be taken.</br>\n * revocationDate: Accepted Date format: `yyyy-MM-dd'T'HH:mm:ss.SSS'Z'` e.g: 2023-01-11T16:12:36.288Z.\n This is an optional and will be default to current server UTC date time if not specified in payload.\n If specified and the date is in future then those entries will be skipped.\n\nThe CRL setting for offline and online check can be enabled/disabled using <kbd><a href=\"#operation/putOptionResource\">/tenant/options</a></kbd>.\nKeys are `crl.online.check.enabled` and `crl.offline.check.enabled` under the category `configuration`.\n\n<section><h5>Required roles</h5>\n(ROLE_TENANT_MANAGEMENT_ADMIN <b>OR</b> ROLE_TENANT_ADMIN) <b>AND</b> is the current tenant\n</section>\n\n**⚠️ Important:** According to CRL policy, added serial numbers cannot be reversed.\n",
+        "x-code-samples": [
+          {
+            "lang": "cURL",
+            "source": "curl --location --request POST 'https://<TENANT_DOMAIN>/tenant/trusted-certificates/settings/crl' \\\n--header \"Authorization: Basic <AUTHORIZATION>\" \\\n--form 'file=@\"/path_to_file/CRL_bulk_registration_template.csv\"'\n"
+          },
+          {
+            "lang": "C#",
+            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/trusted-certificates/settings/crl\");\nclient.Timeout = -1;\nvar request = new RestRequest(Method.POST);\nrequest.AlwaysMultipartFormData = true;\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\nrequest.AddFile(\"file\", \"/path_to_file/CRL_bulk_registration_template.csv\");\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
+          },
+          {
+            "lang": "Java",
+            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.post(\"https://<TENANT_DOMAIN>/tenant/trusted-certificates/settings/crl\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\")\n    .field(\"file\", new File(\"/path_to_file/CRL_bulk_registration_template.csv\"))\n    .asString();\nSystem.out.println(response);\n"
+          },
+          {
+            "lang": "Node.js",
+            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"POST\", \"https://<TENANT_DOMAIN>/tenant/trusted-certificates/settings/crl\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\",\n    })\n    .attach('file', '/path_to_file/CRL_bulk_registration_template.csv')\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
+          },
+          {
+            "lang": "Python",
+            "source": "import requests\nurl = \"https://<TENANT_DOMAIN>/tenant/trusted-certificates/settings/crl\"\npayload = {}\nfiles=[\n('file',('CRL_bulk_registration_template.csv',open('/path_to_file/CRL_bulk_registration_template.csv','rb'),'application/octet-stream'))\n]\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\",\n}\nresponse = requests.request(\"POST\", url, headers=headers, data=payload, files=files)\nprint(response.text.encode(\"utf8\"))\n"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
             "multipart/form-data": {
               "schema": {
                 "type": "object",
@@ -19320,6 +19396,9 @@
             "$ref": "#/components/parameters/queryParam_tenant_id"
           },
           {
+            "$ref": "#/components/parameters/tfaCodeHeader"
+          },
+          {
             "$ref": "#/components/parameters/acceptHeader"
           }
         ],
@@ -19399,6 +19478,9 @@
             "$ref": "#/components/parameters/queryParam_tenant_id"
           },
           {
+            "$ref": "#/components/parameters/tfaCodeHeader"
+          },
+          {
             "$ref": "#/components/parameters/acceptHeader"
           }
         ],
@@ -19456,6 +19538,94 @@
           },
           "403": {
             "$ref": "#/components/responses/operationNotAuthorized"
+          }
+        }
+      }
+    },
+    "/tenant/oauth/certificate": {
+      "post": {
+        "operationId": "postCertificateAccessToken",
+        "x-codegen-resource-name": "obtainAccessTokenWithCertificate",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/queryParam_tenant_id"
+          },
+          {
+            "$ref": "#/components/parameters/tenantIdInHeader"
+          },
+          {
+            "$ref": "#/components/parameters/tokenResponseModeHeader"
+          },
+          {
+            "$ref": "#/components/parameters/tfaCodeHeader"
+          },
+          {
+            "$ref": "#/components/parameters/acceptHeader"
+          }
+        ],
+        "tags": [
+          "Login tokens"
+        ],
+        "security": [],
+        "summary": "Obtain an access token with a certificate",
+        "description": "Obtain a platform access token by presenting an X.509 certificate over standard HTTPS, without requiring mutual TLS (mTLS) or MQTT. This provides a REST-native, standard-port alternative for certificate-authenticated clients that cannot use MQTT or the dedicated mTLS endpoint.\n\nThe request body contains the leaf certificate, or the full certificate chain, in PEM format. By default the returned access token is encrypted as a JWE with the public key from the presented certificate, so that only the holder of the corresponding private key can decrypt it and use it as a `Bearer` token for subsequent REST API requests. The response format can be controlled with the `X-Cumulocity-Token-Response-Mode` header. JWE mode requires the certificate to use an RSA key, because the platform encrypts the token with `RSA-OAEP-256`; clients presenting a certificate with a non-RSA key must request a plain JWT with the `X-Cumulocity-Token-Response-Mode: jwt` header.\n\nThe platform derives the identity from the certificate subject, validates the certificate material against the tenant-trusted certificate authorities (including validity dates and revocation checks where configured) and confirms that the certificate is authorized for the resolved user. The tenant context must be established from the request before validation, for example through the `tenant_id` query parameter or the `X-Cumulocity-TenantId` header. The certificate is not used as the primary tenant identification mechanism.\n\nIf the resolved certificate identity is ambiguous, for example when the same certificate common name could resolve to both a regular user and a device user, the request is rejected and no token is issued. Untrusted, expired, revoked, malformed, unsupported or unmapped certificates are rejected as well.\n\nIf two-factor authentication (TFA) is active for the resolved user, it must be passed with the request as well, because the certificate replaces the password, not the second factor. Send the current TFA code in the `X-Cumulocity-TFA-Code` header. Both the TOTP and the SMS strategy are supported, in the same way as for the OAI-Secure login. Device users are never asked for a second factor.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-pem-file": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "description": "Leaf certificate or full certificate chain in PEM format.",
+                "example": "-----BEGIN CERTIFICATE-----\nMIIDTzCCAjegAwIBAgIUB1a5GM9ubBpN5tyU7YO8D3C8zUUwDQYJKoZIhvcNAQEL\n...\nzngrsOfyKr8YYlDRy6RiAR2HQode00Hs4WoakfuTpaISZIs=\n-----END CERTIFICATE-----"
+              }
+            }
+          }
+        },
+        "x-code-samples": [
+          {
+            "lang": "cURL",
+            "source": "curl --location --request POST \"https://<TENANT_DOMAIN>/tenant/oauth/certificate\" \\\n--header \"Content-Type: application/x-pem-file\" \\\n--header \"Accept: application/json\" \\\n--header \"X-Cumulocity-TenantId: <TENANT_ID>\" \\\n--header \"X-Cumulocity-Token-Response-Mode: jwe\" \\\n--data-binary \"@client-certificate.pem\"\n"
+          },
+          {
+            "lang": "C#",
+            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/oauth/certificate\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.POST);\nrequest.AddHeader(\"Content-Type\", \"application/x-pem-file\");\nrequest.AddHeader(\"Accept\", \"application/json\");\nrequest.AddHeader(\"X-Cumulocity-TenantId\", \"<TENANT_ID>\");\nrequest.AddHeader(\"X-Cumulocity-Token-Response-Mode\", \"jwe\");\nrequest.AddParameter(\"application/x-pem-file\", File.ReadAllText(\"client-certificate.pem\"), ParameterType.RequestBody);\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
+          },
+          {
+            "lang": "Java",
+            "source": "Unirest.setTimeouts(0, 0);\nString certificate = new String(Files.readAllBytes(Paths.get(\"client-certificate.pem\")), java.nio.charset.StandardCharsets.US_ASCII);\nHttpResponse<String> response = Unirest.post(\"https://<TENANT_DOMAIN>/tenant/oauth/certificate\")\n    .header(\"Content-Type\", \"application/x-pem-file\")\n    .header(\"Accept\", \"application/json\")\n    .header(\"X-Cumulocity-TenantId\", \"<TENANT_ID>\")\n    .header(\"X-Cumulocity-Token-Response-Mode\", \"jwe\")\n    .body(certificate)\n    .asString();\nSystem.out.println(response);\n"
+          },
+          {
+            "lang": "Node.js",
+            "source": "var unirest = require(\"unirest\");\nvar fs = require(\"fs\");\nvar req = unirest(\"POST\", \"https://<TENANT_DOMAIN>/tenant/oauth/certificate\")\n    .headers({\n        \"Accept\": \"application/json\",\n        \"Content-Type\": \"application/x-pem-file\",\n        \"X-Cumulocity-TenantId\": \"<TENANT_ID>\",\n        \"X-Cumulocity-Token-Response-Mode\": \"jwe\"\n    })\n    .send(fs.readFileSync(\"client-certificate.pem\"))\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
+          },
+          {
+            "lang": "Python",
+            "source": "import requests\n\nurl = \"https://<TENANT_DOMAIN>/tenant/oauth/certificate\"\nheaders = {\n  \"Accept\": \"application/json\",\n  \"Content-Type\": \"application/x-pem-file\",\n  \"X-Cumulocity-TenantId\": \"<TENANT_ID>\",\n  \"X-Cumulocity-Token-Response-Mode\": \"jwe\"\n}\nwith open(\"client-certificate.pem\", \"rb\") as certificate:\n  data = certificate.read()\n\nresponse = requests.request(\"POST\", url, headers=headers, data=data)\nprint(response.text.encode(\"utf8\"))\n"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The access token is sent in the response. By default it is a JWE encrypted with the public key from the presented certificate.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/certificateAccessToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/unableToParseCertBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/x509CertificateValidationUnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/operationNotAuthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/jweUnsupportedCertificateKeyUnprocessableEntity"
           }
         }
       }
@@ -20538,6 +20708,31 @@
         "schema": {
           "type": "string",
           "example": "t07007007"
+        }
+      },
+      "tokenResponseModeHeader": {
+        "name": "X-Cumulocity-Token-Response-Mode",
+        "in": "header",
+        "description": "Optional. Selects the format of the returned access token. `jwe` (default) returns the access token as a JWE encrypted with the public key from the presented certificate (RSA-OAEP-256 for key encryption and AES-256-GCM for content encryption), so that only the holder of the corresponding private key can decrypt it; it requires the certificate to use an RSA key. `jwt` returns a plain, unencrypted JWT and is rejected with a 403 error unless plain JWT responses are enabled for the platform or the certificate does not use an RSA key. Unsupported values are rejected with a 400 error.\n",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "jwe",
+            "jwt"
+          ],
+          "default": "jwe",
+          "example": "jwe"
+        }
+      },
+      "tfaCodeHeader": {
+        "name": "X-Cumulocity-TFA-Code",
+        "in": "header",
+        "description": "Optional. Current TFA code of the user, if a TFA code is required to log in. For form-based OAI-Secure login, the code can be sent as the `tfa_code` field in the request body; this header is useful for requests that cannot include that field (for example when the request body is a certificate chain). If both are sent, the request body field takes precedence.\n",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "example": "123433"
         }
       },
       "alarmId": {
@@ -23034,6 +23229,21 @@
             "example": {
               "error": "security/Unauthorized",
               "message": "Invalid certificate chain!",
+              "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting"
+            }
+          }
+        }
+      },
+      "jweUnsupportedCertificateKeyUnprocessableEntity": {
+        "description": "The presented certificate does not use an RSA key, so the access token cannot be encrypted as a JWE. Request a plain JWT with the `X-Cumulocity-Token-Response-Mode: jwt` header instead.\n",
+        "content": {
+          "application/vnd.com.nsn.cumulocity.error+json": {
+            "schema": {
+              "$ref": "#/components/schemas/error"
+            },
+            "example": {
+              "error": "certificate-token/Unprocessable Entity",
+              "message": "Only RSA certificates are supported for JWE mode. Use header X-Cumulocity-Token-Response-Mode: jwt for non-RSA certificates.",
               "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting"
             }
           }
@@ -30630,6 +30840,36 @@
           "info": {
             "type": "object",
             "example": null
+          }
+        }
+      },
+      "certificateAccessToken": {
+        "description": "Access token obtained by presenting an X.509 certificate. By default the token is returned as a JWE encrypted with the public key from the presented certificate, so that only the holder of the corresponding private key can decrypt it. This requires the certificate to use an RSA key, because the platform encrypts the token with `RSA-OAEP-256`.\n\nA plain, unencrypted JWT can be requested with the `X-Cumulocity-Token-Response-Mode: jwt` header, but such requests are rejected with a 403 error unless plain JWT responses have been explicitly enabled for the platform. Clients whose certificate does not use an RSA key are exempt from that restriction, as JWE mode is not available to them: they may always request `jwt`, and must do so, because a request left in the default `jwe` mode is rejected with a 422 error.\n",
+        "type": "object",
+        "properties": {
+          "access_token": {
+            "description": "The access token generated by the Cumulocity platform. A JWE compact-serialized, encrypted JWT when `response_mode` is `jwe`, or a plain, unencrypted JWT when `response_mode` is `jwt`.",
+            "type": "string",
+            "example": "eyJhbGciOiJSU0EtT0FFUC0yNTYiLCJlbmMiOiJBMjU2R0NNIn0.g_hEwksO1Ax8Qn7HoN-BVeBoa8FXe0kpyk_XdcSmxvcM5_P296JXXtoHISr_DD_M...48V95cLzdVlCyoQ"
+          },
+          "token_type": {
+            "description": "The type of the returned token.",
+            "type": "string",
+            "example": "Bearer"
+          },
+          "response_mode": {
+            "description": "The format of the returned access token. `jwe` unless a plain JWT was requested with the `X-Cumulocity-Token-Response-Mode` header and permitted.",
+            "type": "string",
+            "enum": [
+              "jwe",
+              "jwt"
+            ],
+            "example": "jwe"
+          },
+          "expires_in": {
+            "description": "The token lifetime in seconds.",
+            "type": "integer",
+            "example": 3600
           }
         }
       },
