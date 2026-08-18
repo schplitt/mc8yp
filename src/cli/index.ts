@@ -7,6 +7,7 @@ import { getCoreOpenApiLabel, getCoreOpenApiVersion, setCoreOpenApiVersion, spec
 import { c8yMcpServer, setupMcpServer } from '../server'
 import { getCredentialsByTenantUrl, getStoredC8yAuth } from '../utils/credentials'
 import { parseAllowRule, parseNoMcp, parseRestrictionRule } from '../utils/restrictions'
+import { parseExternalMcpServers } from '../utils/external-mcp'
 import { clearActiveTenant, readActiveTenantUrl } from './active-tenant'
 import { getCliTenantContext, setCliTenantContext } from './tenant-context'
 import { getBundledOnlyCapabilities } from '../utils/capability-resolution'
@@ -37,6 +38,10 @@ const main = defineCommand({
     'no-mcp': {
       type: 'string',
       description: 'Disable MCP wrapping: pass "*" (or no value) for all services, or a contextPath. Can be repeated. Opted-out services fall back to their OpenAPI spec.',
+    },
+    'mcp-server': {
+      type: 'string',
+      description: 'External MCP server to expose as a codemode namespace, as JSON: \'{"name":"github","url":"https://api.githubcopilot.com/mcp/","token":"…"}\'. Can be repeated.',
     },
   },
   setup: () => {
@@ -87,6 +92,20 @@ const main = defineCommand({
       consola.info(`MCP wrapping disabled for: ${noMcp.all ? 'all services' : [...noMcp.contextPaths].join(', ')}`)
     }
 
+    const rawMcpServers = args['mcp-server']
+    const { servers: externalMcpServers, failedEntries: failedMcpServers } = parseExternalMcpServers(
+      (Array.isArray(rawMcpServers) ? rawMcpServers : rawMcpServers ? [rawMcpServers] : []).filter(
+        (v): v is string => typeof v === 'string' && v.length > 0,
+      ),
+    )
+    if (failedMcpServers.length > 0) {
+      throw new Error(['One or more --mcp-server flags could not be parsed:', ...failedMcpServers.map((e) => `- ${e.entry}: ${e.reason}`)].join('\n'))
+    }
+    if (externalMcpServers.length > 0) {
+      // Never log the entries themselves — they carry tokens.
+      consola.info(`External MCP namespaces: ${externalMcpServers.map((s) => `${s.name} (${s.url})`).join(', ')}`)
+    }
+
     // If a tenant was previously selected, populate the in-memory context now
     // so the first tool call is immediately ready — discovery cost is paid here
     // at startup, not deferred to the first tool call.
@@ -125,6 +144,7 @@ const main = defineCommand({
       restrictions,
       allowRules: parsedAllowRules,
       noMcp,
+      externalMcpServers,
       // No active tenant: expose every bundled spec so codemode discovery
       // stays useful as a reference. Live API calls throw a clear
       // missing-auth error so the agent cannot misuse this state.

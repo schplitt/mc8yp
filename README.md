@@ -31,6 +31,40 @@ The same discovery run also picks up MCP servers declared via `exposeMcpServers`
 
 When a new service is subscribed mid-session, CLI agents can call the `status` tool with `refresh: true` to bust the cache without waiting for the 30-minute window. Server mode does not yet expose an in-protocol refresh trigger — use the `POST /refresh-apis` HTTP route from ops/CI scripts that sit outside the MCP protocol.
 
+### External MCP servers (per connection)
+
+Besides the MCP servers a tenant exposes, a connection can bring its own. Pass one `mc8yp-mcp-server` header per server (or a JSON array in a single header); each becomes a codemode namespace for that connection only:
+
+```http
+mc8yp-mcp-server: {"name":"github","url":"https://api.githubcopilot.com/mcp/","token":"ghp_…"}
+mc8yp-mcp-server: {"name":"linear","url":"https://mcp.linear.app/mcp"}
+```
+
+| Field         | Required | Meaning                                                                                                                                                                     |
+| ------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`        | yes      | The sandbox namespace (`github.<tool>`). Must be a valid JS identifier and must not collide with a reserved namespace (`codemode`, `docs`, `sandbox`, `c8y`, `cumulocity`). |
+| `url`         | yes      | Absolute `http`/`https` MCP endpoint, used as given.                                                                                                                        |
+| `token`       | no       | Sent as `Authorization: Bearer <token>`.                                                                                                                                    |
+| `headers`     | no       | Extra request headers, applied after `token` so an explicit `authorization` entry replaces the bearer shorthand.                                                            |
+| `description` | no       | Shown in the `codemode.describe()` overview. Defaults to the server's own `instructions`.                                                                                   |
+
+The CLI takes the same JSON via a repeatable flag:
+
+```sh
+mc8yp-cli --mcp-server '{"name":"github","url":"https://api.githubcopilot.com/mcp/","token":"ghp_…"}'
+```
+
+Behaviour worth knowing:
+
+- **Config is header/flag-only.** There is deliberately no `?mcpServer=` query parameter even though the other connection options have one — the value can carry a bearer token, and query strings end up in access logs and proxy traces.
+- **Tenant credentials are never forwarded.** An external server only ever receives the credentials in its own entry, and these namespaces work even when no tenant is active (CLI before `set-active-tenant`).
+- **The agent is told which namespaces are external.** `codemode.describe()` labels them `EXTERNAL MCP server at <url> — configured for this connection, NOT part of this tenant`, and the per-method describe repeats it. Whether a tenant namespace is backed by OpenAPI or MCP stays hidden (an implementation detail the agent cannot act on); tenant-vs-third-party is a data boundary it must be able to report on.
+- **Tool lists are fetched on first use and cached per MCP session**, then dropped 15 minutes after last use or immediately when the client closes its session cleanly. Rotating a token or changing a URL mid-session re-handshakes.
+- **A malformed entry fails the request** (HTTP 400 in server mode, a startup error in CLI) rather than silently leaving the agent without a namespace it was supposed to have. A well-formed but _unreachable_ server is reported in the `codemode.describe()` overview and retried on the next call.
+- **The tenant wins name collisions.** An external entry whose `name` matches a tenant namespace is skipped, so a header cannot shadow a real service.
+- **Egress is unrestricted by design.** The URL is used as given — any host, no allowlist, no private-range filtering. The header is part of the connection's trusted configuration (the sandbox cannot set it), but the consequence is that whoever can set headers on the deployed microservice can make it issue requests to any address it can reach, including tenant-internal ones. Front the deployment accordingly.
+- Path-based restriction/allow rules do **not** apply to these namespaces, same as for tenant-discovered MCP tools (see [Access policy](#access-policy)).
+
 ## Two ways to run it
 
 - **Microservice mode** (recommended for production) — deploy inside Cumulocity IoT, expose `/mcp`, integrate with [AI Agent Manager](https://cumulocity.com/docs/ai/aim-introduction/). Auth comes from the request and the service user.
@@ -418,7 +452,7 @@ mc8yp-allow: GET:/measurement/**
 
 When a live call is blocked by connection policy, the codemode run returns explanatory text, no request is sent to Cumulocity, and retrying through the same connection will not help. Blocked operations are additionally omitted from `codemode.search`/`describe` and the docs index, so the agent never plans around a method it cannot call.
 
-> **Note:** path-based restriction/allow rules apply to OpenAPI-derived namespaces only. Wrapped MCP tools have no METHOD:path identity and are not covered by these rules — use the `noMcp` opt-out to disable MCP wrapping for a connection if that matters for your deployment.
+> **Note:** path-based restriction/allow rules apply to OpenAPI-derived namespaces only. Wrapped MCP tools have no METHOD:path identity and are not covered by these rules — use the `noMcp` opt-out to disable MCP wrapping for a connection if that matters for your deployment. The same gap applies to [external MCP servers](#external-mcp-servers-per-connection); there the lever is simply not configuring the server for that connection.
 
 ---
 

@@ -83,7 +83,19 @@ export function getMethodIndex(cacheKey: object, items: () => readonly Searchabl
   if (cached)
     return cached
 
-  const list = items()
+  const index = buildMethodIndex(items())
+  indexCache.set(cacheKey, index)
+  return index
+}
+
+/**
+ * Build an index without caching it. Used for connection-scoped method sets
+ * (external MCP namespaces): those cannot enter the per-tenant cache, and
+ * indexing a few hundred short documents costs single-digit milliseconds
+ * against a codemode call measured in seconds.
+ * @param list
+ */
+export function buildMethodIndex(list: readonly SearchableMethod[]): MethodIndex {
   const mini = new MiniSearch({
     idField: 'target',
     fields: ['method', 'apiPath', 'summary', 'namespace'],
@@ -91,9 +103,7 @@ export function getMethodIndex(cacheKey: object, items: () => readonly Searchabl
   })
   mini.addAll([...list])
 
-  const index: MethodIndex = { mini, methods: new Map(list.map((m) => [m.target, m])) }
-  indexCache.set(cacheKey, index)
-  return index
+  return { mini, methods: new Map(list.map((m) => [m.target, m])) }
 }
 
 /**

@@ -19,7 +19,7 @@ export type { SandboxAdapter } from './types'
 //     guarantee: sessions that go quiet (including ones whose client never
 //     sends a clean DELETE) are dropped 15 minutes after their last call.
 //   • clean close — the transport's session manager wrapper
-//     (./session-eviction.ts) evicts immediately on client DELETE /mcp.
+//     (../session-eviction.ts) evicts immediately on client DELETE /mcp.
 //   • process exit — disposeAllSandboxSessions() clears everything.
 //
 // Two type layers, on purpose:

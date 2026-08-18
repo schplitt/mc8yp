@@ -72,7 +72,7 @@ describe('buildNamespaces with MCP servers', () => {
   })
 
   it('falls back to the OpenAPI spec when the service is opted out', () => {
-    const namespaces = buildNamespaces(resolved(), [], [], { all: false, contextPaths: new Set(['asset-svc']) })
+    const namespaces = buildNamespaces(resolved(), { noMcp: { all: false, contextPaths: new Set(['asset-svc']) } })
     const assetNs = namespaces.find((ns) => ns.name === 'asset_svc')!
     expect(assetNs.kind).toBe('openapi')
     if (assetNs.kind === 'openapi')
@@ -80,13 +80,13 @@ describe('buildNamespaces with MCP servers', () => {
   })
 
   it('blanket opt-out disables every MCP namespace', () => {
-    const namespaces = buildNamespaces(resolved(), [], [], { all: true, contextPaths: new Set() })
+    const namespaces = buildNamespaces(resolved(), { noMcp: { all: true, contextPaths: new Set() } })
     expect(namespaces.every((ns) => ns.kind === 'openapi')).toBe(true)
   })
 
   it('drops the service entirely when opted out with no spec fallback', () => {
     const noSpec: TenantCapabilities = { core: CORE_SPEC, specs: {}, mcpServers: { 'asset-svc': ASSET_MCP } }
-    const namespaces = buildNamespaces(noSpec, [], [], { all: true, contextPaths: new Set() })
+    const namespaces = buildNamespaces(noSpec, { noMcp: { all: true, contextPaths: new Set() } })
     expect(namespaces.map((ns) => ns.name)).toEqual(['c8y'])
   })
 

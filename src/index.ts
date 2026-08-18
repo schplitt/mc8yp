@@ -3,7 +3,7 @@ import consola from 'consola'
 import { getQuery, H3, HTTPError, serve } from 'h3'
 import openApiSpec from '../openapi.json' with { type: 'json' }
 import { c8yMcpServer, setupMcpServer } from './server'
-import { createSandboxEvictingInfoSessionManager } from './codemode/sandbox/session-eviction'
+import { createSessionEvictingInfoSessionManager } from './codemode/session-eviction'
 import process from 'node:process'
 import {
   ALLOW_HEADER,
@@ -19,6 +19,11 @@ import {
   parseNoMcp,
   parseRestrictionRule,
 } from './utils/restrictions'
+import {
+  EXTERNAL_MCP_HEADER,
+  collectServerExternalMcpSources,
+  parseExternalMcpServers,
+} from './utils/external-mcp'
 import { BasicAuth, Client, MicroserviceClientRequestAuth } from '@c8y/client'
 import { getCachedDiscovery, refreshCapabilities } from './utils/capability-discovery'
 import { resolveCapabilities } from './utils/capability-resolution'
@@ -35,10 +40,11 @@ setupMcpServer('server')
 const transport = new HttpTransport(c8yMcpServer, {
   path: '/mcp',
   disableSse: true,
-  // Evict a session's sandbox the moment the client closes cleanly (DELETE);
-  // the 15-min idle TTL backstops sessions that never send one. `streams`
-  // defaults to the transport's InMemoryStreamSessionManager.
-  sessionManager: { info: createSandboxEvictingInfoSessionManager() },
+  // Evict a session's sandbox and cached external MCP tool lists the moment the
+  // client closes cleanly (DELETE); the 15-min idle TTLs backstop sessions that
+  // never send one. `streams` defaults to the transport's
+  // InMemoryStreamSessionManager.
+  sessionManager: { info: createSessionEvictingInfoSessionManager() },
 })
 
 const C8Y_BASEURL = process.env.C8Y_BASEURL!
@@ -109,6 +115,21 @@ const app = new H3().all('/mcp', async (event) => {
   const noMcp = parseNoMcp(collectServerNoMcpSources(query, event.req.headers))
   const enableSandbox = parseEnableSandbox(collectServerEnableSandboxSources(query, event.req.headers))
 
+  // Connection-supplied external MCP servers. Fail the request rather than
+  // dropping a bad entry: the agent would otherwise be missing a namespace the
+  // operator believes it has, with nothing pointing at the typo.
+  const { servers: externalMcpServers, failedEntries: failedExternalMcp } = parseExternalMcpServers(
+    collectServerExternalMcpSources(event.req.headers),
+  )
+  if (failedExternalMcp.length > 0) {
+    throw new HTTPError({
+      status: 400,
+      statusText: 'Invalid external MCP server configuration',
+      message: `One or more ${EXTERNAL_MCP_HEADER} header entries could not be parsed. Each entry is a JSON object {"name":"…","url":"https://…","token":"…"} (or a JSON array of them).`,
+      data: { failedEntries: failedExternalMcp },
+    })
+  }
+
   return transport.respond(event.req, {
     env: 'server' as const,
     // execute uses authorizationHeader to forward the user's auth to
@@ -122,6 +143,7 @@ const app = new H3().all('/mcp', async (event) => {
     allowRules: parsedAllowRules,
     noMcp,
     enableSandbox,
+    externalMcpServers,
     specs,
   })
 })

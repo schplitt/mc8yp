@@ -50,13 +50,13 @@ describe('buildNamespaces', () => {
 
   it('omits policy-blocked operations from namespaces', () => {
     const { parsedRules } = parseRestrictionRule(['DELETE:/alarm/**'])
-    const namespaces = buildNamespaces(resolved(), parsedRules)
+    const namespaces = buildNamespaces(resolved(), { restrictions: parsedRules })
     expect(namespaces[0]!.operations.map((o) => o.name)).toEqual(['getAlarmCollectionResource'])
   })
 
   it('honours allow lists', () => {
     const allow = parseRestrictionRule(['GET:/service/dtm/**'])
-    const namespaces = buildNamespaces(resolved(), [], allow.parsedRules)
+    const namespaces = buildNamespaces(resolved(), { allowRules: allow.parsedRules })
     expect(namespaces.find((ns) => ns.name === 'c8y')!.operations).toHaveLength(0)
     expect(namespaces.find((ns) => ns.name === 'dtm')!.operations).toHaveLength(1)
   })

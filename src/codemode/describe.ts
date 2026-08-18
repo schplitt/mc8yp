@@ -4,6 +4,7 @@ import { SANDBOX_INTERFACE_TS } from './sandbox/types'
 import type { MethodIndex } from './method-search'
 import type { CodemodeNamespace, McpNamespace, McpNamespaceTool, OpenApiNamespace } from './namespaces'
 import type { DerivedOperation } from './derive-operations'
+import type { ExternalMcpFailure } from './external-mcp-session'
 
 // ─────────────────────────────────────────────────────────────────────────
 // codemode.describe — on-demand documentation rendering.
@@ -39,7 +40,11 @@ function truncateLine(text: string | undefined): string | undefined {
 // a method count like every namespace, without hardcoding a drifting number.
 const SANDBOX_METHOD_COUNT = (SANDBOX_INTERFACE_TS.match(/^ {2}\w+:/gm) ?? []).length
 
-function renderOverview(namespaces: readonly CodemodeNamespace[], sandboxEnabled: boolean): string {
+function renderOverview(
+  namespaces: readonly CodemodeNamespace[],
+  sandboxEnabled: boolean,
+  externalFailures: readonly ExternalMcpFailure[],
+): string {
   const lines = ['Available namespaces on this tenant (do not assume capabilities from prior knowledge — search each relevant domain):']
   for (const ns of namespaces) {
     // One flattened, truncated line of the service's own description —
@@ -51,7 +56,14 @@ function renderOverview(namespaces: readonly CodemodeNamespace[], sandboxEnabled
       lines.push(`- ${ns.name}${info?.title ? ` — ${info.title}` : ''} (${ns.operations.length} methods)${short ? `: ${short}` : ''}`)
     } else {
       const short = truncateLine(ns.server.description)
-      lines.push(`- ${ns.name} — ${ns.server.mcpName} (${ns.tools.length} methods)${short ? `: ${short}` : ''}`)
+      // Provenance IS surfaced even though the backing protocol is not: an
+      // external server is a different trust and data boundary — it is not part
+      // of the tenant and calls to it leave Cumulocity — and the agent needs
+      // that to report accurately where data came from or went.
+      const label = ns.external
+        ? `EXTERNAL MCP server at ${ns.external.url} — configured for this connection, NOT part of this tenant`
+        : ns.server.mcpName
+      lines.push(`- ${ns.name} — ${label} (${ns.tools.length} methods)${short ? `: ${short}` : ''}`)
     }
   }
   // Listed as a peer of the API namespaces, same bullet format, so the agent
@@ -59,6 +71,14 @@ function renderOverview(namespaces: readonly CodemodeNamespace[], sandboxEnabled
   // describe("sandbox") rather than by search (they are not spec-derived).
   if (sandboxEnabled) {
     lines.push(`- sandbox — in-memory shell + virtual filesystem (${SANDBOX_METHOD_COUNT} methods): jq/awk/grep/sed/sort/sqlite over data you fetched; no network, no host FS. codemode.describe("sandbox") for its methods.`)
+  }
+  // Unreachable external servers are reported, not silently absent: unlike a
+  // service that simply is not installed, these were explicitly configured for
+  // this connection, so their absence is a fault worth telling the user about.
+  if (externalFailures.length > 0) {
+    lines.push('', 'Configured but unreachable right now (report this to the user; retrying may work if it is transient):')
+    for (const failure of externalFailures)
+      lines.push(`- ${failure.name} (${failure.url}): ${failure.reason}`)
   }
   lines.push(
     '',
@@ -111,6 +131,11 @@ function renderMcpTool(namespace: McpNamespace, tool: McpNamespaceTool): string 
   })
 
   const lines = [`${namespace.name}.${tool.name}`]
+  // Repeated at method level, not just in the overview: the agent may reach a
+  // method through search without ever reading the overview, and "this call
+  // leaves the tenant" must not depend on that.
+  if (namespace.external)
+    lines.push('', `External MCP server (${namespace.external.url}) — configured for this MCP connection, not part of this tenant. Calls go to that host with its own credentials; tenant credentials are never sent.`)
   if (tool.description)
     lines.push('', tool.description)
 
@@ -146,6 +171,20 @@ function renderSearchRedirect(target: string, namespaces: readonly CodemodeNames
 }
 
 /**
+ * Run-scoped extras the overview reports alongside the namespace list.
+ */
+export interface DescribeOptions {
+  /**
+   * Whether the opt-in `sandbox` surface is exposed this run.
+   */
+  sandboxEnabled?: boolean
+  /**
+   * Connection-supplied MCP servers that could not be reached this run.
+   */
+  externalFailures?: readonly ExternalMcpFailure[]
+}
+
+/**
  * Resolve a describe target: nothing (short overview of namespaces), a
  * `namespace.method` pair, or a bare method name searched across all
  * namespaces. Namespace-only targets are intentionally rejected — a full
@@ -153,12 +192,18 @@ function renderSearchRedirect(target: string, namespaces: readonly CodemodeNames
  * @param namespaces
  * @param methodIndex
  * @param target
- * @param sandboxEnabled - whether the opt-in `sandbox` surface is exposed this run.
+ * @param options Run-scoped extras for the overview.
  */
-export function describeTarget(namespaces: readonly CodemodeNamespace[], methodIndex: MethodIndex, target?: string, sandboxEnabled = false): DescribeOutput {
+export function describeTarget(
+  namespaces: readonly CodemodeNamespace[],
+  methodIndex: MethodIndex,
+  target?: string,
+  options: DescribeOptions = {},
+): DescribeOutput {
+  const { sandboxEnabled = false, externalFailures = [] } = options
   const trimmed = target?.trim() ?? ''
   if (trimmed === '')
-    return { target: '', kind: 'overview', content: renderOverview(namespaces, sandboxEnabled) }
+    return { target: '', kind: 'overview', content: renderOverview(namespaces, sandboxEnabled, externalFailures) }
 
   const [maybeNamespace, maybeMethod] = trimmed.includes('.')
     ? [trimmed.slice(0, trimmed.indexOf('.')), trimmed.slice(trimmed.indexOf('.') + 1)]

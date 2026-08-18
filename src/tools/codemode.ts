@@ -86,10 +86,11 @@ declare const docs: {
 }
 
 // API namespaces: \`c8y\` (Cumulocity core — always present) plus one global
-// per microservice available on the current tenant (e.g. \`dtm\`), each with
-// one typed method per operation. If a method seems missing, search
-// with different wording; if it truly does not exist, say so instead of
-// improvising:
+// per microservice available on the current tenant (e.g. \`dtm\`), plus any
+// external MCP server configured for this connection — each with one typed
+// method per operation. \`codemode.describe()\` lists what this connection
+// actually has. If a method seems missing, search with different wording; if
+// it truly does not exist, say so instead of improvising:
 //   await c8y.getManagedObjectCollectionResource({ pageSize: 5 })
 \`\`\`
 
