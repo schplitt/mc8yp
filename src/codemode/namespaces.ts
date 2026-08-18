@@ -8,10 +8,12 @@ import type { SearchableMethod } from './method-search'
 import type { DiscoveredMcpServer } from '../utils/capability-discovery'
 import type { TenantCapabilities, Spec } from '../utils/capability-resolution'
 import type { AllowRule, NoMcpConfig, RestrictionRule } from '../utils/restrictions'
+import type { ExternalMcpServer } from './external-mcp-session'
+import type { ExternalMcpServerConfig } from '../utils/external-mcp'
 
 // ─────────────────────────────────────────────────────────────────────────
-// Namespace assembly — the per-connection view over derived operations and
-// discovered MCP servers.
+// Namespace assembly — the per-connection view over derived operations,
+// discovered MCP servers, and connection-supplied external MCP servers.
 //
 // Derivation (deriveOperations) is cached and policy-independent; THIS is the
 // layer that applies the connection's restriction/allow rules and the
@@ -20,6 +22,12 @@ import type { AllowRule, NoMcpConfig, RestrictionRule } from '../utils/restricti
 // that exposes an MCP server is wrapped as an MCP namespace and its OpenAPI
 // spec is skipped, unless the connection opted that service out — then the
 // spec is the fallback.
+//
+// External MCP servers (from the connection's own config, not from the tenant)
+// are appended last and cannot displace a tenant namespace: on a name
+// collision the external entry is skipped, so a header can never shadow a real
+// service. `noMcp` does not apply to them — it selects between a service's MCP
+// and OpenAPI views, and an external server has no spec view to fall back to.
 //
 // Path-based restriction/allow rules do NOT apply to MCP tools — they have
 // no METHOD:path identity. This is a documented gap, not an oversight.
@@ -82,6 +90,12 @@ export interface McpNamespace extends NamespaceBase {
   kind: 'mcp'
   server: DiscoveredMcpServer
   tools: McpNamespaceTool[]
+  /**
+   * Set when the namespace comes from the connection's own config rather than
+   * tenant discovery. Dispatch reads it to call the absolute URL with the
+   * entry's own credentials instead of the tenant transport.
+   */
+  external?: ExternalMcpServerConfig
 }
 
 export type CodemodeNamespace = OpenApiNamespace | McpNamespace
@@ -108,22 +122,39 @@ function buildMcpTools(server: DiscoveredMcpServer): McpNamespaceTool[] {
 }
 
 /**
- * Build the per-connection namespace list: core as `c8y` plus one namespace
- * per available service. A service exposing an MCP server becomes an MCP
- * namespace (its spec is skipped) unless opted out via `noMcp` — then its
- * spec is used as the fallback. Operations blocked by the connection policy
- * are omitted from OpenAPI namespaces; path templates are matched as-is.
+ * Per-connection inputs to namespace assembly. An options object rather than
+ * positional parameters because the connection view is assembled from four
+ * independent knobs and call sites routinely set only one of them.
+ */
+export interface BuildNamespacesOptions {
+  restrictions?: readonly RestrictionRule[]
+  allowRules?: readonly AllowRule[]
+  /**
+   * Per-connection MCP-wrapping opt-out (tenant services only).
+   */
+  noMcp?: NoMcpConfig
+  /**
+   * Connection-supplied MCP servers with tool lists already resolved.
+   */
+  externalServers?: readonly ExternalMcpServer[]
+}
+
+/**
+ * Build the per-connection namespace list: core as `c8y`, one namespace per
+ * available service, then one per connection-supplied external MCP server. A
+ * service exposing an MCP server becomes an MCP namespace (its spec is skipped)
+ * unless opted out via `noMcp` — then its spec is used as the fallback.
+ * Operations blocked by the connection policy are omitted from OpenAPI
+ * namespaces; path templates are matched as-is.
  * @param resolved
- * @param restrictions
- * @param allowRules
- * @param noMcp Per-connection MCP-wrapping opt-out.
+ * @param options Per-connection policy, opt-outs, and external servers.
  */
 export function buildNamespaces(
   resolved: TenantCapabilities,
-  restrictions: readonly RestrictionRule[] = [],
-  allowRules: readonly AllowRule[] = [],
-  noMcp?: NoMcpConfig,
+  options: BuildNamespacesOptions = {},
 ): CodemodeNamespace[] {
+  const { restrictions = [], allowRules = [], noMcp, externalServers = [] } = options
+
   const visibleOperations = (spec: Spec): DerivedOperation[] =>
     deriveOperations(spec).filter((op) => !evaluateAccessPolicy(restrictions, allowRules, op.method, op.path).blocked)
 
@@ -160,6 +191,33 @@ export function buildNamespaces(
       namespaces.push({ kind: 'openapi', name, specKey: contextPath, spec, operations: visibleOperations(spec) })
     }
     // MCP opted out and no spec fallback → the service gets no namespace.
+  }
+
+  // Connection-supplied servers last: the tenant's own surface wins any name
+  // collision, so a header cannot shadow a real service namespace.
+  for (const external of externalServers) {
+    const name = external.config.name
+    if (RESERVED_NAMESPACES.has(name) || used.has(name)) {
+      consola.warn(
+        `[codemode] external MCP server "${name}" (${external.config.url}) maps to a namespace that is `
+        + `${RESERVED_NAMESPACES.has(name) ? 'reserved' : 'already used by this tenant'} — skipping this server.`,
+      )
+      continue
+    }
+    used.add(name)
+    // Shaped as a DiscoveredMcpServer so describe/search treat external and
+    // tenant MCP namespaces identically. sendAuthentication is always false:
+    // tenant auth must never reach a connection-supplied host.
+    const server: DiscoveredMcpServer = {
+      contextPath: name,
+      appLabel: name,
+      mcpName: name,
+      description: external.config.description ?? external.instructions,
+      url: external.config.url,
+      sendAuthentication: false,
+      tools: external.tools,
+    }
+    namespaces.push({ kind: 'mcp', name, specKey: name, external: external.config, server, tools: buildMcpTools(server) })
   }
 
   return namespaces

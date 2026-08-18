@@ -18,9 +18,19 @@ export function createCodeModeGuidePrompt() {
     const restrictions = c8yMcpServer.ctx.custom?.restrictions ?? []
     const allowRules = c8yMcpServer.ctx.custom?.allowRules ?? []
     const resolvedSpecs = c8yMcpServer.ctx.custom?.specs
-    const namespaceNames = resolvedSpecs
-      ? buildNamespaces(resolvedSpecs, restrictions, allowRules).map((ns) => ns.name)
-      : ['c8y']
+    const namespaceNames = [
+      ...resolvedSpecs
+        ? buildNamespaces(resolvedSpecs, { restrictions, allowRules }).map((ns) => ns.name)
+        : ['c8y'],
+      // External namespaces are listed from their config: their names are known
+      // without the tools/list round-trip that namespace assembly would need,
+      // and the prompt handler must stay synchronous.
+      ...(c8yMcpServer.ctx.custom?.externalMcpServers ?? []).map((s) => s.name),
+    ]
+    const externalServers = c8yMcpServer.ctx.custom?.externalMcpServers ?? []
+    const externalLine = externalServers.length > 0
+      ? `\n- ${externalServers.map((s) => `\`${s.name}\``).join(', ')} ${externalServers.length === 1 ? 'is an' : 'are'} external MCP server${externalServers.length === 1 ? '' : 's'} configured for THIS connection — not part of the tenant. Same typed-method surface; describe and search work identically.`
+      : ''
     const policyLines = [
       ...restrictions.map((rule) => `- deny: \`${rule.source}\``),
       ...allowRules.map((rule) => `- allow: \`${rule.source}\``),
@@ -73,7 +83,7 @@ declare const docs: {
 API namespaces currently visible: ${namespaceNames.map((n) => `\`${n}\``).join(', ')}.
 
 - \`c8y\` is the Cumulocity core REST surface (inventory, alarms, events, measurements, identity, device control, users, tenants, audit). Always present.
-- Each additional namespace is a microservice available on the current tenant (e.g. \`dtm\`). A namespace exists only when the service is actually reachable.
+- Each additional namespace is a microservice available on the current tenant (e.g. \`dtm\`). A namespace exists only when the service is actually reachable.${externalLine}
 - Every namespace has one typed method per API operation. The namespaces are the complete surface — there is no raw-request escape hatch. If a method seems missing, re-search with different wording; if it truly does not exist, report that instead of improvising.
 - Method inputs are a single flat object: path/query/header parameters as top-level keys, the request payload under \`body\`.
 

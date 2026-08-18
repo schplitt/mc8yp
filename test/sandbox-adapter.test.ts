@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createJustBashAdapter } from '../src/codemode/sandbox/just-bash-adapter'
 import { buildSandboxApi, disposeAllSandboxSessions, evictSandboxSession, getSandboxSessionCount } from '../src/codemode/sandbox'
-import { createSandboxEvictingInfoSessionManager } from '../src/codemode/sandbox/session-eviction'
+import { createSessionEvictingInfoSessionManager } from '../src/codemode/session-eviction'
 
 type SandboxApi = Record<string, (...args: unknown[]) => Promise<any>>
 
@@ -133,7 +133,7 @@ describe('sandbox session store', () => {
   it('evicts the sandbox on clean session close (transport DELETE → info.delete)', async () => {
     // The HTTP transport calls sessionManager.info.delete(id) on a clean
     // client DELETE. Drive that method directly to prove the hook fires.
-    const manager = createSandboxEvictingInfoSessionManager()
+    const manager = createSessionEvictingInfoSessionManager()
     const api = buildSandboxApi('sess-del') as SandboxApi
     await api.writeFile('/x.txt', '1')
     expect(getSandboxSessionCount()).toBe(1)

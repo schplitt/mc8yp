@@ -222,6 +222,52 @@ describe('e2e: MCP servers wrapped as codemode namespaces', () => {
     expect(fallback).toContain('asset_svc — Asset REST API (1 methods)')
     expect(fallback).not.toContain('asset-mcp')
 
+    // Connection-supplied external MCP server: same downstream, but reached by
+    // absolute URL with its own token instead of through the tenant.
+    context = contextFor(downstream, tools, {
+      externalMcpServers: [{
+        name: 'ext_assets',
+        url: `${downstream.url}/mcp`,
+        token: 'external-token',
+        description: 'External asset MCP.',
+      }],
+    })
+    const external = await runCodemode(client, `async () => {
+      const overview = (await codemode.describe()).content
+      const method = await codemode.describe('ext_assets.get_assets')
+      const { results } = await codemode.search('assets hierarchy')
+      const called = await ext_assets.get_assets({ query: 'from-external' })
+      return {
+        listed: overview.includes('EXTERNAL MCP server at ' + ${JSON.stringify(`${downstream.url}/mcp`)} + ' — configured for this connection, NOT part of this tenant (2 methods): External asset MCP.'),
+        hasTypes: method.content.includes('GetAssetsInput'),
+        methodFlagsExternal: method.content.includes('not part of this tenant'),
+        searchable: results.some((r) => r.target === 'ext_assets.get_assets'),
+        tenantStillThere: results.some((r) => r.target === 'asset_svc.get_assets'),
+        name: called.assets[0].name,
+        query: called.query,
+      }
+    }`)
+    expect(external).toContain('listed: true')
+    expect(external).toContain('hasTypes: true')
+    expect(external).toContain('methodFlagsExternal: true')
+    expect(external).toContain('searchable: true')
+    expect(external).toContain('tenantStillThere: true')
+    expect(external).toContain('name: Borkum')
+    expect(external).toContain('query: from-external')
+
+    // The external entry's own credential was used — never the tenant's.
+    expect(downstream.lastAuthorization).toBe('Bearer external-token')
+
+    // A misconfigured external server is reported in the overview rather than
+    // silently missing, and does not break the rest of the run.
+    context = contextFor(downstream, tools, {
+      externalMcpServers: [{ name: 'broken', url: 'http://127.0.0.1:1/mcp' }],
+    })
+    const unreachable = await runCodemode(client, 'async () => (await codemode.describe()).content')
+    expect(unreachable).toContain('Configured but unreachable right now')
+    expect(unreachable).toContain('broken (http://127.0.0.1:1/mcp)')
+    expect(unreachable).toContain('asset_svc')
+
     await client.close()
   }, 60_000)
 })

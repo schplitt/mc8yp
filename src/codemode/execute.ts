@@ -7,13 +7,16 @@ import type { HostModuleObject, Sandbox } from '@iso4/sandbox'
 import { toRequest } from './derive-operations'
 import { describeTarget } from './describe'
 import { getDocsIndex, readDoc, searchDocs } from './docs-index'
-import { getMethodIndex, searchMethods } from './method-search'
+import { buildMethodIndex, getMethodIndex, searchMethods } from './method-search'
 import type { MethodIndex, SearchableMethod } from './method-search'
 import { buildNamespaces, toSearchableMethods } from './namespaces'
 import type { CodemodeNamespace, McpNamespace, OpenApiNamespace } from './namespaces'
 import { buildSandboxApi, disposeAllSandboxSessions } from './sandbox'
+import { CLI_EXTERNAL_MCP_SESSION, disposeAllExternalMcpSessions, resolveExternalMcpServers } from './external-mcp-session'
+import type { ExternalMcpFailure } from './external-mcp-session'
 import type { DocsSearchOptions } from './docs-index'
 import { createC8yAuthHeaders, resolveC8yAuth } from '../utils/client'
+import { createExternalMcpFetch } from '../utils/external-mcp'
 import { McpHttpClient } from '../utils/mcp-client'
 import { c8yMcpServer } from '../server-instance'
 import { evaluateAccessPolicy } from '../utils/restriction-matcher'
@@ -58,6 +61,7 @@ export async function disposeSandbox(): Promise<void> {
 // Best-effort shutdown for CLI stdio mode where there is no explicit teardown.
 process.once('exit', () => {
   disposeAllSandboxSessions()
+  disposeAllExternalMcpSessions()
   if (sandboxPromise) {
     sandboxPromise.then((s) => s.dispose()).catch(() => undefined)
   }
@@ -292,7 +296,9 @@ function buildAgentModule(functionCode: string): string {
 }
 
 /**
- * A live-call dispatcher; degraded to throwing stubs when no tenant is active.
+ * A live-call dispatcher. Tenant-bound calls throw the missing-auth message
+ * when no tenant is active; external MCP namespaces still dispatch, since they
+ * carry their own credentials and never touch the tenant.
  */
 interface LiveCalls {
   operation: (namespace: OpenApiNamespace, opName: string, input: unknown) => Promise<unknown>
@@ -303,26 +309,43 @@ interface LiveCalls {
   dispose: () => Promise<void>
 }
 
-function createLiveCalls(safeFetch: SafeFetchGlobal, tenantUrl: string, authHeaders: Record<string, string>): LiveCalls {
+/**
+ * Tenant-bound transport, or the reason there is none (CLI before
+ * set-active-tenant, server request without usable auth).
+ */
+type TenantTransport
+  = | { safeFetch: SafeFetchGlobal, tenantUrl: string, authHeaders: Record<string, string> }
+    | { error: string }
+
+function createLiveCalls(tenant: TenantTransport): LiveCalls {
   // One MCP session per namespace per run, opened lazily on first use and
-  // closed after the run — auth is the end user's, so sessions must not
-  // outlive the connection context they were created for.
+  // closed after the run — auth is the end user's (or the external entry's), so
+  // sessions must not outlive the connection context they were created for.
   const mcpClients = new Map<string, McpHttpClient>()
-  const base = tenantUrl.endsWith('/') ? tenantUrl : `${tenantUrl}/`
 
   const mcpClientFor = (namespace: McpNamespace): McpHttpClient => {
     let client = mcpClients.get(namespace.name)
     if (!client) {
-      client = new McpHttpClient({
-        url: namespace.server.url,
-        fetch: (path, init) => fetch(new URL(path.replace(/^\//, ''), base), {
-          ...init,
-          headers: {
-            ...(init.headers as Record<string, string> | undefined),
-            ...(namespace.server.sendAuthentication ? authHeaders : {}),
-          },
-        }),
-      })
+      // External servers are tenant-independent: absolute URL, their own
+      // credentials, and they work even when no tenant is active.
+      if (namespace.external) {
+        client = new McpHttpClient({ url: namespace.external.url, fetch: createExternalMcpFetch(namespace.external) })
+      } else {
+        if ('error' in tenant)
+          throw new Error(tenant.error)
+        const { tenantUrl, authHeaders } = tenant
+        const base = tenantUrl.endsWith('/') ? tenantUrl : `${tenantUrl}/`
+        client = new McpHttpClient({
+          url: namespace.server.url,
+          fetch: (path, init) => fetch(new URL(path.replace(/^\//, ''), base), {
+            ...init,
+            headers: {
+              ...(init.headers as Record<string, string> | undefined),
+              ...(namespace.server.sendAuthentication ? authHeaders : {}),
+            },
+          }),
+        })
+      }
       mcpClients.set(namespace.name, client)
     }
     return client
@@ -330,8 +353,10 @@ function createLiveCalls(safeFetch: SafeFetchGlobal, tenantUrl: string, authHead
 
   return {
     operation: async (namespace, opName, input) => {
+      if ('error' in tenant)
+        throw new Error(tenant.error)
       const op = namespace.operations.find((o) => o.name === opName)!
-      return performRequest(safeFetch, tenantUrl, toRequest(op, input))
+      return performRequest(tenant.safeFetch, tenant.tenantUrl, toRequest(op, input))
     },
     mcpCall: async (namespace, toolName, args) => {
       return mcpClientFor(namespace).callTool(toolName, args)
@@ -343,19 +368,13 @@ function createLiveCalls(safeFetch: SafeFetchGlobal, tenantUrl: string, authHead
   }
 }
 
-function createUnauthenticatedCalls(message: string): LiveCalls {
-  const fail = async (): Promise<never> => {
-    throw new Error(message)
-  }
-  return { operation: fail, mcpCall: fail, dispose: async () => {} }
-}
-
 function buildApiModule(
   namespaces: readonly CodemodeNamespace[],
   methodIndex: MethodIndex,
   docsIndex: ReturnType<typeof getDocsIndex>,
   live: LiveCalls,
   sandbox: HostModuleObject | undefined,
+  externalFailures: readonly ExternalMcpFailure[],
 ): HostModuleObject {
   const visibleTargets = new Set(namespaces.flatMap((ns) => ns.kind === 'openapi'
     ? ns.operations.map((op) => `${ns.name}.${op.name}`)
@@ -386,9 +405,9 @@ function buildApiModule(
             throw new TypeError('codemode.describe(targets): pass method targets like "c8y.getAlarmCollectionResource"')
           if (targets.length > 5)
             throw new TypeError(`codemode.describe(targets): at most 5 targets per call (got ${targets.length}) — shortlist candidates via search first`)
-          return targets.map((t) => describeTarget(namespaces, methodIndex, t, sandboxEnabled))
+          return targets.map((t) => describeTarget(namespaces, methodIndex, t, { sandboxEnabled, externalFailures }))
         }
-        return describeTarget(namespaces, methodIndex, target == null ? undefined : String(target), sandboxEnabled)
+        return describeTarget(namespaces, methodIndex, target == null ? undefined : String(target), { sandboxEnabled, externalFailures })
       },
     },
     docs: {
@@ -435,9 +454,18 @@ interface CodemodeRuntime {
   namespaces: CodemodeNamespace[]
   restrictions: readonly RestrictionRule[]
   allowRules: readonly AllowRule[]
+  /**
+   * Connection-supplied MCP servers that could not be reached this run.
+   */
+  externalFailures: ExternalMcpFailure[]
+  /**
+   * Searchable methods contributed by external namespaces — connection-scoped,
+   * so they must stay out of the per-tenant method index cache.
+   */
+  externalMethods: SearchableMethod[]
 }
 
-function resolveRuntime(): CodemodeRuntime {
+async function resolveRuntime(): Promise<CodemodeRuntime> {
   const custom = c8yMcpServer.ctx.custom
   const resolved = custom?.specs
   if (!resolved) {
@@ -450,7 +478,27 @@ function resolveRuntime(): CodemodeRuntime {
   const restrictions = custom?.restrictions ?? []
   const allowRules = custom?.allowRules ?? []
   const noMcp = custom?.noMcp
-  return { resolved, restrictions, allowRules, namespaces: buildNamespaces(resolved, restrictions, allowRules, noMcp) }
+
+  // Connection-supplied MCP servers need a live tools/list before they can
+  // become namespaces; the per-session cache makes that a first-call cost.
+  // Keyed by MCP session id in server mode; the CLI is one long-lived process
+  // whose external servers come from immutable startup flags.
+  const { servers: externalServers, failures: externalFailures } = await resolveExternalMcpServers(
+    c8yMcpServer.ctx.sessionId ?? CLI_EXTERNAL_MCP_SESSION,
+    custom?.externalMcpServers ?? [],
+  )
+
+  const namespaces = buildNamespaces(resolved, { restrictions, allowRules, noMcp, externalServers })
+  const externalNames = new Set(namespaces.filter((ns) => ns.kind === 'mcp' && ns.external).map((ns) => ns.name))
+
+  return {
+    resolved,
+    restrictions,
+    allowRules,
+    namespaces,
+    externalFailures,
+    externalMethods: toSearchableMethods(namespaces.filter((ns) => externalNames.has(ns.name))),
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -480,7 +528,7 @@ function withCliTenantMarker(text: string, tenantUrl: string | null): string {
 }
 
 export async function execute(functionCode: string): Promise<string> {
-  const { resolved, namespaces, restrictions, allowRules } = resolveRuntime()
+  const { resolved, namespaces, restrictions, allowRules, externalFailures, externalMethods } = await resolveRuntime()
 
   // Both views of every service exist per connection: MCP-preferred (default)
   // and the noMcp spec fallback. The cached, connection-independent artifacts
@@ -493,22 +541,28 @@ export async function execute(functionCode: string): Promise<string> {
   // entries come from the spec view so tag topics stay available regardless
   // of whether a service is wrapped as MCP (MCP tools carry no tag docs).
   const docsIndex = getDocsIndex(resolved, () =>
-    buildNamespaces(resolved, [], [], SPEC_VIEW)
+    buildNamespaces(resolved, { noMcp: SPEC_VIEW })
       .filter((ns): ns is OpenApiNamespace => ns.kind === 'openapi')
       .map((ns) => ({ namespace: ns.name, spec: ns.spec })))
   // Method index: union of the MCP-preferred and spec views (policy- and
   // opt-out-independent, cached per tenant); the connection's policy and
   // noMcp choice are applied at query time via the visible-targets predicate.
-  const methodIndex = getMethodIndex(resolved, () => {
+  const tenantMethodIndex = getMethodIndex(resolved, () => {
     const byTarget = new Map<string, SearchableMethod>()
     for (const item of [
       ...toSearchableMethods(buildNamespaces(resolved)),
-      ...toSearchableMethods(buildNamespaces(resolved, [], [], SPEC_VIEW)),
+      ...toSearchableMethods(buildNamespaces(resolved, { noMcp: SPEC_VIEW })),
     ]) {
       byTarget.set(item.target, item)
     }
     return [...byTarget.values()]
   })
+  // External namespaces are connection-scoped, so they cannot enter the
+  // per-tenant cache. Reuse the cached tenant items and re-index them together
+  // with the external ones so search ranks one merged corpus.
+  const methodIndex = externalMethods.length === 0
+    ? tenantMethodIndex
+    : buildMethodIndex([...tenantMethodIndex.methods.values(), ...externalMethods])
 
   // In CLI mode discovery must keep working before a tenant is active (the
   // bundled-only fallback), so a missing tenant degrades the live-call
@@ -520,9 +574,9 @@ export async function execute(functionCode: string): Promise<string> {
     tenantUrl = auth.tenantUrl
     const authHeaders = createC8yAuthHeaders(auth)
     const safeFetch = createCumulocitySafeFetch(auth.tenantUrl, authHeaders, restrictions, allowRules)
-    live = createLiveCalls(safeFetch, auth.tenantUrl, authHeaders)
+    live = createLiveCalls({ safeFetch, tenantUrl: auth.tenantUrl, authHeaders })
   } catch (error) {
-    live = createUnauthenticatedCalls(error instanceof Error ? error.message : String(error))
+    live = createLiveCalls({ error: error instanceof Error ? error.message : String(error) })
   }
 
   // Server-only scratch workspace, one in-memory sandbox per MCP session
@@ -541,7 +595,7 @@ export async function execute(functionCode: string): Promise<string> {
     filename: EXECUTE_ENTRY_PATH,
     limits: SANDBOX_LIMITS,
     imports: {
-      [API_MODULE_SPECIFIER]: buildApiModule(namespaces, methodIndex, docsIndex, live, sandboxApi),
+      [API_MODULE_SPECIFIER]: buildApiModule(namespaces, methodIndex, docsIndex, live, sandboxApi, externalFailures),
       [AGENT_MODULE_SPECIFIER]: buildAgentModule(functionCode),
     },
   }).finally(() => live.dispose())

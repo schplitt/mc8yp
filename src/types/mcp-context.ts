@@ -1,4 +1,5 @@
 import type { TenantCapabilities } from '../utils/capability-resolution'
+import type { ExternalMcpServerConfig } from '../utils/external-mcp'
 import type { AllowRule, NoMcpConfig, RestrictionRule } from '../utils/restrictions'
 
 /**
@@ -37,6 +38,13 @@ export interface C8yMcpCustomContext extends Record<string, unknown> {
    * Disabled by default: absent or `false` means no `sandbox` global.
    */
   enableSandbox?: boolean
+  /**
+   * Connection-supplied external MCP servers (`mc8yp-mcp-server` header,
+   * `--mcp-server` CLI flag). Each becomes a codemode namespace for this
+   * connection only, called with its own credentials — never the tenant's.
+   * Their tool lists are fetched on first use and cached per session.
+   */
+  externalMcpServers?: ExternalMcpServerConfig[]
   /**
    * Resolved specs for the query sandbox: always-available `core` plus a
    * service-spec map keyed by contextPath (bundled service entries + any
