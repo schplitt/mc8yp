@@ -1,4 +1,5 @@
 import { RESERVED_NAMESPACES } from '../codemode/namespaces'
+import { sanitizeToolName } from '../codemode/operation-naming'
 import type { McpFetch } from './mcp-client'
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -173,7 +174,7 @@ export function parseExternalMcpServers(sources: readonly string[]): ExternalMcp
     }
 
     for (const candidate of Array.isArray(parsed) ? parsed : [parsed]) {
-      const result = validateEntry(candidate, usedNames)
+      const result = validateExternalMcpEntry(candidate, usedNames)
       if ('reason' in result) {
         failedEntries.push({ entry: typeof candidate === 'object' ? JSON.stringify(candidate) : String(candidate), reason: result.reason })
         continue
@@ -186,7 +187,33 @@ export function parseExternalMcpServers(sources: readonly string[]): ExternalMcp
   return { servers, failedEntries }
 }
 
-function validateEntry(candidate: unknown, usedNames: ReadonlySet<string>): { config: ExternalMcpServerConfig } | { reason: string } {
+/**
+ * Turn an operator-supplied display name into the namespace it would be mounted
+ * under — the SAME derivation a discovered service gets (`sanitizeToolName`), so
+ * `MaStR registry` becomes `MaStR_registry` exactly as `knowledge-base-ms`
+ * becomes `knowledge_base_ms`. A name that is already a valid identifier is
+ * returned unchanged.
+ *
+ * The header path deliberately does NOT call this: there, `name` must already be
+ * an identifier and is used verbatim, so what the agent sees is exactly what was
+ * configured and cannot shift when this function changes. Derivation is a
+ * CONFIGURE-TIME convenience, offered through `POST /resolve-mcp-servers` — a
+ * caller resolves a display name once, stores the namespace it got back, and
+ * keeps sending that.
+ * @param name Operator-supplied display name.
+ */
+export function deriveExternalMcpNamespace(name: string): string {
+  return sanitizeToolName(name)
+}
+
+/**
+ * Validate one entry, exported so the resolve route can answer with the exact
+ * verdict the header path would reach — a route that green-lights a server the
+ * header then rejects is worse than no route at all.
+ * @param candidate Parsed JSON entry.
+ * @param usedNames Namespaces already taken by earlier entries in the same batch.
+ */
+export function validateExternalMcpEntry(candidate: unknown, usedNames: ReadonlySet<string>): { config: ExternalMcpServerConfig } | { reason: string } {
   if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate))
     return { reason: 'Entry must be a JSON object with "name" and "url".' }
 

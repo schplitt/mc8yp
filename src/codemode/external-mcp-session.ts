@@ -46,6 +46,13 @@ export interface ExternalMcpServer {
    * `description`.
    */
   instructions?: string
+  /**
+   * The downstream server's self-reported identity from the handshake. Not used
+   * for namespace assembly — it exists so a configuration check can show an
+   * operator WHICH server answered.
+   */
+  serverName?: string
+  serverVersion?: string
 }
 
 /**
@@ -80,13 +87,30 @@ function armIdleTimer(sessionKey: string): void {
   session.timer.unref?.()
 }
 
-async function listExternalTools(config: ExternalMcpServerConfig): Promise<ExternalMcpServer> {
+/**
+ * Handshake one external server and read its tool list, bypassing the session
+ * cache entirely.
+ *
+ * Exported for configuration checks (`POST /resolve-mcp-servers`): an operator
+ * asking "does this URL and token work" must not be answered from a tool list
+ * cached up to 15 minutes ago, and a candidate that may never be saved must not
+ * seed the cache either. Runtime resolution goes through
+ * {@link resolveExternalMcpServers}, which is where caching belongs.
+ * @param config One external server config.
+ */
+export async function probeExternalMcpServer(config: ExternalMcpServerConfig): Promise<ExternalMcpServer> {
   const client = new McpHttpClient({ url: config.url, fetch: createExternalMcpFetch(config) })
   try {
     const info = await client.initialize()
     const tools = await client.listTools()
     consola.info(`[external-mcp] "${config.name}" at ${config.url}: ${tools.length} tool(s)`)
-    return { config, tools, instructions: info.instructions }
+    return {
+      config,
+      tools,
+      instructions: info.instructions,
+      serverName: info.serverName,
+      serverVersion: info.serverVersion,
+    }
   } finally {
     await client.close()
   }
@@ -121,7 +145,7 @@ export async function resolveExternalMcpServers(
     const key = configKey(config)
     let pending = session!.servers.get(key)
     if (!pending) {
-      pending = listExternalTools(config)
+      pending = probeExternalMcpServer(config)
       session!.servers.set(key, pending)
       // A failed handshake must not stick: drop the entry so the next
       // codemode call retries it.

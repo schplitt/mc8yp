@@ -3,7 +3,7 @@
   "info": {
     "title": "mc8yp HTTP API",
     "version": "1.0.0",
-    "description": "Auxiliary REST surface of the mc8yp Cumulocity MCP microservice.\n\nThis spec intentionally documents only the non-MCP HTTP routes (`/refresh-apis`, `/health`). The MCP protocol itself is served at `POST /mcp` over JSON-RPC and is **not** documented here — MCP clients discover tools and prompts via the MCP `tools/list` / `prompts/list` flow, not via OpenAPI. If you are an agent reading this through `serviceSpecs['mc8yp-server']`, you are talking to mc8yp through mc8yp; do not call `/service/mc8yp-server/mcp` from inside `execute`.\n\nThe primary use case for this spec is letting an agent trigger a fresh API discovery in mc8yp itself after subscribing or unsubscribing a microservice in the tenant."
+    "description": "Auxiliary REST surface of the mc8yp Cumulocity MCP microservice.\n\nThis spec intentionally documents only the non-MCP HTTP routes (`/refresh-apis`, `/resolve-mcp-servers`, `/health`). The MCP protocol itself is served at `POST /mcp` over JSON-RPC and is **not** documented here — MCP clients discover tools and prompts via the MCP `tools/list` / `prompts/list` flow, not via OpenAPI. If you are an agent reading this through `serviceSpecs['mc8yp-server']`, you are talking to mc8yp through mc8yp; do not call `/service/mc8yp-server/mcp` from inside `execute`.\n\nThe primary use cases for this spec are letting an agent trigger a fresh API discovery in mc8yp itself after subscribing or unsubscribing a microservice in the tenant, and letting a management UI resolve and check external MCP server configuration before storing it."
   },
   "paths": {
     "/refresh-apis": {
@@ -40,6 +40,49 @@
           },
           "500": {
             "description": "Discovery failed for an unexpected reason.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          }
+        }
+      }
+    },
+    "/resolve-mcp-servers": {
+      "post": {
+        "operationId": "resolveMcpServers",
+        "summary": "Resolve and check external MCP server configuration before it is used.",
+        "description": "Answers the three questions a caller building the `mc8yp-mcp-server` header cannot answer itself: **which namespace** each entry would be mounted under (derived from its free-form `name` by the same sanitization a Cumulocity contextPath gets, so `MaStR registry` becomes `MaStR_registry`), **whether that namespace is available** (reserved names, namespaces already held by this tenant, and duplicates within the request), and **whether the server answers** — the MCP handshake runs with the entry's own credentials, exactly as it would at runtime, and the tool list it returns is what the agent would see.\n\nWhy this matters: at runtime a tenant namespace always wins a collision and the external server is then **silently skipped**, so the operator believes the agent has a namespace it does not have. This route turns that into a visible `namespace-taken` verdict at configuration time.\n\nThe entry shape is the header's, except that `name` may be free-form here. It is a POST with a body rather than a GET reading the header because the entries carry credentials and the candidate is typically not configured on any connection yet.\n\n**The namespace does not become dynamic.** The header contract stays strict and verbatim: resolve a display name once, store the `namespace` you got back, and send that from then on. Nothing is persisted here — mc8yp holds no external server configuration of its own.\n\nHandshakes are neither served from nor written to the per-session tool-list cache, so the answer always reflects the credentials as sent.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ResolveMcpServersRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One resolution per submitted entry, in the order they were sent. A 200 does NOT mean every entry is usable — read each `status`.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ResolveMcpServersResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Body was not an object carrying a `servers` array. Per-entry problems are reported as `invalid` inside a 200, not here.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "401": {
+            "description": "No Authorization header or session cookie was provided.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "500": {
+            "description": "Resolution failed for an unexpected reason.",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
             }
@@ -113,6 +156,130 @@
             "minimum": 0,
             "description": "Number of paths declared by the spec after the service-prefix rewrite."
           }
+        }
+      },
+      "ResolveMcpServersRequest": {
+        "type": "object",
+        "required": ["servers"],
+        "properties": {
+          "servers": {
+            "type": "array",
+            "description": "Candidate entries. An empty array is valid and resolves to an empty result.",
+            "items": { "$ref": "#/components/schemas/ExternalMcpServerCandidate" }
+          }
+        }
+      },
+      "ExternalMcpServerCandidate": {
+        "type": "object",
+        "description": "One external MCP server as an operator configures it — the `mc8yp-mcp-server` entry shape, except that `name` may be free-form because the namespace is derived from it here.",
+        "required": ["name", "url"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Display name. Sanitized into the namespace: spaces, hyphens and dots become underscores, other non-word characters are dropped, a leading digit gains an underscore, and a JavaScript keyword gains a trailing one. A name that is already a valid identifier passes through unchanged.",
+            "examples": ["MaStR registry", "github"]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Absolute http/https MCP endpoint, used as provided."
+          },
+          "token": {
+            "type": "string",
+            "description": "Bearer shorthand: sent as `Authorization: Bearer <token>` to the external server. Not persisted and not logged."
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+            "description": "Extra request headers, applied after `token` so an explicit `authorization` entry replaces the bearer shorthand."
+          },
+          "description": {
+            "type": "string",
+            "description": "Shown to the agent in the namespace overview; falls back to the server's own `instructions`."
+          }
+        }
+      },
+      "ResolveMcpServersResponse": {
+        "type": "object",
+        "required": ["tenantUrl", "tenantNamespaces", "warnings", "servers"],
+        "properties": {
+          "tenantUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Base URL of the Cumulocity tenant the microservice is deployed against."
+          },
+          "tenantId": {
+            "type": "string",
+            "description": "Tenant resolved from the caller's auth. Absent when resolution failed."
+          },
+          "tenantNamespaces": {
+            "type": ["array", "null"],
+            "items": { "type": "string" },
+            "description": "Every namespace this tenant already occupies (core plus one per available service) — the set an external namespace has to fit around. **`null` means the check did not run** (see `warnings`), so a namespace reported free may still be taken at runtime."
+          },
+          "warnings": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Non-fatal problems that limit how much of the answer can be trusted. Empty on a fully checked response."
+          },
+          "servers": {
+            "type": "array",
+            "description": "One entry per submitted server, same order.",
+            "items": { "$ref": "#/components/schemas/ExternalMcpResolution" }
+          }
+        }
+      },
+      "ExternalMcpResolution": {
+        "type": "object",
+        "required": ["name", "namespace", "status"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The `name` as submitted, echoed so results can be matched to input."
+          },
+          "namespace": {
+            "type": "string",
+            "description": "The namespace this entry would be mounted under — **the value to store and to send in the `mc8yp-mcp-server` header from now on**. Empty when the entry carried no usable name."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ok", "invalid", "namespace-taken", "unreachable"],
+            "description": "The one field to branch on.\n- `ok` — valid, namespace free, server answered.\n- `invalid` — the entry is malformed; sending it in the header would fail the whole request with a 400.\n- `namespace-taken` — well-formed, but the namespace is claimed, so at runtime this server is skipped and the agent silently would not have it. Rename it.\n- `unreachable` — well-formed and free, but the handshake failed. mc8yp retries on the next codemode call, so this may be transient."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the status is not `ok`, phrased for an operator. Absent when it is."
+          },
+          "namespaceTakenBy": {
+            "type": "string",
+            "enum": ["reserved", "tenant", "request"],
+            "description": "Who holds the namespace: a sandbox global (`codemode`, `docs`, `sandbox`, `c8y`, `cumulocity`), a namespace of this tenant, or an earlier entry in the same request. Only set for `namespace-taken`."
+          },
+          "server": {
+            "type": "object",
+            "description": "The downstream server's own handshake identity. Present when it answered.",
+            "properties": {
+              "name": { "type": "string" },
+              "version": { "type": "string" },
+              "instructions": {
+                "type": "string",
+                "description": "The server's `instructions`, which mc8yp shows the agent when the entry has no `description`."
+              }
+            }
+          },
+          "tools": {
+            "type": "array",
+            "description": "The tools the agent would get from this namespace. Present whenever the handshake succeeded — including for `namespace-taken`, so an operator renaming the entry already knows the URL and credential are right.",
+            "items": { "$ref": "#/components/schemas/ExternalMcpResolvedTool" }
+          }
+        }
+      },
+      "ExternalMcpResolvedTool": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "description": "Tool name as advertised by the server." },
+          "description": { "type": "string", "description": "The tool's description, or its title when it has none." }
         }
       },
       "Error": {

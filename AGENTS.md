@@ -65,6 +65,7 @@ src/
   utils/
     capability-discovery.ts          Per-tenant live capability discovery (OpenAPI specs + MCP servers) with 30-min refresh cache
     external-mcp.ts           Connection-supplied MCP server config: header collection, JSON entry parsing/validation, auth headers, transport
+    external-mcp-resolve.ts   Configure-time resolution for those entries: namespace derivation, collision classification, uncached handshake (POST /resolve-mcp-servers)
     auth.ts                   Authorization header parsing for server mode
     c8y-types.ts              Cumulocity-specific shared types
     client.ts                 Auth/header resolution for live requests
@@ -87,7 +88,8 @@ test/
   restrictions.test.ts
   restrictions.bench.ts
   external-mcp.test.ts        External MCP config parsing, namespace assembly, per-session tool-list cache
-openapi.json                 Self-describing OpenAPI for mc8yp's non-MCP HTTP surface; referenced from cumulocity.json so the deployed microservice is discoverable via the standard openApiSpec discovery flow
+  external-mcp-resolve.test.ts  Namespace derivation, collision classification (reserved/tenant/duplicate), probe outcomes
+openapi.json                 Self-describing OpenAPI for mc8yp's non-MCP HTTP surface (/refresh-apis, /resolve-mcp-servers, /health); referenced from cumulocity.json so the deployed microservice is discoverable via the standard openApiSpec discovery flow
 openapi/
   core/
     release.json             Bundled latest Cumulocity core OpenAPI snapshot
@@ -117,7 +119,7 @@ src/openapi-modules.d.ts      Ambient type declarations for the `#core-openapi` 
 
 #### Microservice mode
 
-1. `src/index.ts` starts the HTTP server and exposes `/mcp` and `/health`.
+1. `src/index.ts` starts the HTTP server and exposes `/mcp`, `/refresh-apis`, `/resolve-mcp-servers`, `/health` and `/openapi.json`.
 2. It sets `globalThis.executionEnvironment = 'server'`.
 3. It extracts auth from request headers, restrictions from `restriction`, `restrict`, and `r` query parameters plus the `mc8yp-restriction` header, and allow rules from `allowed`, `allow`, and `a` query parameters plus the `mc8yp-allow` header. External MCP servers come from the `mc8yp-mcp-server` header only (no query equivalent — the value carries credentials); a malformed entry is a 400, not a silent skip.
 4. It stores auth in request-local context and forwards the request to the shared MCP server.
@@ -166,6 +168,11 @@ Servers the CONNECTION brings, not the tenant: `mc8yp-mcp-server` header (repeat
 - **`sendAuthentication` is hardcoded `false`** for these namespaces and tenant auth is never forwarded — a third-party host must not receive tenant credentials. They are also tenant-INDEPENDENT: dispatch works with no active tenant.
 - **`noMcp` does not apply.** That opt-out selects between a service's MCP and OpenAPI views; an external server has no spec view to fall back to.
 - **Egress is deliberately unrestricted** (owner's call, 2026-08-18): any host, `http` or `https`, no allowlist, no private-range blocking, `pinDns` not involved — external calls do not go through `createCumulocitySafeFetch` at all. The trade-off is recorded in README: whoever can set headers on the deployment can make it issue requests to any address it can reach. If this ever needs tightening, the single choke point is `createExternalMcpFetch`.
+- **`POST /resolve-mcp-servers` is the configure-time counterpart** (`src/utils/external-mcp-resolve.ts`, documented in `openapi.json`). It takes the same entries with a FREE-FORM `name`, derives the namespace each would be mounted under (`deriveExternalMcpNamespace` → `sanitizeToolName`, the same rule contextPaths get), classifies namespace collisions (`reserved` / `tenant` / `request`), and handshakes what is left — returning the tool list the agent would actually see. It exists because three things a header-building consumer needs are only knowable in here: the derivation, the tenant's namespace set, and the MCP auth semantics of these entries. Four rules hold it together:
+  - **It reuses `validateExternalMcpEntry`** (the header path's own validator, exported for exactly this). A route that green-lights an entry the header then 400s would be worse than no route.
+  - **The runtime contract is unchanged.** Derivation is configure-time only: a caller resolves a display name once, stores the returned `namespace`, and keeps sending it verbatim, so the agent-visible global cannot shift when the derivation is refined. The header still validates `name` as an identifier and uses it as given — do NOT make it derive.
+  - **The handshake is `probeExternalMcpServer`, which bypasses the session cache** in both directions: an operator asking "does this token work" must not be answered from a 15-minute-old tool list, and a candidate that may never be saved must not seed the cache.
+  - **A tenant-collision verdict needs discovery**, which can legitimately be unavailable. `tenantNamespaces: null` plus a `warnings` entry says the check did not run; reporting a namespace as free when nobody looked is the failure this route exists to remove. When nothing is warmed yet the route discovers on demand (service user, like `/refresh-apis`) rather than guessing.
 - **Method index**: external methods are connection-scoped, so they must NOT enter the per-tenant `getMethodIndex` WeakMap. `execute` reuses the cached tenant items and re-indexes them together with the external ones via the uncached `buildMethodIndex` — only when external servers are actually configured. The docs index is untouched (MCP tools carry no tag docs).
 
 ### Bundled OpenAPI Selection
