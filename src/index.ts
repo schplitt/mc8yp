@@ -1,6 +1,6 @@
 import { HttpTransport } from '@tmcp/transport-http'
 import consola from 'consola'
-import { getQuery, H3, HTTPError, serve } from 'h3'
+import { getQuery, H3, HTTPError, readBody, serve } from 'h3'
 import openApiSpec from '../openapi.json' with { type: 'json' }
 import { c8yMcpServer, setupMcpServer } from './server'
 import { createSessionEvictingInfoSessionManager } from './codemode/session-eviction'
@@ -24,6 +24,8 @@ import {
   collectServerExternalMcpSources,
   parseExternalMcpServers,
 } from './utils/external-mcp'
+import { resolveExternalMcpCandidates } from './utils/external-mcp-resolve'
+import { buildNamespaces } from './codemode/namespaces'
 import { BasicAuth, Client, MicroserviceClientRequestAuth } from '@c8y/client'
 import { getCachedDiscovery, refreshCapabilities } from './utils/capability-discovery'
 import { resolveCapabilities } from './utils/capability-resolution'
@@ -206,6 +208,111 @@ app.post('/refresh-apis', async (event) => {
       status: 500,
       statusText: 'Discovery failed',
       message: err instanceof Error ? err.message : 'Failed to refresh API specs',
+    })
+  }
+})
+
+// Configuration-time check for connection-supplied external MCP servers: derive
+// the namespace each entry would be mounted under, say whether that namespace is
+// free, and report what the agent would actually get from the server.
+//
+// This exists because the `mc8yp-mcp-server` header is a strict runtime
+// contract, and the three things a caller building that header cannot know on
+// its own all live in here: the derivation, the tenant's namespace list, and the
+// MCP handshake with these entries' own auth semantics. See
+// ./utils/external-mcp-resolve.ts for the reasoning.
+//
+// It is a POST with a body rather than a GET taking the header, because entries
+// carry credentials and a management UI is testing a candidate that is not
+// configured on any connection yet.
+app.post('/resolve-mcp-servers', async (event) => {
+  try {
+    const authorizationHeader = event.req.headers.get('authorization') ?? undefined
+    const cookieHeader = event.req.headers.get('cookie') ?? undefined
+    if (!authorizationHeader && !cookieHeader) {
+      throw new HTTPError({
+        status: 401,
+        statusText: 'Unauthorized',
+        message: 'Resolving MCP servers requires user auth (Authorization header or session cookie).',
+      })
+    }
+
+    // A malformed body is the caller's mistake, so it must not fall through to
+    // the 500 handler below: readBody throws on unparseable JSON.
+    const badBody = new HTTPError({
+      status: 400,
+      statusText: 'Invalid body',
+      message: 'Body must be JSON {"servers":[{"name":"…","url":"https://…","token":"…"}]} — one entry per server, `name` free-form (the namespace is derived from it).',
+    })
+    let body: { servers?: unknown } | undefined
+    try {
+      body = await readBody<{ servers?: unknown }>(event)
+    } catch {
+      throw badBody
+    }
+    const servers = body?.servers
+    if (!Array.isArray(servers))
+      throw badBody
+
+    // The tenant namespace list is what makes a collision verdict possible, and
+    // it is the one part that can legitimately be unavailable: discovery is
+    // cached per tenant and warmed by the subscriptions refresh. When it cannot
+    // be resolved we return the resolutions WITHOUT a tenant check and say so in
+    // `warnings` — reporting a namespace as free when we could not look is the
+    // failure mode this route exists to remove.
+    const warnings: string[] = []
+    let tenantId: string | undefined
+    let tenantNamespaces: string[] | null = null
+    try {
+      const userClient = new Client(
+        new MicroserviceClientRequestAuth({ authorization: authorizationHeader, cookie: cookieHeader }),
+        C8Y_BASEURL,
+      )
+      tenantId = (await userClient.tenant.current()).data?.name
+      if (!tenantId)
+        throw new Error('could not resolve the current tenant via /tenant/currentTenant')
+
+      // Nothing warmed yet (fresh container, or a tenant whose refresh has not
+      // run) means discovering on demand: this route is an admin action, so
+      // paying the spec download once beats answering with an unchecked
+      // namespace.
+      const cached = getCachedDiscovery(tenantId)
+      let discovery
+      if (cached) {
+        discovery = await cached
+      } else {
+        const subscribedCred = await getServiceUserCredentials(tenantId)
+        if (!subscribedCred)
+          throw new Error(`tenant '${tenantId}' is not subscribed to this microservice`)
+        discovery = await refreshCapabilities(tenantId, new Client(new BasicAuth(subscribedCred), C8Y_BASEURL))
+      }
+
+      const resolved = resolveCapabilities(discovery.specs, discovery.installedContextPaths, discovery.mcpServers)
+      // Assembled the same way a real connection assembles it, with no policy:
+      // restrictions filter operations, never namespace names, so the set of
+      // names is exactly what an external entry has to fit around.
+      tenantNamespaces = buildNamespaces(resolved).map((ns) => ns.name)
+    } catch (err) {
+      warnings.push(
+        `Tenant namespace check did not run (${err instanceof Error ? err.message : String(err)}). `
+        + 'A namespace reported as free here may still be taken by a tenant namespace at runtime.',
+      )
+    }
+
+    return {
+      tenantUrl: C8Y_BASEURL,
+      ...(tenantId ? { tenantId } : {}),
+      tenantNamespaces,
+      warnings,
+      servers: await resolveExternalMcpCandidates(servers, { tenantNamespaces }),
+    }
+  } catch (err) {
+    if (err instanceof HTTPError)
+      throw err
+    throw new HTTPError({
+      status: 500,
+      statusText: 'Resolution failed',
+      message: err instanceof Error ? err.message : 'Failed to resolve external MCP servers',
     })
   }
 })
