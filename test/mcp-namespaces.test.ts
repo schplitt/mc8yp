@@ -120,6 +120,27 @@ describe('describeTarget for MCP namespaces', () => {
     expect(output.content).not.toContain('```ts')
   })
 
+  it('lists the sanitized method name and omits the dash for a tool without a description', () => {
+    // Two things an OpenAPI listing can never exercise: MCP wire names that
+    // are not valid identifiers, and tools that ship no description at all.
+    const mixed: DiscoveredMcpServer = {
+      ...ASSET_MCP,
+      tools: [
+        { name: 'create-asset', description: 'Create a single asset.' },
+        { name: 'no_description_tool' },
+      ],
+    }
+    const mixedNs = buildNamespaces({ core: CORE_SPEC, specs: {}, mcpServers: { 'asset-svc': mixed } })
+    const content = describeTarget(mixedNs, getMethodIndex({}, () => toSearchableMethods(mixedNs)), 'asset_svc').content
+
+    // The callable sandbox name, not the wire name.
+    expect(content).toContain('- create_asset — Create a single asset.')
+    expect(content).not.toContain('create-asset')
+    // No dangling separator when there is nothing to say about a tool.
+    expect(content).toContain('\n- no_description_tool')
+    expect(content).not.toContain('no_description_tool —')
+  })
+
   it('clips long MCP tool descriptions in the listing but not in the method describe', () => {
     // Third-party MCP servers routinely ship multi-paragraph tool prose — one
     // such server must not be able to dominate a namespace listing.
