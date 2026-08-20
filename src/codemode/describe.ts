@@ -7,21 +7,31 @@ import type { DerivedOperation } from './derive-operations'
 import type { ExternalMcpFailure } from './external-mcp-session'
 
 // ─────────────────────────────────────────────────────────────────────────
-// codemode.describe — on-demand documentation rendering.
+// codemode.describe — on-demand documentation rendering, at three altitudes:
 //
-// Deliberately method-only: rendering the full typed block for a whole
-// namespace would flood the agent's context (c8y alone has ~250 operations).
-// The only real target is a single method — `describe("dtm.getAssets")` —
-// and its output is lean: the request line, prose, the bare signature, and
-// the input/output types (whose properties carry the OpenAPI descriptions
-// as JSDoc). Discovery across methods is codemode.search's job, not a
-// namespace dump. Wrapped MCP tools render through the same path — their
+// - no target      → the namespace overview (one line per namespace)
+// - `"<ns>"`       → every method in that namespace, ONE LINE each: method
+//                    name, `METHOD /path`, and the operation's own summary.
+//                    Deliberately NO types — rendering the full typed block
+//                    for ~250 core operations would flood context, while the
+//                    one-liner listing costs ~7k tokens for all of core and
+//                    lets the agent see a domain's real shape (which nearby
+//                    variants exist: collection, count, by-external-id, bulk)
+//                    instead of only what a search query happened to rank.
+// - `"<ns>.<m>"`   → the lean full render for one method: the request line,
+//                    prose, the bare signature, and input/output types (whose
+//                    properties carry the OpenAPI descriptions as JSDoc).
+//
+// Only the summary goes into a listing, never `description` — that is the
+// long prose, and 250 of them is the context flood this avoids. Search stays
+// the entry point for "which method does X"; the listing answers "what is in
+// this namespace". Wrapped MCP tools render through the same paths — their
 // schemas are already JSON Schema.
 // ─────────────────────────────────────────────────────────────────────────
 
 export interface DescribeOutput {
   target: string
-  kind: 'overview' | 'method'
+  kind: 'overview' | 'namespace' | 'method'
   content: string
 }
 
@@ -29,16 +39,40 @@ interface SpecWithInfo {
   info?: { title?: string, description?: string }
 }
 
-function truncateLine(text: string | undefined): string | undefined {
+function truncateLine(text: string | undefined, limit = 220): string | undefined {
   const flattened = text?.trim().replace(/\s+/g, ' ')
   if (!flattened)
     return undefined
-  return flattened.length > 220 ? `${flattened.slice(0, 220)}…` : flattened
+  return flattened.length > limit ? `${flattened.slice(0, limit)}…` : flattened
 }
 
 // Count the method leaves in the sandbox interface so its overview line shows
 // a method count like every namespace, without hardcoding a drifting number.
 const SANDBOX_METHOD_COUNT = (SANDBOX_INTERFACE_TS.match(/^ {2}\w+:/gm) ?? []).length
+
+// The one-line identity of a namespace: name, what it is, how many methods,
+// and a truncated version of its own description. Shared by the overview and
+// the namespace listing header so the external-provenance label — a trust
+// boundary the agent must be able to report on — cannot drift between them.
+function namespaceHeadline(ns: CodemodeNamespace): string {
+  // One flattened, truncated line of the service's own description — enough
+  // to route a problem domain to its namespace without flooding context. The
+  // backing protocol is deliberately not shown.
+  if (ns.kind === 'openapi') {
+    const info = (ns.spec as SpecWithInfo).info
+    const short = truncateLine(info?.description)
+    return `${ns.name}${info?.title ? ` — ${info.title}` : ''} (${ns.operations.length} methods)${short ? `: ${short}` : ''}`
+  }
+  const short = truncateLine(ns.server.description)
+  // Provenance IS surfaced even though the backing protocol is not: an
+  // external server is a different trust and data boundary — it is not part
+  // of the tenant and calls to it leave Cumulocity — and the agent needs
+  // that to report accurately where data came from or went.
+  const label = ns.external
+    ? `EXTERNAL MCP server at ${ns.external.url} — configured for this connection, NOT part of this tenant`
+    : ns.server.mcpName
+  return `${ns.name} — ${label} (${ns.tools.length} methods)${short ? `: ${short}` : ''}`
+}
 
 function renderOverview(
   namespaces: readonly CodemodeNamespace[],
@@ -46,26 +80,8 @@ function renderOverview(
   externalFailures: readonly ExternalMcpFailure[],
 ): string {
   const lines = ['Available namespaces on this tenant (do not assume capabilities from prior knowledge — search each relevant domain):']
-  for (const ns of namespaces) {
-    // One flattened, truncated line of the service's own description —
-    // enough to route a problem domain to its namespace without flooding
-    // context. The backing protocol is deliberately not shown.
-    if (ns.kind === 'openapi') {
-      const info = (ns.spec as SpecWithInfo).info
-      const short = truncateLine(info?.description)
-      lines.push(`- ${ns.name}${info?.title ? ` — ${info.title}` : ''} (${ns.operations.length} methods)${short ? `: ${short}` : ''}`)
-    } else {
-      const short = truncateLine(ns.server.description)
-      // Provenance IS surfaced even though the backing protocol is not: an
-      // external server is a different trust and data boundary — it is not part
-      // of the tenant and calls to it leave Cumulocity — and the agent needs
-      // that to report accurately where data came from or went.
-      const label = ns.external
-        ? `EXTERNAL MCP server at ${ns.external.url} — configured for this connection, NOT part of this tenant`
-        : ns.server.mcpName
-      lines.push(`- ${ns.name} — ${label} (${ns.tools.length} methods)${short ? `: ${short}` : ''}`)
-    }
-  }
+  for (const ns of namespaces)
+    lines.push(`- ${namespaceHeadline(ns)}`)
   // Listed as a peer of the API namespaces, same bullet format, so the agent
   // treats it with the same confidence. Its methods are a fixed set surfaced by
   // describe("sandbox") rather than by search (they are not spec-derived).
@@ -84,6 +100,7 @@ function renderOverview(
     '',
     'Workflow:',
     '- codemode.search("keywords") — find methods by name/path/summary (top 20 by score)',
+    '- codemode.describe("<namespace>") — every method in one namespace, one line each, no types (the method count above is the cost: prefer search on large namespaces)',
     '- codemode.describe("<namespace>.<method>") — types and docs for one method',
     '- docs.search("keywords") / docs.read(id) — documentation topics (domain query languages, concepts)',
     '- <namespace>.<method>({ ...params, body }) — call the API',
@@ -102,6 +119,72 @@ function renderSandbox(): string {
     SANDBOX_INTERFACE_TS,
     '```',
   ].join('\n')
+}
+
+// Operations without a declared tag land here rather than being dropped or
+// silently merged into the previous group.
+const UNGROUPED = 'Other'
+
+// MCP tool descriptions are written by third-party servers and are routinely
+// multi-paragraph prose — nothing like an OpenAPI `summary` (p90 60 chars in
+// core), which is why the listing clips them harder than a namespace
+// description. Full text stays available at describe("<ns>.<tool>").
+const MCP_LISTING_DESCRIPTION_LIMIT = 200
+
+function renderNamespaceListing(namespace: CodemodeNamespace): string {
+  // Usage hints go ABOVE the listing, not below: the listing itself can be
+  // hundreds of lines, and the agent must read how to go deeper before it
+  // reads the lines it will want to go deeper on.
+  const lines = [
+    namespaceHeadline(namespace),
+    '',
+    `Every method in this namespace, one line each — no types. For input/output types and full prose: codemode.describe("${namespace.name}.<method>") (up to 5 targets in one call). To rank these by relevance instead of reading all of them: codemode.search("keywords").`,
+  ]
+
+  if (namespace.kind === 'mcp') {
+    if (namespace.external)
+      lines.push('', `External MCP server (${namespace.external.url}) — configured for this MCP connection, not part of this tenant. Calls go to that host with its own credentials; tenant credentials are never sent.`)
+    lines.push('')
+    for (const tool of namespace.tools) {
+      const short = truncateLine(tool.description, MCP_LISTING_DESCRIPTION_LIMIT)
+      lines.push(`- ${tool.name}${short ? ` — ${short}` : ''}`)
+    }
+    return lines.join('\n')
+  }
+
+  // Grouped by the operation's FIRST declared tag, in order of first
+  // appearance: the spec's own grouping is the domain structure the agent is
+  // looking for, and it turns a 250-line wall into ~50 readable sections.
+  // First tag only, so every method appears exactly once.
+  const groups = new Map<string, string[]>()
+  for (const op of namespace.operations) {
+    const summary = truncateLine(op.summary)
+    const request = `${op.method} ${op.path}`
+    // `summary` falls back to `METHOD /path` when the spec has none — don't
+    // print it twice.
+    const entry = `- ${op.name} — ${request}${summary && summary !== request ? ` — ${summary}` : ''}`
+    const group = op.tags[0] ?? UNGROUPED
+    const existing = groups.get(group)
+    if (existing)
+      existing.push(entry)
+    else
+      groups.set(group, [entry])
+  }
+
+  // The headline description is truncated, and the group names double as doc
+  // topic ids — point at both rather than leaving the agent with a cut-off
+  // sentence and no way to read the rest.
+  const info = (namespace.spec as SpecWithInfo).info
+  if (info?.title || info?.description)
+    lines.push('', `Full namespace overview: docs.read("${namespace.name}::overview").`)
+  const specTags = new Set((namespace.spec as { tags?: Array<{ name?: string }> }).tags?.map((t) => t?.name) ?? [])
+  if ([...groups.keys()].some((group) => specTags.has(group)))
+    lines.push(`Group names are documentation topics: docs.read("${namespace.name}::topic::<group>").`)
+
+  for (const [group, entries] of groups) {
+    lines.push('', `${group} (${entries.length}):`, ...entries)
+  }
+  return lines.join('\n')
 }
 
 function renderOperation(namespace: OpenApiNamespace, op: DerivedOperation): string {
@@ -162,7 +245,10 @@ function renderSearchRedirect(target: string, namespaces: readonly CodemodeNames
     : ns.tools.map((tool) => `${ns.name}.${tool.name}`)))
   const { results } = searchMethods(methodIndex, target, (t) => visible.has(t))
   const suggestions = results.slice(0, 3)
-  const lines = [`"${target}" is not a method target. Use codemode.describe("<namespace>.<method>") for one method, or codemode.search("keywords") to find methods.`]
+  const lines = [
+    `"${target}" is not a known target. Use codemode.describe("<namespace>.<method>") for one method, codemode.describe("<namespace>") to list a whole namespace, or codemode.search("keywords") to find methods.`,
+    `Namespaces on this connection: ${namespaces.map((ns) => ns.name).join(', ')}`,
+  ]
   if (suggestions.length > 0) {
     lines.push('', 'Closest methods:')
     for (const s of suggestions) lines.push(`- ${s.target}${s.httpMethod ? ` — ${s.httpMethod} ${s.apiPath}` : s.summary ? ` — ${s.summary}` : ''}`)
@@ -186,9 +272,9 @@ export interface DescribeOptions {
 
 /**
  * Resolve a describe target: nothing (short overview of namespaces), a
+ * namespace name (one-line listing of its methods, no types), a
  * `namespace.method` pair, or a bare method name searched across all
- * namespaces. Namespace-only targets are intentionally rejected — a full
- * method dump floods context; search is the discovery path.
+ * namespaces.
  * @param namespaces
  * @param methodIndex
  * @param target
@@ -215,8 +301,15 @@ export function describeTarget(
 
   const namespace = namespaces.find((ns) => ns.name === maybeNamespace)
 
-  const methodName = maybeMethod ?? trimmed
-  const candidates = namespace && maybeMethod !== undefined ? [namespace] : namespaces
+  // A bare namespace name (or a trailing-dot `"c8y."`) lists the namespace.
+  // A namespace name wins over a method that happens to share it — the
+  // method is still reachable as `<namespace>.<method>`.
+  const methodPart = maybeMethod?.trim()
+  if (namespace && !methodPart)
+    return { target: namespace.name, kind: 'namespace', content: renderNamespaceListing(namespace) }
+
+  const methodName = methodPart ?? trimmed
+  const candidates = namespace && methodPart ? [namespace] : namespaces
   for (const candidate of candidates) {
     const found = findMethod(candidate, methodName)
     if (found)

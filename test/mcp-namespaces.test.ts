@@ -111,6 +111,32 @@ describe('describeTarget for MCP namespaces', () => {
     expect(output.content).toContain('asset_svc — asset-mcp (1 methods): Asset management via MCP')
   })
 
+  it('lists an MCP namespace flat, one line per tool, without protocol markers', () => {
+    const output = describeTarget(namespaces, methodIndex, 'asset_svc')
+    expect(output.kind).toBe('namespace')
+    expect(output.content).toContain('asset_svc — asset-mcp (1 methods)')
+    expect(output.content).toContain('- get_assets — ')
+    expect(output.content).not.toMatch(/MCP server \(/)
+    expect(output.content).not.toContain('```ts')
+  })
+
+  it('clips long MCP tool descriptions in the listing but not in the method describe', () => {
+    // Third-party MCP servers routinely ship multi-paragraph tool prose — one
+    // such server must not be able to dominate a namespace listing.
+    const prose = `${'Filters assets. '.repeat(40)}END`
+    const verbose: DiscoveredMcpServer = { ...ASSET_MCP, tools: [{ ...ASSET_MCP.tools[0]!, description: prose }] }
+    const verboseNs = buildNamespaces({ core: CORE_SPEC, specs: {}, mcpServers: { 'asset-svc': verbose } })
+    const index = getMethodIndex({}, () => toSearchableMethods(verboseNs))
+
+    const listed = describeTarget(verboseNs, index, 'asset_svc').content.split('\n').find((l) => l.startsWith('- get_assets'))!
+    expect(listed).toHaveLength('- get_assets — '.length + 201)
+    expect(listed.endsWith('…')).toBe(true)
+    expect(listed).not.toContain('END')
+
+    // The deep dive is still the whole thing.
+    expect(describeTarget(verboseNs, index, 'asset_svc.get_assets').content).toContain('END')
+  })
+
   it('renders lean types for an MCP tool target without protocol markers', () => {
     const output = describeTarget(namespaces, methodIndex, 'asset_svc.get_assets')
     expect(output.kind).toBe('method')

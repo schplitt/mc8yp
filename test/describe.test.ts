@@ -74,13 +74,34 @@ describe('describeTarget', () => {
     expect(output.content).toContain('codemode.search')
   })
 
-  it('rejects namespace-only targets and redirects to search', () => {
+  it('lists a namespace one line per method, grouped by tag, without types', () => {
     const output = describeTarget(namespaces, methodIndex, 'c8y')
-    expect(output.kind).toBe('method')
-    expect(output.content).toContain('not a method target')
-    expect(output.content).toContain('codemode.search')
-    // No method dump — the listing must not leak through the redirect.
-    expect(output.content).not.toContain('Retrieve all alarms')
+    expect(output.kind).toBe('namespace')
+    expect(output.target).toBe('c8y')
+    expect(output.content).toContain('c8y — Cumulocity Core (2 methods)')
+    expect(output.content).toContain('Alarms (1):')
+    expect(output.content).toContain('- getAlarmCollectionResource — GET /alarm/alarms — Retrieve all alarms')
+    // Untagged operations get their own group rather than being dropped.
+    expect(output.content).toContain('Other (1):')
+    expect(output.content).toContain('- deleteAlarmResource — DELETE /alarm/alarms/{id} — Delete an alarm')
+    expect(output.content).toContain('docs.read("c8y::topic::<group>")')
+    // A listing is names and summaries only — types stay method-level.
+    expect(output.content).not.toContain('GetAlarmCollectionResourceInput')
+    expect(output.content).not.toContain('```ts')
+    // The way to go deeper is stated above the listing, not after it.
+    expect(output.content.indexOf('codemode.describe("c8y.<method>")')).toBeLessThan(output.content.indexOf('Alarms (1):'))
+  })
+
+  it('treats a trailing dot as a namespace target', () => {
+    expect(describeTarget(namespaces, methodIndex, 'c8y.').kind).toBe('namespace')
+  })
+
+  it('omits policy-blocked operations from a namespace listing', () => {
+    const { parsedRules } = parseRestrictionRule(['DELETE:/alarm/**'])
+    const restricted = buildNamespaces(resolved(), { restrictions: parsedRules })
+    const output = describeTarget(restricted, getMethodIndex({}, () => toSearchableMethods(restricted)), 'c8y')
+    expect(output.content).toContain('getAlarmCollectionResource')
+    expect(output.content).not.toContain('deleteAlarmResource')
   })
 
   it('renders lean types with JSDoc and doc pointers for a method target', () => {
@@ -105,7 +126,8 @@ describe('describeTarget', () => {
 
   it('suggests close matches for unknown targets', () => {
     const output = describeTarget(namespaces, methodIndex, 'c8y.getAlarmCollection')
-    expect(output.content).toContain('not a method target')
+    expect(output.content).toContain('not a known target')
+    expect(output.content).toContain('Namespaces on this connection: c8y, dtm')
     expect(output.content).toContain('c8y.getAlarmCollectionResource')
   })
 })

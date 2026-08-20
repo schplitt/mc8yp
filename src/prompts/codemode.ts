@@ -71,7 +71,7 @@ One MCP tool: \`codemode\`. It runs an async JavaScript function in a sandbox wh
 \`\`\`ts
 declare const codemode: {
   search: (query: string | string[]) => Promise<{ results: Array<{ target: string, namespace: string, method: string, httpMethod?: string, apiPath?: string, summary?: string, score: number }>, total: number, truncated: boolean }>
-  describe: (target?: string | string[]) => Promise<{ target: string, kind: 'overview' | 'method', content: string } | Array<{ target: string, kind: 'overview' | 'method', content: string }>>
+  describe: (target?: string | string[]) => Promise<{ target: string, kind: 'overview' | 'namespace' | 'method', content: string } | Array<{ target: string, kind: 'overview' | 'namespace' | 'method', content: string }>>
 }
 
 declare const docs: {
@@ -95,7 +95,8 @@ Do NOT rely on prior knowledge of these APIs and do not assume anything: the ava
 
 1. \`codemode.describe()\` (no target) — ALWAYS start here. It lists the API namespaces on THIS tenant with their responsibilities. A domain service (asset management, data preparation, …) usually has a far better API for its domain — server-side hierarchy queries, bulk operations — than composing the generic core API. Decide which namespaces could own the problem's domain, and search with each of their vocabularies.
 2. \`codemode.search(["phrasing 1", "phrasing 2"])\` — ranked fuzzy search over method names, REST paths, and summaries (top 20 by score); multiple phrasings are unioned. Results usually contain several overlapping endpoints (single-item, collection, count, by-external-id, bulk variants) — read all summaries and shortlist every candidate that could satisfy the request in ONE call, don't grab the first hit. If all results come from one namespace, re-check the overview — another namespace may own the domain with a stronger API. If the expected method is missing, re-search with other domain words before concluding it does not exist.
-3. \`codemode.describe(["<ns>.<methodA>", "<ns>.<methodB>"])\` (max 5) — ALWAYS describe before calling, and describe the whole shortlist in one call. Compare the input types: prefer the method whose parameters push the work to the server — query/filter parameters (especially ones documenting a query grammar), hierarchy/recursive selectors, bulk endpoints — over methods that would force per-item calls or client-side filtering. Describe is method-only by design — there is no whole-namespace dump.
+3. \`codemode.describe(["<ns>.<methodA>", "<ns>.<methodB>"])\` (max 5) — ALWAYS describe before calling, and describe the whole shortlist in one call. Compare the input types: prefer the method whose parameters push the work to the server — query/filter parameters (especially ones documenting a query grammar), hierarchy/recursive selectors, bulk endpoints — over methods that would force per-item calls or client-side filtering.
+   \`codemode.describe("<ns>")\` is the survey variant: every method in that namespace, one line each (name, path, summary), no types. Reach for it when search keeps missing the domain's vocabulary or you need to see which nearby variants exist — the method count in the overview is what it costs, so on a large namespace search first.
 4. \`docs.search("keywords")\` — fuzzy full-text search over documentation topics: domain query languages, concepts, API-area guides. When a parameter description references a concept, read the docs before guessing values.
 5. \`docs.read(id)\` — returns the FULL text; read it to the END and never \`.slice()\` it. The operator or function you need is often documented in the later sections — a blind cut loses exactly the crucial part. Long doc topics are the one output where length is justified.
 
