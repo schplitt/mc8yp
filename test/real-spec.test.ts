@@ -9,7 +9,9 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import rawCoreSpec from '../openapi/core/release.json' with { type: 'json' }
 import rawDtmSpec from '../openapi/dtm/release.json' with { type: 'json' }
+import { describeTarget } from '../src/codemode/describe'
 import { deriveOperations } from '../src/codemode/derive-operations'
+import { buildNamespaces, toSearchableMethods } from '../src/codemode/namespaces'
 import type { DerivedOperation } from '../src/codemode/derive-operations'
 import { getDocsIndex, readDoc, searchDocs } from '../src/codemode/docs-index'
 import { getMethodIndex, searchMethods } from '../src/codemode/method-search'
@@ -21,11 +23,13 @@ import type { Spec } from '../src/utils/capability-resolution'
 let ops: DerivedOperation[]
 let dtmOps: DerivedOperation[]
 let docsIndex: DocsIndex
+let coreSpec: Spec
 
 beforeAll(async () => {
   // The preprocessor mutates in place and the JSON modules are cached per
   // run — clone so other tests never see a preprocessed spec.
   const spec = await preprocessOpenApi(structuredClone(rawCoreSpec) as unknown as Spec)
+  coreSpec = spec
   ops = deriveOperations(spec)
   // DTM runs through the same servicePrefix rewrite the bundled-services
   // build plugin and live discovery apply.
@@ -103,6 +107,29 @@ describe('renderMethodDeclaration on the real core spec', () => {
     expect(types).toContain('alarms?:')
     // Property JSDoc from the real parameter descriptions must survive.
     expect(types).toMatch(/\/\*\*[\s\S]*severity/)
+  })
+})
+
+describe('namespace listing on the real core spec', () => {
+  it('lists every core method in one affordable, tag-grouped block', () => {
+    const namespaces = buildNamespaces({ core: coreSpec, specs: {} })
+    const output = describeTarget(namespaces, getMethodIndex({}, () => toSearchableMethods(namespaces)), 'c8y')
+
+    expect(output.kind).toBe('namespace')
+    // One line per operation, and nothing lost to grouping.
+    const methodLines = output.content.split('\n').filter((line) => line.startsWith('- '))
+    expect(methodLines).toHaveLength(ops.length)
+    expect(output.content).toContain('- c8y.getAlarmCollectionResource — GET /alarm/alarms — Retrieve all alarms')
+    // The real spec's own tags are the grouping, so a domain reads as a block.
+    expect(output.content).toMatch(/\nAlarms \(\d+\):\n/)
+    // No types anywhere — that is the whole point of the listing altitude.
+    expect(output.content).not.toContain('```ts')
+    expect(output.content).not.toContain('Input =')
+    // Size budget: the full ~250-method listing measured ~30k chars (~7.5k
+    // tokens). This guard is what keeps it a survey and not a context flood —
+    // if a future spec or format change blows past it, reconsider the format
+    // rather than raising the number.
+    expect(output.content.length).toBeLessThan(40_000)
   })
 })
 

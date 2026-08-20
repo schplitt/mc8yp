@@ -18,6 +18,7 @@ Operators stay in control through per-connection **restrictions** and **allow ru
 
 1. mc8yp discovers every microservice installed on the tenant that declares an OpenAPI spec, and derives typed method namespaces from those alongside the bundled Core (+ DTM) specs.
 2. Inside a `codemode` run, the agent finds the right method with `codemode.search`, inspects its exact input/output types with `codemode.describe`, and reads prose documentation (domain query languages, parameter syntax) with `docs.search`/`docs.read`.
+   `codemode.describe` works at three altitudes: no target lists the namespaces on this tenant, `describe("<namespace>")` lists every method in one namespace one line each — the callable target (`c8y.getAlarmCollectionResource`), `METHOD /path`, summary, no types — and `describe("<namespace>.<method>")` renders the full input/output types. The namespace listing is the survey step for when search keeps missing a domain's vocabulary; all ~250 core methods cost roughly 7k tokens, which is why full types stay method-level.
 3. In the same run, the agent calls the live Cumulocity API through the derived methods (`c8y.<method>({ ... })`). The namespaces are the complete surface — there is no raw-request escape hatch.
 4. mc8yp enforces configured restrictions and allow rules before any request leaves the host — blocked operations are also omitted from discovery entirely.
 

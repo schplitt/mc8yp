@@ -62,11 +62,13 @@ declare const codemode: {
    * input/output types with OpenAPI docs as JSDoc, related doc ids.
    * Array of method targets (max 5): describe a shortlist in one call and
    * COMPARE their input types before picking.
-   * Namespace-only targets are rejected — use search to find methods.
+   * "namespace": every method in it, ONE LINE each (name, path, summary) and
+   * NO types — for surveying a domain. The overview's method count is the
+   * cost; on a large namespace search first.
    */
   describe: (target?: string | string[]) => Promise<
-    { target: string, kind: 'overview' | 'method', content: string }
-    | Array<{ target: string, kind: 'overview' | 'method', content: string }>
+    { target: string, kind: 'overview' | 'namespace' | 'method', content: string }
+    | Array<{ target: string, kind: 'overview' | 'namespace' | 'method', content: string }>
   >
 }
 
@@ -97,7 +99,7 @@ declare const docs: {
 Workflow — ALWAYS in this order: describe() → search → describe(shortlist) → call.
 1. \`codemode.describe()\` (no target) — ALWAYS start here. It lists the API namespaces on THIS tenant with their responsibilities. A domain service (asset management, data preparation, …) usually has a far better API for its domain — server-side hierarchy queries, bulk operations — than composing the generic core API. Decide which namespaces could own the problem's domain, and search with each of their vocabularies.
 2. \`codemode.search(["phrasing 1", "phrasing 2"])\` — find candidate methods (top 20 by score). Results usually contain several overlapping endpoints (single-item, collection, count, by-external-id, bulk variants) — read all summaries and shortlist every candidate that could satisfy the request in ONE call, don't grab the first hit. If all results come from one namespace, re-check the overview — another namespace may own the domain with a stronger API. If the expected method is missing, re-search with other domain words before concluding it does not exist — check \`total\` too.
-3. \`codemode.describe(["ns.methodA", "ns.methodB"])\` (max 5) — ALWAYS describe before calling, and describe the whole shortlist in one call. Compare the input types: prefer the method whose parameters push the work to the server — query/filter parameters (especially ones marked \`@format c8y:query\` or documenting a query grammar), hierarchy/recursive selectors, bulk endpoints — over methods that would force per-item calls or client-side filtering. Describing five candidates costs almost nothing; one wrong or unfiltered API call costs more context than all your discovery combined.
+3. \`codemode.describe(["ns.methodA", "ns.methodB"])\` (max 5) — ALWAYS describe before calling, and describe the whole shortlist in one call. Compare the input types: prefer the method whose parameters push the work to the server — query/filter parameters (especially ones marked \`@format c8y:query\` or documenting a query grammar), hierarchy/recursive selectors, bulk endpoints — over methods that would force per-item calls or client-side filtering. Describing five candidates costs almost nothing; one wrong or unfiltered API call costs more context than all your discovery combined. If search keeps missing the domain's vocabulary, \`codemode.describe("<ns>")\` lists every method in that namespace one line each (no types) — the method count from step 1 is what it costs.
 4. \`docs.search("...")\` / \`docs.read(id)\` — when a parameter references domain syntax you don't know, read the docs before guessing values. Read doc texts to the END — never \`.slice()\` them: the operator or function you need is often documented in the later sections, and a blind cut loses exactly the crucial part.
 5. Call the winner: \`await c8y.someMethod({ ...params, body })\` (path/query/header parameters and \`body\` share one flat input object). ONE well-parameterized call beats fetching broadly and filtering in your code, and beats chains of per-item calls. If you catch yourself looping over items to call an API for each one, go back to step 1 — a collection, query, or bulk endpoint usually exists.
 6. Return only the data needed to answer — never return raw unfiltered collections.

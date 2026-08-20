@@ -523,25 +523,27 @@ describe('in-sandbox discovery', () => {
     }
   })
 
-  it('describes methods only — namespace targets redirect to search', async () => {
+  it('describes at three altitudes: overview, namespace listing, method types', async () => {
     const restore = stubExecuteCtx({ core: TEST_CORE_SPEC })
     try {
       mockAuth(TEST_TENANT)
       const result = await execute(
         `async () => {
           const overview = await codemode.describe()
-          const namespaceAttempt = await codemode.describe('c8y')
+          const listing = await codemode.describe('c8y')
           const method = await codemode.describe('c8y.getAlarmCollectionResource')
           return [
             overview.kind,
-            namespaceAttempt.content.includes('not a method target'),
-            namespaceAttempt.content.includes('Retrieve all alarms') ? 'leaked-listing' : 'no-listing',
+            listing.kind,
+            listing.content.includes('Retrieve all alarms'),
+            // A listing carries no types — that is what keeps it affordable.
+            listing.content.includes('GetAlarmCollectionResourceInput') ? 'leaked-types' : 'no-types',
             method.kind,
             method.content.includes('GetAlarmCollectionResourceInput'),
           ].join('|')
         }`,
       )
-      expect(stripCliTenantMarker(result)).toContain('overview|true|no-listing|method|true')
+      expect(stripCliTenantMarker(result)).toContain('overview|namespace|true|no-types|method|true')
     } finally {
       restore()
     }
@@ -901,7 +903,7 @@ describe('sandbox surface', () => {
         `async () => {
           const overview = await codemode.describe()
           const surface = await codemode.describe('sandbox')
-          return { inOverview: overview.content.includes('\`sandbox\`'), surfaceRedirects: surface.content.includes('not a method target') }
+          return { inOverview: overview.content.includes('\`sandbox\`'), surfaceRedirects: surface.content.includes('not a known target') }
         }`,
       )
       expect(stripCliTenantMarker(result)).toBe(encode({ inOverview: false, surfaceRedirects: true }))

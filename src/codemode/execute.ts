@@ -397,8 +397,9 @@ function buildApiModule(
       describe: async (...args: unknown[]) => {
         const [target] = args
         // Array form: describe a SHORTLIST of methods in one call so their
-        // input types can be compared side by side. Capped so it cannot
-        // become a namespace dump through the back door.
+        // input types can be compared side by side. Capped so a caller cannot
+        // render the whole tenant's types in one go — the cap applies to
+        // namespace listings in the array too.
         if (Array.isArray(target)) {
           const targets = target.filter((t) => typeof t === 'string' && t.trim() !== '')
           if (targets.length === 0)

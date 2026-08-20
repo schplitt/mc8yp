@@ -216,6 +216,15 @@ describe('buildNamespaces with external MCP servers', () => {
     expect(overview).toContain('- asset_svc — Asset REST API (1 methods)')
   })
 
+  it('repeats the external provenance on the namespace listing', () => {
+    const namespaces = buildNamespaces(capabilities(), { externalServers: [externalServer('github')] })
+    const output = describeTarget(namespaces, getMethodIndex({}, () => toSearchableMethods(namespaces)), 'github')
+    expect(output.kind).toBe('namespace')
+    expect(output.content).toContain('EXTERNAL MCP server at https://github.example/mcp')
+    expect(output.content).toContain('tenant credentials are never sent')
+    expect(output.content).toContain('- github.search_docs — Search the docs.')
+  })
+
   it('repeats the external provenance on the method describe', () => {
     const namespaces = buildNamespaces(capabilities(), { externalServers: [externalServer('github')] })
     const output = describeTarget(namespaces, getMethodIndex({}, () => toSearchableMethods(namespaces)), 'github.search_docs')

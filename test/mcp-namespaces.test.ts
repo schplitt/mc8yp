@@ -111,6 +111,53 @@ describe('describeTarget for MCP namespaces', () => {
     expect(output.content).toContain('asset_svc — asset-mcp (1 methods): Asset management via MCP')
   })
 
+  it('lists an MCP namespace flat, one line per tool, without protocol markers', () => {
+    const output = describeTarget(namespaces, methodIndex, 'asset_svc')
+    expect(output.kind).toBe('namespace')
+    expect(output.content).toContain('asset_svc — asset-mcp (1 methods)')
+    expect(output.content).toContain('- asset_svc.get_assets — ')
+    expect(output.content).not.toMatch(/MCP server \(/)
+    expect(output.content).not.toContain('```ts')
+  })
+
+  it('lists the sanitized method name and omits the dash for a tool without a description', () => {
+    // Two things an OpenAPI listing can never exercise: MCP wire names that
+    // are not valid identifiers, and tools that ship no description at all.
+    const mixed: DiscoveredMcpServer = {
+      ...ASSET_MCP,
+      tools: [
+        { name: 'create-asset', description: 'Create a single asset.' },
+        { name: 'no_description_tool' },
+      ],
+    }
+    const mixedNs = buildNamespaces({ core: CORE_SPEC, specs: {}, mcpServers: { 'asset-svc': mixed } })
+    const content = describeTarget(mixedNs, getMethodIndex({}, () => toSearchableMethods(mixedNs)), 'asset_svc').content
+
+    // The callable sandbox name, not the wire name.
+    expect(content).toContain('- asset_svc.create_asset — Create a single asset.')
+    expect(content).not.toContain('create-asset')
+    // No dangling separator when there is nothing to say about a tool.
+    expect(content).toContain('\n- asset_svc.no_description_tool')
+    expect(content).not.toContain('no_description_tool —')
+  })
+
+  it('clips long MCP tool descriptions in the listing but not in the method describe', () => {
+    // Third-party MCP servers routinely ship multi-paragraph tool prose — one
+    // such server must not be able to dominate a namespace listing.
+    const prose = `${'Filters assets. '.repeat(40)}END`
+    const verbose: DiscoveredMcpServer = { ...ASSET_MCP, tools: [{ ...ASSET_MCP.tools[0]!, description: prose }] }
+    const verboseNs = buildNamespaces({ core: CORE_SPEC, specs: {}, mcpServers: { 'asset-svc': verbose } })
+    const index = getMethodIndex({}, () => toSearchableMethods(verboseNs))
+
+    const listed = describeTarget(verboseNs, index, 'asset_svc').content.split('\n').find((l) => l.startsWith('- asset_svc.get_assets'))!
+    expect(listed).toHaveLength('- asset_svc.get_assets — '.length + 201)
+    expect(listed.endsWith('…')).toBe(true)
+    expect(listed).not.toContain('END')
+
+    // The deep dive is still the whole thing.
+    expect(describeTarget(verboseNs, index, 'asset_svc.get_assets').content).toContain('END')
+  })
+
   it('renders lean types for an MCP tool target without protocol markers', () => {
     const output = describeTarget(namespaces, methodIndex, 'asset_svc.get_assets')
     expect(output.kind).toBe('method')
