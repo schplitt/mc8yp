@@ -80,10 +80,10 @@ describe('describeTarget', () => {
     expect(output.target).toBe('c8y')
     expect(output.content).toContain('c8y — Cumulocity Core (2 methods)')
     expect(output.content).toContain('Alarms (1):')
-    expect(output.content).toContain('- getAlarmCollectionResource — GET /alarm/alarms — Retrieve all alarms')
+    expect(output.content).toContain('- c8y.getAlarmCollectionResource — GET /alarm/alarms — Retrieve all alarms')
     // Untagged operations get their own group rather than being dropped.
     expect(output.content).toContain('Other (1):')
-    expect(output.content).toContain('- deleteAlarmResource — DELETE /alarm/alarms/{id} — Delete an alarm')
+    expect(output.content).toContain('- c8y.deleteAlarmResource — DELETE /alarm/alarms/{id} — Delete an alarm')
     expect(output.content).toContain('docs.read("c8y::topic::<group>")')
     // A listing is names and summaries only — types stay method-level.
     expect(output.content).not.toContain('GetAlarmCollectionResourceInput')

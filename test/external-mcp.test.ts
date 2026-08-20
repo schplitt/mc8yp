@@ -222,7 +222,7 @@ describe('buildNamespaces with external MCP servers', () => {
     expect(output.kind).toBe('namespace')
     expect(output.content).toContain('EXTERNAL MCP server at https://github.example/mcp')
     expect(output.content).toContain('tenant credentials are never sent')
-    expect(output.content).toContain('- search_docs — Search the docs.')
+    expect(output.content).toContain('- github.search_docs — Search the docs.')
   })
 
   it('repeats the external provenance on the method describe', () => {

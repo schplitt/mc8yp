@@ -119,7 +119,7 @@ describe('namespace listing on the real core spec', () => {
     // One line per operation, and nothing lost to grouping.
     const methodLines = output.content.split('\n').filter((line) => line.startsWith('- '))
     expect(methodLines).toHaveLength(ops.length)
-    expect(output.content).toContain('- getAlarmCollectionResource — GET /alarm/alarms — Retrieve all alarms')
+    expect(output.content).toContain('- c8y.getAlarmCollectionResource — GET /alarm/alarms — Retrieve all alarms')
     // The real spec's own tags are the grouping, so a domain reads as a block.
     expect(output.content).toMatch(/\nAlarms \(\d+\):\n/)
     // No types anywhere — that is the whole point of the listing altitude.

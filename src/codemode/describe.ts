@@ -10,8 +10,10 @@ import type { ExternalMcpFailure } from './external-mcp-session'
 // codemode.describe — on-demand documentation rendering, at three altitudes:
 //
 // - no target      → the namespace overview (one line per namespace)
-// - `"<ns>"`       → every method in that namespace, ONE LINE each: method
-//                    name, `METHOD /path`, and the operation's own summary.
+// - `"<ns>"`       → every method in that namespace, ONE LINE each: the
+//                    fully-qualified callable target (`c8y.getAlarmResource`,
+//                    the same string search returns and describe accepts),
+//                    `METHOD /path`, and the operation's own summary.
 //                    Deliberately NO types — rendering the full typed block
 //                    for ~250 core operations would flood context, while the
 //                    one-liner listing costs ~7k tokens for all of core and
@@ -135,10 +137,14 @@ function renderNamespaceListing(namespace: CodemodeNamespace): string {
   // Usage hints go ABOVE the listing, not below: the listing itself can be
   // hundreds of lines, and the agent must read how to go deeper before it
   // reads the lines it will want to go deeper on.
+  // Lines are FULLY QUALIFIED (`c8y.getAlarmCollectionResource`), matching
+  // what search returns as `target` and what the agent actually types to call
+  // or describe. A bare method name would make the listing the only surface
+  // where the agent has to reassemble the callable name itself.
   const lines = [
     namespaceHeadline(namespace),
     '',
-    `Every method in this namespace, one line each — no types. For input/output types and full prose: codemode.describe("${namespace.name}.<method>") (up to 5 targets in one call). To rank these by relevance instead of reading all of them: codemode.search("keywords").`,
+    `Every method in this namespace, one line each — no types. Each line is the callable target: await ${namespace.name}.<method>({ ...params, body }). For input/output types and full prose: codemode.describe("${namespace.name}.<method>") (up to 5 targets in one call). To rank these by relevance instead of reading all of them: codemode.search("keywords").`,
   ]
 
   if (namespace.kind === 'mcp') {
@@ -147,7 +153,7 @@ function renderNamespaceListing(namespace: CodemodeNamespace): string {
     lines.push('')
     for (const tool of namespace.tools) {
       const short = truncateLine(tool.description, MCP_LISTING_DESCRIPTION_LIMIT)
-      lines.push(`- ${tool.name}${short ? ` — ${short}` : ''}`)
+      lines.push(`- ${namespace.name}.${tool.name}${short ? ` — ${short}` : ''}`)
     }
     return lines.join('\n')
   }
@@ -162,7 +168,7 @@ function renderNamespaceListing(namespace: CodemodeNamespace): string {
     const request = `${op.method} ${op.path}`
     // `summary` falls back to `METHOD /path` when the spec has none — don't
     // print it twice.
-    const entry = `- ${op.name} — ${request}${summary && summary !== request ? ` — ${summary}` : ''}`
+    const entry = `- ${namespace.name}.${op.name} — ${request}${summary && summary !== request ? ` — ${summary}` : ''}`
     const group = op.tags[0] ?? UNGROUPED
     const existing = groups.get(group)
     if (existing)

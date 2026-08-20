@@ -115,7 +115,7 @@ describe('describeTarget for MCP namespaces', () => {
     const output = describeTarget(namespaces, methodIndex, 'asset_svc')
     expect(output.kind).toBe('namespace')
     expect(output.content).toContain('asset_svc — asset-mcp (1 methods)')
-    expect(output.content).toContain('- get_assets — ')
+    expect(output.content).toContain('- asset_svc.get_assets — ')
     expect(output.content).not.toMatch(/MCP server \(/)
     expect(output.content).not.toContain('```ts')
   })
@@ -134,10 +134,10 @@ describe('describeTarget for MCP namespaces', () => {
     const content = describeTarget(mixedNs, getMethodIndex({}, () => toSearchableMethods(mixedNs)), 'asset_svc').content
 
     // The callable sandbox name, not the wire name.
-    expect(content).toContain('- create_asset — Create a single asset.')
+    expect(content).toContain('- asset_svc.create_asset — Create a single asset.')
     expect(content).not.toContain('create-asset')
     // No dangling separator when there is nothing to say about a tool.
-    expect(content).toContain('\n- no_description_tool')
+    expect(content).toContain('\n- asset_svc.no_description_tool')
     expect(content).not.toContain('no_description_tool —')
   })
 
@@ -149,8 +149,8 @@ describe('describeTarget for MCP namespaces', () => {
     const verboseNs = buildNamespaces({ core: CORE_SPEC, specs: {}, mcpServers: { 'asset-svc': verbose } })
     const index = getMethodIndex({}, () => toSearchableMethods(verboseNs))
 
-    const listed = describeTarget(verboseNs, index, 'asset_svc').content.split('\n').find((l) => l.startsWith('- get_assets'))!
-    expect(listed).toHaveLength('- get_assets — '.length + 201)
+    const listed = describeTarget(verboseNs, index, 'asset_svc').content.split('\n').find((l) => l.startsWith('- asset_svc.get_assets'))!
+    expect(listed).toHaveLength('- asset_svc.get_assets — '.length + 201)
     expect(listed.endsWith('…')).toBe(true)
     expect(listed).not.toContain('END')
 
