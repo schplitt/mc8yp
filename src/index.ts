@@ -30,6 +30,7 @@ import { BasicAuth, Client, MicroserviceClientRequestAuth } from '@c8y/client'
 import { getCachedDiscovery, refreshCapabilities } from './utils/capability-discovery'
 import { resolveCapabilities } from './utils/capability-resolution'
 import { getServiceUserCredentials, startSubscriptionsRefresh } from './utils/subscriptions'
+import { getSandbox } from './codemode/execute'
 
 // Microservice mode requires bootstrap credentials. The subscriptions cache
 // fetches per-tenant service-user creds via the bootstrap user, and proactive
@@ -317,7 +318,12 @@ app.post('/resolve-mcp-servers', async (event) => {
   }
 })
 
-app.get('/health', () => 'OK')
+app.get('/health', async () => {
+  const result = await (await getSandbox()).run({
+    code: 'export default \'alive\';',
+  })
+  return result.ok
+})
 app.get('/openapi.json', () => openApiSpec)
 
 app.get('/', () => 'C8Y MCP Server is running!')

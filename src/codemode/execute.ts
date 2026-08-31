@@ -40,7 +40,7 @@ const SANDBOX_LIMITS = {
 
 let sandboxPromise: Promise<Sandbox> | null = null
 
-async function getSandbox(): Promise<Sandbox> {
+export async function getSandbox(): Promise<Sandbox> {
   sandboxPromise ??= createSandbox({ maxIsolates: 10 })
   return sandboxPromise
 }
