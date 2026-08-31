@@ -645,6 +645,26 @@ describe('execute', () => {
       restore()
     }
   })
+
+  it('supports Intl in agent code and the sandbox survives it', async () => {
+    const restore = stubExecuteCtx()
+    try {
+      mockAuth(TEST_TENANT)
+      const result = await execute(
+        `async () => ({
+          date: new Date(0).toLocaleString('de-DE', { timeZone: 'UTC' }),
+          number: new Intl.NumberFormat('de-DE').format(1234.5),
+        })`,
+      )
+      expect(result).toContain('1.1.1970')
+      expect(result).toContain('1.234,5')
+      // The shared sandbox must still be usable afterwards.
+      const after = await execute('async () => ({ alive: true })')
+      expect(stripCliTenantMarker(after)).toBe(encode({ alive: true }))
+    } finally {
+      restore()
+    }
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────
