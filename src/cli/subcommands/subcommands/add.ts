@@ -42,6 +42,7 @@ const command: CommandDef = defineCommand({
       if (isCancel(passwordPrompt)) {
         cancel('Cancelled.')
         exit()
+        return
       }
 
       // Check if credentials with same tenant URL already exist
@@ -64,7 +65,7 @@ const command: CommandDef = defineCommand({
       await setStoredC8yAuth({
         tenantUrl,
         user,
-        password: passwordPrompt,
+        password: passwordPrompt as string,
       })
 
       consola.success('Credentials saved successfully!')
