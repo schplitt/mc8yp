@@ -28,7 +28,7 @@ const EXECUTE_ENTRY_PATH = '/codemode-execute.mjs'
 export const BLOCKED_REQUEST_PREFIX = 'Request blocked by MCP connection policy.'
 
 const SANDBOX_LIMITS = {
-  memoryMb: 128,
+  memoryMb: 24,
   cpuTimeMs: 50_000,
   wallTimeMs: 120_000,
   maxBridgeCalls: 200,

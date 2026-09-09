@@ -10,7 +10,7 @@
   "scale": "NONE",
   "replicas": 1,
   "requestedResources": {
-    "memory": "256M",
+    "memory": "512M",
     "cpu": "250m"
   },
   "resources": {
