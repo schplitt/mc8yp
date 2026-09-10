@@ -89,7 +89,7 @@ test/
   restrictions.bench.ts
   external-mcp.test.ts        External MCP config parsing, namespace assembly, per-session tool-list cache
   external-mcp-resolve.test.ts  Namespace derivation, collision classification (reserved/tenant/duplicate), probe outcomes
-openapi.json                 Self-describing OpenAPI for mc8yp's non-MCP HTTP surface (/refresh-apis, /resolve-mcp-servers, /health); referenced from cumulocity.json so the deployed microservice is discoverable via the standard openApiSpec discovery flow
+openapi.json                 Self-describing OpenAPI for mc8yp's non-MCP HTTP surface (/refresh-apis, /resolve-mcp-servers, /stats, /health); referenced from cumulocity.json so the deployed microservice is discoverable via the standard openApiSpec discovery flow
 openapi/
   core/
     release.json             Bundled latest Cumulocity core OpenAPI snapshot
@@ -119,7 +119,7 @@ src/openapi-modules.d.ts      Ambient type declarations for the `#core-openapi` 
 
 #### Microservice mode
 
-1. `src/index.ts` starts the HTTP server and exposes `/mcp`, `/refresh-apis`, `/resolve-mcp-servers`, `/health` and `/openapi.json`.
+1. `src/index.ts` starts the HTTP server and exposes `/mcp`, `/refresh-apis`, `/resolve-mcp-servers`, `/stats`, `/health` and `/openapi.json`.
 2. It sets `globalThis.executionEnvironment = 'server'`.
 3. It extracts auth from request headers, restrictions from `restriction`, `restrict`, and `r` query parameters plus the `mc8yp-restriction` header, and allow rules from `allowed`, `allow`, and `a` query parameters plus the `mc8yp-allow` header. External MCP servers come from the `mc8yp-mcp-server` header only (no query equivalent — the value carries credentials); a malformed entry is a 400, not a silent skip.
 4. It stores auth in request-local context and forwards the request to the shared MCP server.
@@ -395,7 +395,7 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 - For deployed microservice mode, prefer POST-only streamable HTTP over long-lived GET/SSE. The optional SSE channel can go inactive behind Cumulocity ingress and break later tool calls even when initialization and tool discovery succeeded.
 - The `status` tool is the in-protocol on-demand refresh path for CLI mode. It busts the per-tenant discovery cache via `refreshCapabilities`, re-resolves specs, and patches both `getCliTenantContext().specs` and `c8yMcpServer.ctx.custom.specs` so the very next `codemode` call sees the new surface. There is no rate-limit — a local human-driven session has no runaway-agent risk and a forced refresh after a deploy should always work.
 - Server mode has no in-protocol `status` tool yet; only the `POST /refresh-apis` HTTP route exists for ops/CI use. An in-protocol server-side equivalent (with rate-limiting) is planned for a separate PR and will need to re-introduce a tenant-ID stash on `c8yMcpServer.ctx.custom` and a global cooldown timestamp in `src/utils/capability-discovery.ts`.
-- mc8yp ships its own `openapi.json` (repo root) describing the non-MCP HTTP surface (`/refresh-apis`, `/health`). It is referenced from `cumulocity.json#openApiSpec` and served by the H3 server at `GET /openapi.json` via a `with { type: 'json' }` import in `src/index.ts` so it inlines into every server bundle. When mc8yp is subscribed on a tenant, the standard discovery loop in `src/utils/capability-discovery.ts` picks it up and exposes it to agents as the `mc8yp_server` namespace (contextPath `mc8yp-server`, sanitized). The MCP endpoint at `/mcp` is intentionally NOT documented in this spec — MCP discovery is out-of-band via `tools/list`. Keep `openapi.json` in sync with any change to the HTTP surface, and never list `/mcp` there.
+- mc8yp ships its own `openapi.json` (repo root) describing the non-MCP HTTP surface (`/refresh-apis`, `/resolve-mcp-servers`, `/stats`, `/health`). It is referenced from `cumulocity.json#openApiSpec` and served by the H3 server at `GET /openapi.json` via a `with { type: 'json' }` import in `src/index.ts` so it inlines into every server bundle. When mc8yp is subscribed on a tenant, the standard discovery loop in `src/utils/capability-discovery.ts` picks it up and exposes it to agents as the `mc8yp_server` namespace (contextPath `mc8yp-server`, sanitized). The MCP endpoint at `/mcp` is intentionally NOT documented in this spec — MCP discovery is out-of-band via `tools/list`. Keep `openapi.json` in sync with any change to the HTTP surface, and never list `/mcp` there.
 - CLI mode is a single stdio process; there is no IPC channel from a second terminal into the running CLI. Out-of-process triggers (e.g. "refresh from a shell after deploying") are intentionally not supported. Refresh has to flow through the in-protocol `status` tool.
 
 - The namespace/discovery layer: host-side derivation of one typed method per OpenAPI operation (or MCP tool), `search`/`describe` as the discovery SDK, deliberately NO escape hatch — namespaces are the complete surface. Design choices to know: namespace-level describe lists methods one line each and never renders types (core is too big for full type dumps — see the three describe altitudes above), output types are derived from response schemas, and prose docs get their own MiniSearch-backed `docs` global because name-oriented method search scores long prose poorly.

@@ -318,6 +318,11 @@ app.post('/resolve-mcp-servers', async (event) => {
   }
 })
 
+app.get('/stats', async () => {
+  const stats = await (await getSandbox()).stats()
+  return stats
+})
+
 app.get('/health', async () => {
   const result = await (await getSandbox()).run({
     code: 'export default \'alive\';',

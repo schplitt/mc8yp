@@ -3,7 +3,7 @@
   "info": {
     "title": "mc8yp HTTP API",
     "version": "1.0.0",
-    "description": "Auxiliary REST surface of the mc8yp Cumulocity MCP microservice.\n\nThis spec intentionally documents only the non-MCP HTTP routes (`/refresh-apis`, `/resolve-mcp-servers`, `/health`). The MCP protocol itself is served at `POST /mcp` over JSON-RPC and is **not** documented here — MCP clients discover tools and prompts via the MCP `tools/list` / `prompts/list` flow, not via OpenAPI. If you are an agent reading this through `serviceSpecs['mc8yp-server']`, you are talking to mc8yp through mc8yp; do not call `/service/mc8yp-server/mcp` from inside `execute`.\n\nThe primary use cases for this spec are letting an agent trigger a fresh API discovery in mc8yp itself after subscribing or unsubscribing a microservice in the tenant, and letting a management UI resolve and check external MCP server configuration before storing it."
+    "description": "Auxiliary REST surface of the mc8yp Cumulocity MCP microservice.\n\nThis spec intentionally documents only the non-MCP HTTP routes (`/refresh-apis`, `/resolve-mcp-servers`, `/stats`, `/health`). The MCP protocol itself is served at `POST /mcp` over JSON-RPC and is **not** documented here — MCP clients discover tools and prompts via the MCP `tools/list` / `prompts/list` flow, not via OpenAPI. If you are an agent reading this through `serviceSpecs['mc8yp-server']`, you are talking to mc8yp through mc8yp; do not call `/service/mc8yp-server/mcp` from inside `execute`.\n\nThe primary use cases for this spec are letting an agent trigger a fresh API discovery in mc8yp itself after subscribing or unsubscribing a microservice in the tenant, and letting a management UI resolve and check external MCP server configuration before storing it."
   },
   "paths": {
     "/refresh-apis": {
@@ -83,6 +83,29 @@
           },
           "500": {
             "description": "Resolution failed for an unexpected reason.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          }
+        }
+      }
+    },
+    "/stats": {
+      "get": {
+        "operationId": "sandboxStats",
+        "summary": "Point-in-time capacity/usage snapshot of the codemode sandbox runtime.",
+        "description": "Returns the `@iso4/sandbox` runtime's own `stats()` snapshot: active/queued runs, warm-instance counts, memory budget and pressure state, and per-prefix instance counts. Diagnostics only — every number is stale the moment it returns, so treat it as observability, not synchronization.\n\nLike `/health`, the first call lazily initializes the shared sandbox runtime (spawning its child process) if no `codemode` call has done so yet.",
+        "responses": {
+          "200": {
+            "description": "Snapshot taken successfully.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SandboxStats" }
+              }
+            }
+          },
+          "500": {
+            "description": "The sandbox runtime could not be initialized or did not answer.",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
             }
@@ -280,6 +303,92 @@
         "properties": {
           "name": { "type": "string", "description": "Tool name as advertised by the server." },
           "description": { "type": "string", "description": "The tool's description, or its title when it has none." }
+        }
+      },
+      "SandboxStats": {
+        "type": "object",
+        "description": "A point-in-time capacity/usage snapshot from the `@iso4/sandbox` runtime. The runtime-side numbers are mutually consistent (taken under one registry lock); `queueDepth` is a separate host-side read taken after the round trip.",
+        "required": [
+          "activeRuns",
+          "queueDepth",
+          "openConnections",
+          "warmInstances",
+          "idleInstances",
+          "idleHeapBytes",
+          "budgetBytes",
+          "rssBytes",
+          "usageBytes",
+          "hardLineBytes",
+          "underPressure",
+          "prefixes"
+        ],
+        "properties": {
+          "activeRuns": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Runs executing right now: one-off runs plus prefix runs on warm instances. Several prefix runs may share one instance, so this can exceed the busy-instance count."
+          },
+          "queueDepth": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Callers queued for a free run slot (the configured maximum of concurrent runs is already executing)."
+          },
+          "openConnections": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Host-side count of runtime connections as the pool tracks them. Connections are kept for the process lifetime, so this rises to roughly the concurrency high-water mark divided by the per-connection cap and stays there."
+          },
+          "warmInstances": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Resident warm instances — busy plus idle. Bounded by memory, not by a count."
+          },
+          "idleInstances": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Idle warm instances ready to serve their prefix without a cold start."
+          },
+          "idleHeapBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Summed heap of the idle instances in bytes, each measured after its last call."
+          },
+          "budgetBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The memory mark the runtime sheds against, in bytes. 0 = watermarks disabled. Utilization is `usageBytes / budgetBytes`."
+          },
+          "rssBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The runtime child process's own resident set size in bytes at snapshot time. 0 when the platform offers no reader."
+          },
+          "usageBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Measured global container memory in bytes at snapshot time (cgroup working set including the Node host; equals the child's RSS where no cgroup exists; 0 when neither is readable)."
+          },
+          "hardLineBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The isolate admission line in bytes: 90% of the container limit minus the host reserve. A run needing a new isolate that would not fit under it fails with `ERR_CAPACITY`. 0 = no container limit readable, line disabled."
+          },
+          "underPressure": {
+            "type": "boolean",
+            "description": "True while the runtime is shedding: usage reached the budget and has not yet fallen back to 80% of it. While shedding, idle instances are evicted and new warm admissions stop."
+          },
+          "prefixes": {
+            "type": "object",
+            "description": "Per-prefix instance counts, keyed by prefix id — saturation of a single hot prefix is diagnosable here.",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["idle", "busy"],
+              "properties": {
+                "idle": { "type": "integer", "minimum": 0 },
+                "busy": { "type": "integer", "minimum": 0 }
+              }
+            }
+          }
         }
       },
       "Error": {
