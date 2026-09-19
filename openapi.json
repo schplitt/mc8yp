@@ -94,7 +94,7 @@
       "get": {
         "operationId": "sandboxStats",
         "summary": "Point-in-time capacity/usage snapshot of the codemode sandbox runtime.",
-        "description": "Returns the `@iso4/sandbox` runtime's own `stats()` snapshot: active/queued runs, warm-instance counts, memory budget and pressure state, and per-prefix instance counts. Diagnostics only — every number is stale the moment it returns, so treat it as observability, not synchronization.\n\nLike `/health`, the first call lazily initializes the shared sandbox runtime (spawning its child process) if no `codemode` call has done so yet.",
+        "description": "Returns the `@iso4/sandbox` runtime's own `stats()` snapshot: active/queued runs and the current concurrency slot limit, warm-instance counts, memory budget and pressure state, and per-prefix instance counts. Diagnostics only — every number is stale the moment it returns, so treat it as observability, not synchronization.\n\nLike `/health`, the first call lazily initializes the shared sandbox runtime (spawning its child process) if no `codemode` call has done so yet.",
         "responses": {
           "200": {
             "description": "Snapshot taken successfully.",
@@ -311,6 +311,7 @@
         "required": [
           "activeRuns",
           "queueDepth",
+          "slotLimit",
           "openConnections",
           "warmInstances",
           "idleInstances",
@@ -331,12 +332,17 @@
           "queueDepth": {
             "type": "integer",
             "minimum": 0,
-            "description": "Callers queued for a free run slot (the configured maximum of concurrent runs is already executing)."
+            "description": "Callers queued for a free run slot (`slotLimit` runs are already executing). Callers beyond the queue bound are shed with `ERR_QUEUE_FULL`."
+          },
+          "slotLimit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Runs admitted concurrently right now. mc8yp does not pin `maxConcurrentRuns`, so the runtime derives this from the shape of the runs it is serving and moves it as the workload changes — expect it to vary between snapshots."
           },
           "openConnections": {
             "type": "integer",
             "minimum": 0,
-            "description": "Host-side count of runtime connections as the pool tracks them. Connections are kept for the process lifetime, so this rises to roughly the concurrency high-water mark divided by the per-connection cap and stays there."
+            "description": "Host-side count of runtime connections as the pool tracks them (the dedicated `stats()` control connection not included). Runs are multiplexed onto shared connections — another is opened only once all are at the internal per-connection cap — and a connection that has carried nothing for 30 s is closed, one always kept. It is a ledger, not a socket probe: a connection that died stays counted until the next run observes and replaces it."
           },
           "warmInstances": {
             "type": "integer",
@@ -371,7 +377,7 @@
           "hardLineBytes": {
             "type": "integer",
             "minimum": 0,
-            "description": "The isolate admission line in bytes: 90% of the container limit minus the host reserve. A run needing a new isolate that would not fit under it fails with `ERR_CAPACITY`. 0 = no container limit readable, line disabled."
+            "description": "The isolate admission line in bytes: 90% of the container limit minus the host reserve (`hostReserveMb`, 128 MB by default). A run needing a new isolate that would not fit under it fails with `ERR_CAPACITY_MEMORY`. 0 = no container limit readable, line disabled."
           },
           "underPressure": {
             "type": "boolean",
