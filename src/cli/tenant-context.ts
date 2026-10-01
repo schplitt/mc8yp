@@ -92,6 +92,11 @@ export async function renewCliTenantAuthIfExpiring(): Promise<void> {
   }
 
   const creds = await getFreshCliCredentials(ctx.tenantUrl)
+  // The renewal may have waited on the user; if set-active-tenant switched
+  // tenants meanwhile, writing now would put this tenant's auth back.
+  if (_context !== ctx) {
+    return
+  }
   ctx.authorizationHeader = createC8yAuthHeaders(creds).Authorization!
   ctx.tfaExpiresAt = creds.tfaSession?.expiresAt
 

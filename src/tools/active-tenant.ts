@@ -67,8 +67,10 @@ export function createSetActiveTenantTool() {
           )
         }
 
-        writeActiveTenant(input.tenantUrl)
+        // Persist only once activation succeeded: a declined TFA prompt or a
+        // failed discovery must not make the next restart switch tenants.
         const ctx = await setCliTenantContext(input.tenantUrl)
+        writeActiveTenant(input.tenantUrl)
 
         // Push auth and specs into the shared MCP context so all subsequent
         // codemode calls read from it without needing to re-resolve.

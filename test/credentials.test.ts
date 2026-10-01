@@ -138,11 +138,12 @@ describe('TFA credentials', () => {
   })
 
   it('exchanges password + TFA code for a token and reads its expiry from the JWT', async () => {
-    const token = fakeJwt(2_000_000_000)
+    const exp = Math.floor(Date.now() / 1000) + 14 * 24 * 3600
+    const token = fakeJwt(exp)
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { access_token: token }))
 
     const session = await requestTfaSession({ tenantUrl: 'https://t.example.com', user: 'u', password: 'p', tenantId: 't42' }, ' 123456 ')
-    expect(session).toEqual({ token, expiresAt: 2_000_000_000_000 })
+    expect(session).toEqual({ token, expiresAt: exp * 1000 })
 
     const [url, init] = fetchMock.mock.calls[0]!
     expect(String(url)).toBe('https://t.example.com/tenant/oauth/token?tenant_id=t42')
@@ -153,6 +154,30 @@ describe('TFA credentials', () => {
       password: 'p',
       tfa_code: '123456',
     })
+  })
+
+  it('refuses to follow redirects with the password in the body', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { access_token: fakeJwt(2_000_000_000) }))
+    await requestTfaSession({ tenantUrl: 'https://t.example.com', user: 'u', password: 'p' }, '123456')
+    expect(fetchMock.mock.calls[0]![1]?.redirect).toBe('error')
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { name: 't42' }))
+    await setStoredC8yAuth({ tenantUrl: 'https://t.example.com', user: 'u', password: 'p' })
+    expect(fetchMock.mock.calls[1]![1]?.redirect).toBe('error')
+  })
+
+  it('rejects a token that is already expired', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { access_token: fakeJwt(Math.floor(Date.now() / 1000) - 60) }))
+    await expect(requestTfaSession({ tenantUrl: 'https://t.example.com', user: 'u', password: 'p' }, '123456'))
+      .rejects
+      .toThrow('already expired')
+  })
+
+  it('clamps an absurd expiry so it stays a valid date', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { access_token: fakeJwt(1e300) }))
+    const session = await requestTfaSession({ tenantUrl: 'https://t.example.com', user: 'u', password: 'p' }, '123456')
+    expect(session.expiresAt).toBeLessThanOrEqual(Date.now() + 366 * 24 * 3600_000)
+    expect(() => new Date(session.expiresAt).toISOString()).not.toThrow()
   })
 
   it('stores the TFA session and resolves the tenant ID with the bearer token', async () => {

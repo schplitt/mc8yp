@@ -7,6 +7,7 @@ import { createCliClient, getFreshCliCredentials } from '../cli/tfa-session'
 import { c8yMcpServer } from '../server-instance'
 import { refreshCapabilities } from '../utils/capability-discovery'
 import { resolveCapabilities } from '../utils/capability-resolution'
+import { createC8yAuthHeaders } from '../utils/client'
 import { resetActiveTenant } from './active-tenant'
 
 const STATUS_TOOL_DESCRIPTION
@@ -107,14 +108,20 @@ async function refreshCliActiveTenant(tenantUrl: string): Promise<string> {
     const resolved = resolveCapabilities(result.specs, result.installedContextPaths, result.mcpServers)
 
     // Update both the CLI-local context and the shared MCP custom context
-    // so subsequent codemode calls see the new surface immediately.
+    // so subsequent codemode calls see the new surface immediately — but
+    // only if this tenant is still the active one (the refresh may have
+    // waited on a TFA prompt while set-active-tenant switched tenants).
+    // The auth header is refreshed too, in case the TFA session was renewed.
     const cliCtx = getCliTenantContext()
-    if (cliCtx) {
+    if (cliCtx?.tenantUrl === tenantUrl) {
       cliCtx.specs = resolved
-    }
-    const custom = c8yMcpServer.ctx.custom
-    if (custom) {
-      custom.specs = resolved
+      cliCtx.authorizationHeader = createC8yAuthHeaders(creds).Authorization!
+      cliCtx.tfaExpiresAt = creds.tfaSession?.expiresAt
+      const custom = c8yMcpServer.ctx.custom
+      if (custom) {
+        custom.specs = resolved
+        custom.auth = { tenantUrl, authorizationHeader: cliCtx.authorizationHeader }
+      }
     }
     return `Refreshed API discovery for ${tenantUrl}: ${result.specs.length} spec(s) downloaded, ${result.mcpServers.length} MCP server(s) connected, ${result.installedContextPaths.size} subscribed application(s).`
   } catch (err) {

@@ -64,6 +64,12 @@ interface StoredUserC8yAuth extends BaseC8yAuth {
 type NewStoredUserC8yAuth = Omit<UserC8yAuth, 'tenantId'> & { tenantId?: string }
 
 /**
+ * Upper bound for a stored TFA session's expiry. Keeps a malformed `exp`
+ * claim from producing an out-of-range Date.
+ */
+const MAX_TFA_SESSION_MS = 365 * 24 * 3600_000
+
+/**
  * Thrown when the platform rejects a login because a TFA code is required.
  * `creds add` catches it to prompt for the code.
  */
@@ -91,6 +97,8 @@ async function platformError(res: Response, action: string): Promise<Error> {
 async function resolveTenantId(tenantUrl: string, authorizationHeader: string): Promise<string> {
   const res = await fetch(`${tenantUrl}/tenant/currentTenant`, {
     headers: { Authorization: authorizationHeader, Accept: 'application/json' },
+    // Credentials go to the tenant only, never to wherever it redirects.
+    redirect: 'error',
   })
   if (!res.ok) {
     throw await platformError(res, 'Login')
@@ -122,6 +130,9 @@ export async function requestTfaSession(
       password: creds.password,
       tfa_code: tfaCode.trim(),
     }),
+    // fetch re-sends the body on a 307/308, even cross-origin — and this one
+    // carries the password. Unlike the Authorization header it is not stripped.
+    redirect: 'error',
   })
   if (!res.ok) {
     throw await platformError(res, 'TFA login')
@@ -135,10 +146,16 @@ export async function requestTfaSession(
   try {
     exp = (JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8')) as { exp?: unknown }).exp
   } catch {}
-  if (typeof exp !== 'number') {
+  if (typeof exp !== 'number' || !Number.isFinite(exp)) {
     throw new Error('TFA login failed: could not read the expiry (exp claim) of the access token.')
   }
-  return { token, expiresAt: exp * 1000 }
+  const expiresAt = exp * 1000
+  if (expiresAt <= Date.now()) {
+    throw new Error(`TFA login failed: the platform issued an access token that already expired (${new Date(expiresAt).toISOString()}).`)
+  }
+  // Only schedules renewal (the platform enforces the real expiry), so an
+  // absurd value just means renewing early — but it must stay a valid Date.
+  return { token, expiresAt: Math.min(expiresAt, Date.now() + MAX_TFA_SESSION_MS) }
 }
 
 async function writeStoredC8yAuth(creds: UserC8yAuth): Promise<void> {
