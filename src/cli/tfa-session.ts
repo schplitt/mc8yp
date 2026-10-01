@@ -73,7 +73,12 @@ async function renewTfaSession(creds: UserC8yAuth): Promise<UserC8yAuth> {
   let code: string | undefined
   try {
     const answer = await c8yMcpServer.elicitation(
-      `${state} Enter the current code from your authenticator app to continue.`,
+      // Say what the code authorizes: the human should be able to tell an
+      // expected renewal from a prompt they did not cause.
+      `mc8yp — the Cumulocity MCP server your AI assistant is using — needs a new TFA code to keep acting as ${creds.user} on ${creds.tenantUrl}. `
+      + `The current session ${expiresAt <= Date.now() ? 'expired' : 'expires'} at ${new Date(expiresAt).toLocaleString()}. `
+      + 'Entering the code from your authenticator app renews the assistant\'s access to this tenant for the full token lifetime set by your tenant. '
+      + 'Decline if you did not expect this prompt.',
       v.object({
         code: v.pipe(
           v.string(),

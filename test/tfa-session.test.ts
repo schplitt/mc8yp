@@ -71,6 +71,10 @@ describe('getFreshCliCredentials', () => {
 
     const creds = await getFreshCliCredentials(TENANT)
     expect(elicit).toHaveBeenCalledOnce()
+    const message = elicit.mock.calls[0]![0]
+    expect(message).toContain(`acting as u on ${TENANT}`)
+    expect(message).toContain('renews the assistant\'s access')
+    expect(message).toContain('Decline if you did not expect this prompt')
     expect(requestTfaSession).toHaveBeenCalledWith(expect.objectContaining({ user: 'u', password: 'p', tenantId: 't42' }), '123456')
     expect(creds.tfaSession).toEqual(renewed)
   })
