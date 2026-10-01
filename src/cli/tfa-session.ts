@@ -3,7 +3,6 @@ import { isInputRequired } from 'tmcp'
 import * as v from 'valibot'
 import { c8yMcpServer } from '../server-instance'
 import type { UserC8yAuth } from '../utils/credentials'
-import { requestTfaSession, updateStoredTfaSession } from '../utils/credentials'
 
 /**
  * Renew a TFA session this long before it expires, so a codemode run that
@@ -74,7 +73,12 @@ async function renewTfaSession(creds: UserC8yAuth): Promise<UserC8yAuth> {
   let code: string | undefined
   try {
     const answer = await c8yMcpServer.elicitation(
-      `${state} Enter the current code from your authenticator app to continue.`,
+      // Say what the code authorizes: the human should be able to tell an
+      // expected renewal from a prompt they did not cause.
+      `mc8yp — the Cumulocity MCP server your AI assistant is using — needs a new TFA code to keep acting as ${creds.user} on ${creds.tenantUrl}. `
+      + `The current session ${expiresAt <= Date.now() ? 'expired' : 'expires'} at ${new Date(expiresAt).toLocaleString()}. `
+      + 'Entering the code from your authenticator app renews the assistant\'s access to this tenant for the full token lifetime set by your tenant. '
+      + 'Decline if you did not expect this prompt.',
       v.object({
         code: v.pipe(
           v.string(),
@@ -94,6 +98,9 @@ async function renewTfaSession(creds: UserC8yAuth): Promise<UserC8yAuth> {
     throw new Error(`${state} No TFA code was entered. ${shellHint}`)
   }
 
-  const session = await requestTfaSession(creds, code)
-  return updateStoredTfaSession(creds, session)
+  // Credential helpers come in as CLI-installed globals, never as a static
+  // import: the shared tools reach this module, and a static import would
+  // pull @napi-rs/keyring into every server bundle.
+  const session = await globalThis._requestTfaSession(creds, code)
+  return globalThis._updateStoredTfaSession(creds, session)
 }

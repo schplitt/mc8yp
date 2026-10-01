@@ -11,11 +11,6 @@ import type { UserC8yAuth } from '../src/utils/credentials'
 const requestTfaSession = vi.fn()
 const updateStoredTfaSession = vi.fn(async (creds: UserC8yAuth, tfaSession: UserC8yAuth['tfaSession']) => ({ ...creds, tfaSession }))
 
-vi.mock('../src/utils/credentials', () => ({
-  requestTfaSession: (...args: unknown[]) => requestTfaSession(...args),
-  updateStoredTfaSession: (creds: UserC8yAuth, s: UserC8yAuth['tfaSession']) => updateStoredTfaSession(creds, s),
-}))
-
 const TENANT = 'https://t.example.com'
 
 function storedCreds(expiresAt?: number): UserC8yAuth {
@@ -37,6 +32,8 @@ function stubClient(elicitation: boolean): void {
 beforeEach(() => {
   requestTfaSession.mockReset()
   updateStoredTfaSession.mockClear()
+  globalThis._requestTfaSession = requestTfaSession
+  globalThis._updateStoredTfaSession = updateStoredTfaSession as typeof globalThis._updateStoredTfaSession
 })
 
 afterEach(() => {
@@ -74,6 +71,10 @@ describe('getFreshCliCredentials', () => {
 
     const creds = await getFreshCliCredentials(TENANT)
     expect(elicit).toHaveBeenCalledOnce()
+    const message = elicit.mock.calls[0]![0]
+    expect(message).toContain(`acting as u on ${TENANT}`)
+    expect(message).toContain('renews the assistant\'s access')
+    expect(message).toContain('Decline if you did not expect this prompt')
     expect(requestTfaSession).toHaveBeenCalledWith(expect.objectContaining({ user: 'u', password: 'p', tenantId: 't42' }), '123456')
     expect(creds.tfaSession).toEqual(renewed)
   })
