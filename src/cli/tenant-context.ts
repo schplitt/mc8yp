@@ -1,8 +1,9 @@
-import { BasicAuth, Client } from '@c8y/client'
+import { c8yMcpServer } from '../server-instance'
 import { startDiscovery } from '../utils/capability-discovery'
 import { createC8yAuthHeaders } from '../utils/client'
 import type { TenantCapabilities } from '../utils/capability-resolution'
 import { resolveCapabilities } from '../utils/capability-resolution'
+import { createCliClient, getFreshCliCredentials, TFA_REFRESH_MARGIN_MS } from './tfa-session'
 
 export interface CliTenantContext {
   tenantUrl: string
@@ -14,6 +15,11 @@ export interface CliTenantContext {
    * Fully resolved specs (bundled + discovered, paths pre-prefixed).
    */
   specs: TenantCapabilities
+  /**
+   * Expiry (epoch ms) of the TFA session token behind `authorizationHeader`.
+   * Absent for Basic-auth credentials, which do not expire.
+   */
+  tfaExpiresAt?: number
 }
 
 let _context: CliTenantContext | null = null
@@ -50,16 +56,9 @@ export function clearCliTenantContext(): void {
  * @param tenantUrl - Base URL of the Cumulocity tenant to activate
  */
 export async function setCliTenantContext(tenantUrl: string): Promise<CliTenantContext> {
-  const creds = await globalThis._getCredentialsByTenantUrl(tenantUrl)
+  const creds = await getFreshCliCredentials(tenantUrl)
   const authHeaders = createC8yAuthHeaders(creds)
-
-  // CLI creds from the keyring are always UserC8yAuth (user/password).
-  // Build the Cumulocity client directly so discovery has a typed
-  // entrypoint into the platform.
-  const cliClient = new Client(
-    new BasicAuth({ tenant: creds.tenantId, user: creds.user, password: creds.password }),
-    tenantUrl,
-  )
+  const cliClient = createCliClient(creds)
 
   // startDiscovery is idempotent: returns the cached promise if already running.
   // _context.specs is a resolved snapshot; the cache is busted externally
@@ -71,7 +70,33 @@ export async function setCliTenantContext(tenantUrl: string): Promise<CliTenantC
     tenantUrl,
     authorizationHeader: authHeaders.Authorization!,
     specs: resolveCapabilities(discovered, installedContextPaths, mcpServers),
+    tfaExpiresAt: creds.tfaSession?.expiresAt,
   }
 
   return _context
+}
+
+/**
+ * Renew the active tenant's TFA session when it is about to expire, and
+ * push the new Authorization header into the shared MCP context. Noop for
+ * Basic-auth tenants and while the token is still fresh, so the keyring is
+ * only read near expiry. Called by the codemode tool before each run.
+ *
+ * Throws (via `getFreshCliCredentials`) when the session cannot be renewed
+ * here; the codemode tool surfaces that message to the agent.
+ */
+export async function renewCliTenantAuthIfExpiring(): Promise<void> {
+  const ctx = _context
+  if (!ctx?.tfaExpiresAt || ctx.tfaExpiresAt - Date.now() > TFA_REFRESH_MARGIN_MS) {
+    return
+  }
+
+  const creds = await getFreshCliCredentials(ctx.tenantUrl)
+  ctx.authorizationHeader = createC8yAuthHeaders(creds).Authorization!
+  ctx.tfaExpiresAt = creds.tfaSession?.expiresAt
+
+  const custom = c8yMcpServer.ctx.custom
+  if (custom) {
+    custom.auth = { tenantUrl: ctx.tenantUrl, authorizationHeader: ctx.authorizationHeader }
+  }
 }

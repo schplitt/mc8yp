@@ -1,4 +1,4 @@
-import { Client } from '@c8y/client'
+import { Buffer } from 'node:buffer'
 import { AsyncEntry, findCredentialsAsync } from '@napi-rs/keyring'
 import pkgjson from '../../package.json' with { type: 'json' }
 
@@ -17,6 +17,19 @@ export interface TokenC8yAuth extends BaseC8yAuth {
   token: string
 }
 
+/**
+ * OAI-Secure access token obtained with a TFA code. Users with two-factor
+ * authentication cannot use Basic auth (every request would need a fresh
+ * TOTP code), so live calls use this token instead while it is valid.
+ */
+export interface TfaSession {
+  token: string
+  /**
+   * Token expiry as epoch milliseconds, read from the JWT `exp` claim.
+   */
+  expiresAt: number
+}
+
 export interface UserC8yAuth extends BaseC8yAuth {
   /**
    * The Cumulocity username (for Basic auth)
@@ -31,6 +44,12 @@ export interface UserC8yAuth extends BaseC8yAuth {
    * The Cumulocity tenant ID used in Basic auth: tenantId/user
    */
   tenantId: string
+
+  /**
+   * Present for users with TFA enabled. The password is kept alongside so a
+   * new token can be requested with just a fresh TFA code.
+   */
+  tfaSession?: TfaSession
 }
 
 export type C8yAuth = TokenC8yAuth | UserC8yAuth
@@ -39,17 +58,87 @@ interface StoredUserC8yAuth extends BaseC8yAuth {
   user: string
   password: string
   tenantId?: string
+  tfaSession?: TfaSession
 }
 
 type NewStoredUserC8yAuth = Omit<UserC8yAuth, 'tenantId'> & { tenantId?: string }
 
-async function resolveTenantId(creds: Omit<UserC8yAuth, 'tenantId'>): Promise<string> {
-  const client = await Client.authenticate({
-    user: creds.user,
-    password: creds.password,
-  }, creds.tenantUrl)
-  const tenant = await client.tenant.current()
-  return tenant.data.name
+/**
+ * Thrown when the platform rejects a login because a TFA code is required.
+ * `creds add` catches it to prompt for the code.
+ */
+export class TfaRequiredError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'TfaRequiredError'
+  }
+}
+
+/**
+ * Turn a failed platform response into an Error carrying the platform's own
+ * message (e.g. "Invalid credentials! : TFA TOTP code required.").
+ * @param res - Non-2xx response from the tenant
+ * @param action - What was attempted, for the message prefix
+ */
+async function platformError(res: Response, action: string): Promise<Error> {
+  const body = await res.json().catch(() => undefined) as { message?: string } | undefined
+  const message = `${action} failed: ${res.status} ${res.statusText}${body?.message ? ` — ${body.message}` : ''}`
+  return res.status === 401 && /\bTFA\b/i.test(body?.message ?? '')
+    ? new TfaRequiredError(message)
+    : new Error(message)
+}
+
+async function resolveTenantId(tenantUrl: string, authorizationHeader: string): Promise<string> {
+  const res = await fetch(`${tenantUrl}/tenant/currentTenant`, {
+    headers: { Authorization: authorizationHeader, Accept: 'application/json' },
+  })
+  if (!res.ok) {
+    throw await platformError(res, 'Login')
+  }
+  const tenant = await res.json() as { name: string }
+  return tenant.name
+}
+
+/**
+ * Exchange user, password and a current TFA code for an OAI-Secure access
+ * token via `POST /tenant/oauth/token`.
+ * @param creds - Tenant URL, user, password, and the tenant ID when already known
+ * @param tfaCode - Current TFA code (TOTP)
+ */
+export async function requestTfaSession(
+  creds: Omit<UserC8yAuth, 'tenantId' | 'tfaSession'> & { tenantId?: string },
+  tfaCode: string,
+): Promise<TfaSession> {
+  const url = new URL('/tenant/oauth/token', creds.tenantUrl)
+  if (creds.tenantId) {
+    url.searchParams.set('tenant_id', creds.tenantId)
+  }
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+    body: new URLSearchParams({
+      grant_type: 'PASSWORD',
+      username: creds.user,
+      password: creds.password,
+      tfa_code: tfaCode.trim(),
+    }),
+  })
+  if (!res.ok) {
+    throw await platformError(res, 'TFA login')
+  }
+  const { access_token: token } = await res.json() as { access_token?: string }
+  if (!token) {
+    throw new Error('TFA login failed: the platform response contained no access token.')
+  }
+
+  let exp: unknown
+  try {
+    exp = (JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8')) as { exp?: unknown }).exp
+  } catch {}
+  if (typeof exp !== 'number') {
+    throw new Error('TFA login failed: could not read the expiry (exp claim) of the access token.')
+  }
+  return { token, expiresAt: exp * 1000 }
 }
 
 async function writeStoredC8yAuth(creds: UserC8yAuth): Promise<void> {
@@ -77,6 +166,7 @@ function parseStoredUserC8yAuth(jsonString: string, tenantUrl: string): UserC8yA
     user: cred.user,
     password: cred.password,
     tenantId: cred.tenantId,
+    ...(cred.tfaSession ? { tfaSession: cred.tfaSession } : {}),
   }
 }
 
@@ -116,14 +206,26 @@ export async function setStoredC8yAuth(creds: NewStoredUserC8yAuth): Promise<voi
   const normalized: UserC8yAuth = {
     ...creds,
     tenantUrl: cleanedTenantUrl,
-    tenantId: creds.tenantId ?? await resolveTenantId({
-      tenantUrl: cleanedTenantUrl,
-      user: creds.user,
-      password: creds.password,
-    }),
+    tenantId: creds.tenantId ?? await resolveTenantId(
+      cleanedTenantUrl,
+      creds.tfaSession
+        ? `Bearer ${creds.tfaSession.token}`
+        : `Basic ${Buffer.from(`${creds.user}:${creds.password}`).toString('base64')}`,
+    ),
   }
 
   await writeStoredC8yAuth(normalized)
+}
+
+/**
+ * Replace the stored TFA session for an existing credential entry.
+ * @param creds - The stored credentials the new session belongs to
+ * @param tfaSession - Freshly obtained session token
+ */
+export async function updateStoredTfaSession(creds: UserC8yAuth, tfaSession: TfaSession): Promise<UserC8yAuth> {
+  const updated: UserC8yAuth = { ...creds, tfaSession }
+  await writeStoredC8yAuth(updated)
+  return updated
 }
 
 export function cleanTenantUrl(url: string): string {

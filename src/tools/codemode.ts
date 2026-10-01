@@ -1,6 +1,8 @@
+import { isInputRequired } from 'tmcp'
 import { defineTool } from 'tmcp/tool'
 import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
+import { renewCliTenantAuthIfExpiring } from '../cli/tenant-context'
 import { execute } from '../codemode/execute'
 import type { Env } from '../types'
 
@@ -137,10 +139,20 @@ async () => {
         v.description('An async JavaScript function expression. The globals codemode, docs, c8y, and per-service namespaces are available automatically — do not declare them as parameters. Return the final result.'),
       ),
     }),
+    // CLI with a TFA tenant may ask the client for a new TFA code before the
+    // run starts. Nothing has executed at that point, so a stateless retry
+    // that restarts this handler from the top is safe.
+    replayable: true,
   }, async (input) => {
     try {
+      if (env === 'cli') {
+        await renewCliTenantAuthIfExpiring()
+      }
       return tool.text(await execute(input.code))
     } catch (error) {
+      if (isInputRequired(error)) {
+        throw error
+      }
       return tool.error(error instanceof Error ? error.message : String(error))
     }
   })
