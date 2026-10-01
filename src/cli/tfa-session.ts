@@ -3,7 +3,6 @@ import { isInputRequired } from 'tmcp'
 import * as v from 'valibot'
 import { c8yMcpServer } from '../server-instance'
 import type { UserC8yAuth } from '../utils/credentials'
-import { requestTfaSession, updateStoredTfaSession } from '../utils/credentials'
 
 /**
  * Renew a TFA session this long before it expires, so a codemode run that
@@ -94,6 +93,9 @@ async function renewTfaSession(creds: UserC8yAuth): Promise<UserC8yAuth> {
     throw new Error(`${state} No TFA code was entered. ${shellHint}`)
   }
 
-  const session = await requestTfaSession(creds, code)
-  return updateStoredTfaSession(creds, session)
+  // Credential helpers come in as CLI-installed globals, never as a static
+  // import: the shared tools reach this module, and a static import would
+  // pull @napi-rs/keyring into every server bundle.
+  const session = await globalThis._requestTfaSession(creds, code)
+  return globalThis._updateStoredTfaSession(creds, session)
 }

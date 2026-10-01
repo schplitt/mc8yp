@@ -5,7 +5,7 @@ import consola from 'consola'
 import pkgjson from '../../package.json' with { type: 'json' }
 import { getCoreOpenApiLabel, getCoreOpenApiVersion, setCoreOpenApiVersion, specs } from '#core-openapi'
 import { c8yMcpServer, setupMcpServer } from '../server'
-import { getCredentialsByTenantUrl, getStoredC8yAuth } from '../utils/credentials'
+import { getCredentialsByTenantUrl, getStoredC8yAuth, requestTfaSession, updateStoredTfaSession } from '../utils/credentials'
 import { parseAllowRule, parseNoMcp, parseRestrictionRule } from '../utils/restrictions'
 import { parseExternalMcpServers } from '../utils/external-mcp'
 import { clearActiveTenant, readActiveTenantUrl } from './active-tenant'
@@ -47,6 +47,8 @@ const main = defineCommand({
   setup: () => {
     globalThis._getCredentialsByTenantUrl = getCredentialsByTenantUrl
     globalThis._getStoredC8yAuth = getStoredC8yAuth
+    globalThis._requestTfaSession = requestTfaSession
+    globalThis._updateStoredTfaSession = updateStoredTfaSession
   },
   subCommands: {
     creds: () => import('./subcommands/creds').then((m) => m.default),
