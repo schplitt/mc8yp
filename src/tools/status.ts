@@ -2,7 +2,7 @@ import { isInputRequired } from 'tmcp'
 import { defineTool } from 'tmcp/tool'
 import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
-import { getCliTenantContext } from '../cli/tenant-context'
+import { getCliTenantContext, getPendingCliTenantUrl } from '../cli/tenant-context'
 import { createCliClient, getFreshCliCredentials } from '../cli/tfa-session'
 import { c8yMcpServer } from '../server-instance'
 import { refreshCapabilities } from '../utils/capability-discovery'
@@ -45,6 +45,7 @@ export function createStatusTool() {
 async function buildCliStatus(refresh: boolean): Promise<string> {
   const creds = await globalThis._getStoredC8yAuth()
   let active = getCliTenantContext()
+  let pending = getPendingCliTenantUrl()
   const sections: string[] = []
 
   // Drift recovery: the active tenant has no stored credentials anymore
@@ -59,8 +60,16 @@ async function buildCliStatus(refresh: boolean): Promise<string> {
     )
   }
 
+  if (pending && !creds.some((c) => c.tenantUrl === pending)) {
+    sections.push(`Selected tenant ${pending} was cleared automatically because no credentials are stored for it.`)
+    resetActiveTenant()
+    pending = null
+  }
+
   if (refresh) {
-    if (!active) {
+    if (pending) {
+      sections.push(`Refresh skipped: ${pending} is waiting for a new TFA code. The next codemode or set-active-tenant call asks for it and runs discovery.`)
+    } else if (!active) {
       sections.push('Refresh requested but no tenant is active — nothing to refresh. Call set-active-tenant first.')
     } else {
       sections.push(await refreshCliActiveTenant(active.tenantUrl))
@@ -71,6 +80,8 @@ async function buildCliStatus(refresh: boolean): Promise<string> {
 
   if (active) {
     sections.push(`Active tenant: ${active.tenantUrl}`)
+  } else if (pending) {
+    sections.push(`Active tenant: ${pending} — waiting for a new TFA code because the stored TFA session expired. The next codemode or set-active-tenant call asks the user for it; until then codemode calls fail without running.`)
   } else {
     sections.push('Active tenant: (none) — codemode discovery falls back to all bundled OpenAPI snapshots; live API calls are unavailable until set-active-tenant is called. Visibility in the bundled-only mode does NOT guarantee any service is installed on any tenant.')
   }
@@ -87,7 +98,7 @@ async function buildCliStatus(refresh: boolean): Promise<string> {
     sections.push(`Stored credentials:\n${lines}`)
   }
 
-  if (!active && creds.length > 0) {
+  if (!active && !pending && creds.length > 0) {
     sections.push('Next step: call set-active-tenant with one of the tenant URLs above before making live API calls through codemode.')
   }
 

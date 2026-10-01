@@ -21,6 +21,10 @@ const command: CommandDef = defineCommand({
 
       // check if tenantUrl is valid
       v.parse(v.pipe(v.string(), v.url()), tenantUrl)
+      const { protocol, hostname } = new URL(tenantUrl)
+      if (protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(hostname)) {
+        consola.warn(`${tenantUrl} uses plain http — your password (and TFA code) would be sent unencrypted. Use https unless this is a trusted local setup.`)
+      }
 
       const user = await consola.prompt('Username:', {
         type: 'text',
