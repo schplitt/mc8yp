@@ -41,11 +41,14 @@ vi.mock('../src/utils/capability-discovery', async (importOriginal) => {
 // CLI tenant-context normally goes through keyring + BasicAuth + discovery.
 // For tests we expose a tiny in-memory singleton and control it directly so
 // each case can flip between "no tenant" and "tenant X active" cheaply.
+let mockPendingTenant: string | null = null
 let mockCliTenant: { tenantUrl: string, authorizationHeader: string, specs: { core: { paths: Record<string, unknown> }, specs: Record<string, unknown> } } | null = null
 vi.mock('../src/cli/tenant-context', () => ({
   getCliTenantContext: () => mockCliTenant,
+  getPendingCliTenantUrl: () => mockPendingTenant,
   clearCliTenantContext: () => {
     mockCliTenant = null
+    mockPendingTenant = null
   },
   setCliTenantContext: vi.fn(),
 }))
@@ -103,6 +106,7 @@ async function callStatus(input: { refresh?: boolean } = {}): Promise<string> {
 beforeEach(() => {
   bustCapabilityCache()
   mockCliTenant = null
+  mockPendingTenant = null
   mockRefreshResult = { specs: [], mcpServers: [], installedContextPaths: new Set() }
   refreshShouldThrow = false
   globalThis._getStoredC8yAuth = vi.fn(async () => [])
@@ -211,5 +215,19 @@ describe('status tool', () => {
     expect(out).toContain('discovery exploded')
     // Even though refresh failed, the rest of the status should still render.
     expect(out).toContain('Active tenant: https://t1.cumulocity.com')
+  })
+
+  it('reports a tenant waiting for a TFA code without prompting or refreshing', async () => {
+    globalThis._getStoredC8yAuth = vi.fn(async () => [
+      { tenantUrl: 'https://t1.cumulocity.com', tenantId: 't1', user: 'u', password: 'p' },
+    ])
+    setCustomContext({})
+    mockPendingTenant = 'https://t1.cumulocity.com'
+
+    const out = await callStatus({ refresh: true })
+    expect(out).toContain('Refresh skipped: https://t1.cumulocity.com is waiting for a new TFA code')
+    expect(out).toContain('Active tenant: https://t1.cumulocity.com — waiting for a new TFA code')
+    expect(out).not.toContain('Next step')
+    expect(globalThis._getCredentialsByTenantUrl).not.toHaveBeenCalled()
   })
 })

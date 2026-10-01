@@ -9,7 +9,7 @@ import { getCredentialsByTenantUrl, getStoredC8yAuth, requestTfaSession, updateS
 import { parseAllowRule, parseNoMcp, parseRestrictionRule } from '../utils/restrictions'
 import { parseExternalMcpServers } from '../utils/external-mcp'
 import { clearActiveTenant, readActiveTenantUrl } from './active-tenant'
-import { getCliTenantContext, setCliTenantContext } from './tenant-context'
+import { getCliTenantContext, restoreCliTenantContext } from './tenant-context'
 import { getBundledOnlyCapabilities } from '../utils/capability-resolution'
 
 const main = defineCommand({
@@ -114,11 +114,15 @@ const main = defineCommand({
     const activeTenant = readActiveTenantUrl()
     if (activeTenant) {
       try {
-        const tenantCtx = await setCliTenantContext(activeTenant)
-        const specKeys = Object.keys(tenantCtx.specs.specs)
-        const mcpKeys = Object.keys(tenantCtx.specs.mcpServers)
-        consola.info(`Active tenant: ${activeTenant}`)
-        consola.info(`Startup discovery complete — OpenAPI specs: ${specKeys.length > 0 ? specKeys.join(', ') : 'none'}; MCP servers: ${mcpKeys.length > 0 ? mcpKeys.join(', ') : 'none'}`)
+        // null: the TFA session ran out — the tenant stays selected and the
+        // first codemode / set-active-tenant call asks for a new code.
+        const tenantCtx = await restoreCliTenantContext(activeTenant)
+        if (tenantCtx) {
+          const specKeys = Object.keys(tenantCtx.specs.specs)
+          const mcpKeys = Object.keys(tenantCtx.specs.mcpServers)
+          consola.info(`Active tenant: ${activeTenant}`)
+          consola.info(`Startup discovery complete — OpenAPI specs: ${specKeys.length > 0 ? specKeys.join(', ') : 'none'}; MCP servers: ${mcpKeys.length > 0 ? mcpKeys.join(', ') : 'none'}`)
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         // Drift recovery: if the persistence file points at a tenant whose

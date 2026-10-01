@@ -2,7 +2,7 @@ import { isInputRequired } from 'tmcp'
 import { defineTool } from 'tmcp/tool'
 import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
-import { renewCliTenantAuthIfExpiring } from '../cli/tenant-context'
+import { ensureCliTenantReady } from '../cli/tenant-context'
 import { execute } from '../codemode/execute'
 import type { Env } from '../types'
 
@@ -146,7 +146,7 @@ async () => {
   }, async (input) => {
     try {
       if (env === 'cli') {
-        await renewCliTenantAuthIfExpiring()
+        await ensureCliTenantReady()
       }
       return tool.text(await execute(input.code))
     } catch (error) {

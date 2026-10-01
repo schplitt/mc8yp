@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { c8yMcpServer } from '../src/server-instance'
-import { getCliTenantContext, renewCliTenantAuthIfExpiring, setCliTenantContext } from '../src/cli/tenant-context'
+import { clearCliTenantContext, ensureCliTenantReady, getCliTenantContext, getPendingCliTenantUrl, restoreCliTenantContext, setCliTenantContext } from '../src/cli/tenant-context'
 import type { UserC8yAuth } from '../src/utils/credentials'
 
 const getFreshCliCredentials = vi.fn<(tenantUrl: string) => Promise<UserC8yAuth>>()
@@ -16,8 +16,10 @@ vi.mock('../src/cli/tfa-session', () => ({
   getFreshCliCredentials: (tenantUrl: string) => getFreshCliCredentials(tenantUrl),
 }))
 
+const startDiscovery = vi.fn(async () => ({ specs: [], installedContextPaths: new Set(), mcpServers: [] }))
+
 vi.mock('../src/utils/capability-discovery', () => ({
-  startDiscovery: async () => ({ specs: [], installedContextPaths: new Set(), mcpServers: [] }),
+  startDiscovery: () => startDiscovery(),
 }))
 
 const A = 'https://a.example.com'
@@ -33,19 +35,86 @@ beforeEach(() => {
   custom = { env: 'cli' }
   vi.spyOn(c8yMcpServer, 'ctx', 'get').mockReturnValue({ custom } as unknown as typeof c8yMcpServer.ctx)
   getFreshCliCredentials.mockReset()
+  startDiscovery.mockClear()
+  clearCliTenantContext()
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('renewCliTenantAuthIfExpiring', () => {
+describe('restoreCliTenantContext (CLI startup)', () => {
+  it('activates a tenant whose TFA session is still valid', async () => {
+    globalThis._getCredentialsByTenantUrl = vi.fn(async () => creds(A, 'valid', Date.now() + 3600_000))
+    getFreshCliCredentials.mockResolvedValueOnce(creds(A, 'valid', Date.now() + 3600_000))
+
+    const ctx = await restoreCliTenantContext(A)
+    expect(ctx?.authorizationHeader).toBe('Bearer valid')
+    expect(getPendingCliTenantUrl()).toBeNull()
+  })
+
+  it('leaves a tenant with an expired TFA session pending, without prompting or discovery', async () => {
+    globalThis._getCredentialsByTenantUrl = vi.fn(async () => creds(A, 'old', Date.now() - 1000))
+
+    await expect(restoreCliTenantContext(A)).resolves.toBeNull()
+    expect(getPendingCliTenantUrl()).toBe(A)
+    expect(getCliTenantContext()).toBeNull()
+    expect(getFreshCliCredentials).not.toHaveBeenCalled()
+    expect(startDiscovery).not.toHaveBeenCalled()
+  })
+})
+
+describe('ensureCliTenantReady', () => {
+  it('activates a pending tenant on the first call: prompts, discovers, publishes auth and specs', async () => {
+    globalThis._getCredentialsByTenantUrl = vi.fn(async () => creds(A, 'old', Date.now() - 1000))
+    await restoreCliTenantContext(A)
+
+    getFreshCliCredentials.mockResolvedValueOnce(creds(A, 'renewed', Date.now() + 3600_000))
+    await ensureCliTenantReady()
+
+    expect(getFreshCliCredentials).toHaveBeenCalledWith(A)
+    expect(startDiscovery).toHaveBeenCalledOnce()
+    expect(getPendingCliTenantUrl()).toBeNull()
+    expect(getCliTenantContext()?.authorizationHeader).toBe('Bearer renewed')
+    expect(custom.auth).toEqual({ tenantUrl: A, authorizationHeader: 'Bearer renewed' })
+    expect(custom.specs).toBe(getCliTenantContext()?.specs)
+  })
+
+  it('keeps the tenant pending and throws when no code was entered, so the call does not run', async () => {
+    globalThis._getCredentialsByTenantUrl = vi.fn(async () => creds(A, 'old', Date.now() - 1000))
+    await restoreCliTenantContext(A)
+
+    getFreshCliCredentials.mockRejectedValueOnce(new Error('No TFA code was entered.'))
+    await expect(ensureCliTenantReady()).rejects.toThrow('No TFA code was entered.')
+    expect(getPendingCliTenantUrl()).toBe(A)
+    expect(custom.auth).toBeUndefined()
+  })
+
+  it('lets set-active-tenant win over a pending activation that is still waiting', async () => {
+    globalThis._getCredentialsByTenantUrl = vi.fn(async () => creds(A, 'old', Date.now() - 1000))
+    await restoreCliTenantContext(A)
+
+    let finish!: (c: UserC8yAuth) => void
+    getFreshCliCredentials.mockReturnValueOnce(new Promise((resolve) => {
+      finish = resolve
+    }))
+    const activation = ensureCliTenantReady()
+
+    getFreshCliCredentials.mockResolvedValueOnce(creds(B, 'b-token', Date.now() + 3600_000))
+    await setCliTenantContext(B)
+
+    finish(creds(A, 'a-renewed', Date.now() + 3600_000))
+    await activation
+    expect(getCliTenantContext()?.tenantUrl).toBe(B)
+    expect(custom.auth).toBeUndefined()
+  })
+
   it('updates the active tenant auth after a renewal', async () => {
     getFreshCliCredentials.mockResolvedValueOnce(creds(A, 'old', Date.now() + 60_000))
     await setCliTenantContext(A)
 
     getFreshCliCredentials.mockResolvedValueOnce(creds(A, 'renewed', Date.now() + 3600_000))
-    await renewCliTenantAuthIfExpiring()
+    await ensureCliTenantReady()
 
     expect(getCliTenantContext()?.authorizationHeader).toBe('Bearer renewed')
     expect(custom.auth).toEqual({ tenantUrl: A, authorizationHeader: 'Bearer renewed' })
@@ -60,7 +129,7 @@ describe('renewCliTenantAuthIfExpiring', () => {
     getFreshCliCredentials.mockReturnValueOnce(new Promise((resolve) => {
       finishRenewal = resolve
     }))
-    const renewal = renewCliTenantAuthIfExpiring()
+    const renewal = ensureCliTenantReady()
 
     // ... meanwhile set-active-tenant switches to B.
     getFreshCliCredentials.mockResolvedValueOnce(creds(B, 'b-token', Date.now() + 3600_000))
