@@ -20,7 +20,10 @@ const command: CommandDef = defineCommand({
 
       consola.box('Stored credentials')
       for (const c of creds) {
-        consola.log(`${c.tenantUrl} (${c.tenantId}) - ${c.user}`)
+        const tfa = c.tfaSession
+          ? ` [TFA session ${c.tfaSession.expiresAt <= Date.now() ? 'expired' : 'valid until'} ${new Date(c.tfaSession.expiresAt).toLocaleString()}]`
+          : ''
+        consola.log(`${c.tenantUrl} (${c.tenantId}) - ${c.user}${tfa}`)
       }
       exit()
     } catch (err) {

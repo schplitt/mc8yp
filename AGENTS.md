@@ -30,6 +30,8 @@ src/
   types.ts                    Shared public types
   cli/
     index.ts                  CLI entrypoint and stdio transport
+    tenant-context.ts         Active-tenant context (auth header, specs, TFA expiry) + pre-run TFA renewal
+    tfa-session.ts            TFA session renewal via MCP elicitation, Bearer/Basic @c8y/client factory
     subcommands/
       creds.ts                Credential command group
       subcommands/
@@ -249,6 +251,8 @@ The restriction system is implemented in two places:
 - `src/utils/credentials.ts` is the source of truth for storing, listing, resolving, and deleting tenant credentials.
 - Stored credentials are normalized by tenant URL.
 - User/password credentials may resolve and persist the tenant ID if it is not provided.
+- **TFA users** get an OAI-Secure token instead of Basic auth. `setStoredC8yAuth` resolves the tenant ID with a plain `fetch` to `/tenant/currentTenant`; a 401 whose message mentions TFA throws `TfaRequiredError`, which `creds add` catches to prompt for the code and call `requestTfaSession` (`POST /tenant/oauth/token`, form `grant_type=PASSWORD` + `tfa_code`; expiry read from the JWT `exp`). The keyring entry then carries `tfaSession: { token, expiresAt }` (epoch ms) alongside the password, and `createC8yAuthHeaders` sends `Bearer` whenever `tfaSession` is present.
+- **TFA renewal** lives in `src/cli/tfa-session.ts`. `getFreshCliCredentials` re-reads the keyring (so a `creds add` from another terminal is picked up live) and, within `TFA_REFRESH_MARGIN_MS` (5 min) of expiry, asks the MCP client for a new code via `c8yMcpServer.elicitation`, then renews with the stored password. It is the credential source for `setCliTenantContext` and the `status` refresh; the `codemode` tool calls `renewCliTenantAuthIfExpiring` (tenant-context) before each CLI run, which only touches the keyring near expiry. Concurrent renewals for a tenant share one prompt. Without elicitation support (or outside a request, e.g. at startup) it throws a message pointing at `mc8yp creds add`. The three tool handlers involved (`codemode`, `set-active-tenant`, `status`) are `replayable: true` and rethrow `isInputRequired` errors: the elicitation runs before any non-idempotent work, so tmcp's stateless retry-from-the-top is safe. Do not move the renewal into the middle of a codemode run. Use `createCliClient` (Bearer vs Basic) for any CLI-side `@c8y/client` — never build `BasicAuth` from stored creds directly.
 - The active tenant is persisted to `~/.config/mc8yp/active-tenant.json` by the `set-active-tenant` MCP tool. `src/cli/active-tenant.ts` owns read/write. Any read error or bad JSON shape returns null silently. With no tenant, `codemode` runs in discovery-only mode and live calls throw a descriptive missing-auth error.
 
 ### Microservice mode
@@ -331,6 +335,8 @@ pnpm prerelease    # lint + typecheck + build
   - JSON Schema → TS rendering: `test/type-render.test.ts`
   - spec resolution logic: `test/capability-resolution.test.ts`
   - active tenant persistence: `test/active-tenant.test.ts`
+  - keyring lookup, TFA login and token storage: `test/credentials.test.ts`
+  - TFA session renewal / elicitation: `test/tfa-session.test.ts`
 
 Run these before finishing meaningful changes:
 

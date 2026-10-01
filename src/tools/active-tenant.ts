@@ -1,3 +1,4 @@
+import { isInputRequired } from 'tmcp'
 import { defineTool } from 'tmcp/tool'
 import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
@@ -41,6 +42,10 @@ export function createSetActiveTenantTool() {
           ),
         ),
       }),
+      // Activating a TFA tenant may ask the client for a new TFA code. The
+      // work before that (validation, persisting the selection) is
+      // idempotent, so a stateless retry from the top is safe.
+      replayable: true,
     },
     async (input) => {
       try {
@@ -83,6 +88,9 @@ export function createSetActiveTenantTool() {
           `Active tenant set to ${input.tenantUrl}. Available specs: ${specKeys.join(', ') || '(none)'}. You can now use the codemode tool.`,
         )
       } catch (error) {
+        if (isInputRequired(error)) {
+          throw error
+        }
         return tool.error(error instanceof Error ? error.message : String(error))
       }
     },

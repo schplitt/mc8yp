@@ -1,8 +1,9 @@
-import { BasicAuth, Client } from '@c8y/client'
+import { isInputRequired } from 'tmcp'
 import { defineTool } from 'tmcp/tool'
 import { tool } from 'tmcp/utils'
 import * as v from 'valibot'
 import { getCliTenantContext } from '../cli/tenant-context'
+import { createCliClient, getFreshCliCredentials } from '../cli/tfa-session'
 import { c8yMcpServer } from '../server-instance'
 import { refreshCapabilities } from '../utils/capability-discovery'
 import { resolveCapabilities } from '../utils/capability-resolution'
@@ -30,6 +31,9 @@ export function createStatusTool() {
           false,
         ),
       }),
+      // A refresh against a TFA tenant may ask the client for a new TFA
+      // code first; everything before it is read-only, so a replay is safe.
+      replayable: true,
     },
     async (input) => {
       return tool.text(await buildCliStatus(input.refresh === true))
@@ -73,7 +77,12 @@ async function buildCliStatus(refresh: boolean): Promise<string> {
   if (creds.length === 0) {
     sections.push('Stored credentials: (none). Use `creds add` from the shell to register a tenant before calling set-active-tenant.')
   } else {
-    const lines = creds.map((c) => `- ${c.tenantUrl} (tenantId: ${c.tenantId})`).join('\n')
+    const lines = creds.map((c) => {
+      const tfa = c.tfaSession
+        ? `, TFA session ${c.tfaSession.expiresAt <= Date.now() ? 'expired' : 'valid until'} ${new Date(c.tfaSession.expiresAt).toISOString()}`
+        : ''
+      return `- ${c.tenantUrl} (tenantId: ${c.tenantId}${tfa})`
+    }).join('\n')
     sections.push(`Stored credentials:\n${lines}`)
   }
 
@@ -92,11 +101,8 @@ async function buildCliStatus(refresh: boolean): Promise<string> {
  */
 async function refreshCliActiveTenant(tenantUrl: string): Promise<string> {
   try {
-    const creds = await globalThis._getCredentialsByTenantUrl(tenantUrl)
-    const client = new Client(
-      new BasicAuth({ tenant: creds.tenantId, user: creds.user, password: creds.password }),
-      tenantUrl,
-    )
+    const creds = await getFreshCliCredentials(tenantUrl)
+    const client = createCliClient(creds)
     const result = await refreshCapabilities(creds.tenantId, client)
     const resolved = resolveCapabilities(result.specs, result.installedContextPaths, result.mcpServers)
 
@@ -112,6 +118,9 @@ async function refreshCliActiveTenant(tenantUrl: string): Promise<string> {
     }
     return `Refreshed API discovery for ${tenantUrl}: ${result.specs.length} spec(s) downloaded, ${result.mcpServers.length} MCP server(s) connected, ${result.installedContextPaths.size} subscribed application(s).`
   } catch (err) {
+    if (isInputRequired(err)) {
+      throw err
+    }
     return `Refresh failed for ${tenantUrl}: ${err instanceof Error ? err.message : String(err)}`
   }
 }

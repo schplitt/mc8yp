@@ -8,8 +8,10 @@
  * cause: findCredentialsAsync's second parameter filters by keyring target
  * (ignored on macOS, returns everything), not by account.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { getCredentialsByTenantUrl } from '../src/utils/credentials'
+import { Buffer } from 'node:buffer'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createC8yAuthHeaders } from '../src/utils/client'
+import { getCredentialsByTenantUrl, requestTfaSession, setStoredC8yAuth, TfaRequiredError } from '../src/utils/credentials'
 
 interface FakeEntry { account: string, password: string }
 
@@ -19,14 +21,16 @@ let storedEntries: FakeEntry[] = []
 // is ignored and every entry for the service comes back, in storage order.
 const findCredentialsAsync = vi.fn(async (_service: string, _target?: string | null) => storedEntries)
 
+const setPassword = vi.fn(async (_value: string) => {})
+
 vi.mock('@napi-rs/keyring', () => ({
   findCredentialsAsync: (...args: [string, (string | null)?]) => findCredentialsAsync(...args),
-  AsyncEntry: class {},
+  AsyncEntry: class {
+    setPassword(value: string) {
+      return setPassword(value)
+    }
+  },
 }))
-
-// credentials.ts imports @c8y/client for tenant-id resolution on store;
-// stub it so the module loads without a real HTTP stack.
-vi.mock('@c8y/client', () => ({ Client: class {} }))
 
 function storeEntry(tenantUrl: string, user: string, tenantId: string): void {
   storedEntries.push({
@@ -73,5 +77,103 @@ describe('getCredentialsByTenantUrl', () => {
     await expect(getCredentialsByTenantUrl('https://tenant-c.example.com'))
       .rejects
       .toThrow('No stored credentials found for tenant URL: https://tenant-c.example.com')
+  })
+})
+
+function fakeJwt(expSeconds: number): string {
+  const part = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  return `${part({ alg: 'RS256' })}.${part({ exp: expSeconds })}.sig`
+}
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), { status, statusText: status === 401 ? 'Unauthorized' : 'OK', headers: { 'Content-Type': 'application/json' } })
+}
+
+describe('TFA credentials', () => {
+  const fetchMock = vi.fn<typeof fetch>()
+
+  beforeEach(() => {
+    storedEntries = []
+    setPassword.mockClear()
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps the Basic-auth path unchanged for users without TFA', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { name: 't42' }))
+
+    await setStoredC8yAuth({ tenantUrl: 'https://t.example.com/', user: 'u', password: 'p' })
+
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(String(url)).toBe('https://t.example.com/tenant/currentTenant')
+    expect((init?.headers as Record<string, string>).Authorization).toBe(`Basic ${Buffer.from('u:p').toString('base64')}`)
+    const stored = JSON.parse(setPassword.mock.calls[0]![0])
+    expect(stored).toEqual({ tenantUrl: 'https://t.example.com', user: 'u', password: 'p', tenantId: 't42' })
+
+    storedEntries.push({ account: 'https://t.example.com', password: setPassword.mock.calls[0]![0] })
+    const creds = await getCredentialsByTenantUrl('https://t.example.com')
+    expect(creds).not.toHaveProperty('tfaSession')
+    expect(createC8yAuthHeaders(creds)).toEqual({ Authorization: `Basic ${Buffer.from('t42/u:p').toString('base64')}` })
+  })
+
+  it('throws TfaRequiredError when the platform demands a TFA code on Basic login', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { message: 'Invalid credentials! : TFA TOTP code required.', error: 'security/Unauthorized' }))
+
+    const err = await setStoredC8yAuth({ tenantUrl: 'https://t.example.com/', user: 'u', password: 'p' }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(TfaRequiredError)
+    expect((err as Error).message).toContain('TFA TOTP code required')
+    expect(setPassword).not.toHaveBeenCalled()
+  })
+
+  it('reports other login failures as plain errors with the platform message', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { message: 'Invalid credentials!' }))
+
+    const err = await setStoredC8yAuth({ tenantUrl: 'https://t.example.com', user: 'u', password: 'p' }).catch((e: unknown) => e)
+    expect(err).not.toBeInstanceOf(TfaRequiredError)
+    expect((err as Error).message).toBe('Login failed: 401 Unauthorized — Invalid credentials!')
+  })
+
+  it('exchanges password + TFA code for a token and reads its expiry from the JWT', async () => {
+    const token = fakeJwt(2_000_000_000)
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { access_token: token }))
+
+    const session = await requestTfaSession({ tenantUrl: 'https://t.example.com', user: 'u', password: 'p', tenantId: 't42' }, ' 123456 ')
+    expect(session).toEqual({ token, expiresAt: 2_000_000_000_000 })
+
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(String(url)).toBe('https://t.example.com/tenant/oauth/token?tenant_id=t42')
+    expect(init?.method).toBe('POST')
+    expect(Object.fromEntries(init?.body as URLSearchParams)).toEqual({
+      grant_type: 'PASSWORD',
+      username: 'u',
+      password: 'p',
+      tfa_code: '123456',
+    })
+  })
+
+  it('stores the TFA session and resolves the tenant ID with the bearer token', async () => {
+    const tfaSession = { token: fakeJwt(2_000_000_000), expiresAt: 2_000_000_000_000 }
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { name: 't42' }))
+
+    await setStoredC8yAuth({ tenantUrl: 'https://t.example.com', user: 'u', password: 'p', tfaSession })
+
+    const [, init] = fetchMock.mock.calls[0]!
+    expect((init?.headers as Record<string, string>).Authorization).toBe(`Bearer ${tfaSession.token}`)
+    expect(JSON.parse(setPassword.mock.calls[0]![0])).toEqual({
+      tenantUrl: 'https://t.example.com',
+      user: 'u',
+      password: 'p',
+      tenantId: 't42',
+      tfaSession,
+    })
+
+    storedEntries.push({ account: 'https://t.example.com', password: setPassword.mock.calls[0]![0] })
+    const creds = await getCredentialsByTenantUrl('https://t.example.com')
+    expect(creds.tfaSession).toEqual(tfaSession)
+    expect(createC8yAuthHeaders(creds)).toEqual({ Authorization: `Bearer ${tfaSession.token}` })
   })
 })

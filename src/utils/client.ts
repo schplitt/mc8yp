@@ -51,6 +51,13 @@ export function createC8yAuthHeaders(auth: C8yAuth | RequestAuth): Record<string
     }
   }
 
+  // TFA users cannot use Basic auth — every request would need a fresh code.
+  if ('tfaSession' in auth && auth.tfaSession) {
+    return {
+      Authorization: `Bearer ${auth.tfaSession.token}`,
+    }
+  }
+
   if ('user' in auth && 'password' in auth && 'tenantId' in auth && auth.user && auth.password && auth.tenantId) {
     const credentials = Buffer.from(`${auth.tenantId}/${auth.user}:${auth.password}`).toString('base64')
     return {
