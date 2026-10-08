@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,8 +7,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { clearActiveTenant as ClearFn, readActiveTenantUrl as ReadFn, writeActiveTenant as WriteFn } from '../src/cli/active-tenant'
 
 const TEST_CONFIG_DIR = join(tmpdir(), `mc8yp-test-${process.pid}`)
-const TEST_MC8YP_DIR = join(TEST_CONFIG_DIR, '.config', 'mc8yp')
-const TEST_CONFIG_FILE = join(TEST_MC8YP_DIR, 'active-tenant.json')
+const TEST_MC8YP_DIR = join(TEST_CONFIG_DIR, '.config', 'mc8yp', 'active-tenants')
+const LEGACY_CONFIG_FILE = join(TEST_CONFIG_DIR, '.config', 'mc8yp', 'active-tenant.json')
+const CWD = '/projects/a'
+const TEST_CONFIG_FILE = join(TEST_MC8YP_DIR, `${createHash('sha256').update(CWD).digest('hex').slice(0, 32)}.json`)
 
 vi.mock('node:os', async (importOriginal) => {
   const original = await importOriginal<typeof import('node:os')>()
@@ -36,36 +39,36 @@ describe('writeActiveTenant / readActiveTenantUrl', () => {
   })
 
   it('round-trips a tenant URL', () => {
-    writeActiveTenant('https://example.cumulocity.com')
-    expect(readActiveTenantUrl()).toBe('https://example.cumulocity.com')
+    writeActiveTenant('https://example.cumulocity.com', CWD)
+    expect(readActiveTenantUrl(CWD)).toBe('https://example.cumulocity.com')
   })
 
   it('overwrites a previous value', () => {
-    writeActiveTenant('https://first.cumulocity.com')
-    writeActiveTenant('https://second.cumulocity.com')
-    expect(readActiveTenantUrl()).toBe('https://second.cumulocity.com')
+    writeActiveTenant('https://first.cumulocity.com', CWD)
+    writeActiveTenant('https://second.cumulocity.com', CWD)
+    expect(readActiveTenantUrl(CWD)).toBe('https://second.cumulocity.com')
   })
 
   it('returns null when the config file does not exist', () => {
-    expect(readActiveTenantUrl()).toBeNull()
+    expect(readActiveTenantUrl(CWD)).toBeNull()
   })
 
   it('returns null when the file contains invalid JSON', () => {
     mkdirSync(TEST_MC8YP_DIR, { recursive: true })
     writeFileSync(TEST_CONFIG_FILE, 'not-json', 'utf8')
-    expect(readActiveTenantUrl()).toBeNull()
+    expect(readActiveTenantUrl(CWD)).toBeNull()
   })
 
   it('returns null when the file has valid JSON but wrong shape', () => {
     mkdirSync(TEST_MC8YP_DIR, { recursive: true })
-    writeFileSync(TEST_CONFIG_FILE, JSON.stringify({ notTenantUrl: 'oops' }), 'utf8')
-    expect(readActiveTenantUrl()).toBeNull()
+    writeFileSync(TEST_CONFIG_FILE, JSON.stringify({ cwd: CWD, notTenantUrl: 'oops' }), 'utf8')
+    expect(readActiveTenantUrl(CWD)).toBeNull()
   })
 
   it('returns null when the file holds an explicit { tenantUrl: null } marker', () => {
     mkdirSync(TEST_MC8YP_DIR, { recursive: true })
-    writeFileSync(TEST_CONFIG_FILE, JSON.stringify({ tenantUrl: null }), 'utf8')
-    expect(readActiveTenantUrl()).toBeNull()
+    writeFileSync(TEST_CONFIG_FILE, JSON.stringify({ cwd: CWD, tenantUrl: null }), 'utf8')
+    expect(readActiveTenantUrl(CWD)).toBeNull()
   })
 })
 
@@ -79,20 +82,73 @@ describe('clearActiveTenant', () => {
   })
 
   it('writes the explicit null marker so readActiveTenantUrl returns null', () => {
-    writeActiveTenant('https://example.cumulocity.com')
-    clearActiveTenant()
-    expect(readActiveTenantUrl()).toBeNull()
+    writeActiveTenant('https://example.cumulocity.com', CWD)
+    clearActiveTenant(CWD)
+    expect(readActiveTenantUrl(CWD)).toBeNull()
   })
 
   it('is idempotent when no active tenant was ever set', () => {
-    clearActiveTenant()
-    clearActiveTenant()
-    expect(readActiveTenantUrl()).toBeNull()
+    clearActiveTenant(CWD)
+    clearActiveTenant(CWD)
+    expect(readActiveTenantUrl(CWD)).toBeNull()
   })
 
   it('creates the config directory if it does not exist yet', () => {
     rmSync(TEST_CONFIG_DIR, { recursive: true, force: true })
-    clearActiveTenant()
-    expect(readActiveTenantUrl()).toBeNull()
+    clearActiveTenant(CWD)
+    expect(readActiveTenantUrl(CWD)).toBeNull()
+  })
+})
+
+describe('per-directory scoping', () => {
+  afterEach(() => {
+    rmSync(TEST_CONFIG_DIR, { recursive: true, force: true })
+  })
+
+  it('keeps separate tenants per working directory', () => {
+    writeActiveTenant('https://a.cumulocity.com', '/projects/a')
+    writeActiveTenant('https://b.cumulocity.com', '/projects/b')
+    expect(readActiveTenantUrl('/projects/a')).toBe('https://a.cumulocity.com')
+    expect(readActiveTenantUrl('/projects/b')).toBe('https://b.cumulocity.com')
+  })
+
+  it('clearing one directory leaves the others alone', () => {
+    writeActiveTenant('https://a.cumulocity.com', '/projects/a')
+    writeActiveTenant('https://b.cumulocity.com', '/projects/b')
+    clearActiveTenant('/projects/a')
+    expect(readActiveTenantUrl('/projects/a')).toBeNull()
+    expect(readActiveTenantUrl('/projects/b')).toBe('https://b.cumulocity.com')
+  })
+
+  it('does not inherit another directory\'s tenant', () => {
+    writeActiveTenant('https://a.cumulocity.com', '/projects/a')
+    expect(readActiveTenantUrl('/projects/new')).toBeNull()
+  })
+
+  it('falls back to the legacy global file for a directory with no selection', () => {
+    mkdirSync(TEST_MC8YP_DIR, { recursive: true })
+    writeFileSync(LEGACY_CONFIG_FILE, JSON.stringify({ tenantUrl: 'https://legacy.cumulocity.com' }), 'utf8')
+    expect(readActiveTenantUrl('/projects/new')).toBe('https://legacy.cumulocity.com')
+  })
+
+  it('a directory\'s own selection wins over the legacy file', () => {
+    mkdirSync(TEST_MC8YP_DIR, { recursive: true })
+    writeFileSync(LEGACY_CONFIG_FILE, JSON.stringify({ tenantUrl: 'https://legacy.cumulocity.com' }), 'utf8')
+    writeActiveTenant('https://a.cumulocity.com', '/projects/a')
+    expect(readActiveTenantUrl('/projects/a')).toBe('https://a.cumulocity.com')
+  })
+
+  it('clearing a directory stops the legacy fallback without touching the legacy file', () => {
+    mkdirSync(TEST_MC8YP_DIR, { recursive: true })
+    writeFileSync(LEGACY_CONFIG_FILE, JSON.stringify({ tenantUrl: 'https://legacy.cumulocity.com' }), 'utf8')
+    clearActiveTenant('/projects/a')
+    expect(readActiveTenantUrl('/projects/a')).toBeNull()
+    expect(readActiveTenantUrl('/projects/b')).toBe('https://legacy.cumulocity.com')
+  })
+
+  it('ignores a file whose stored cwd does not match', () => {
+    mkdirSync(TEST_MC8YP_DIR, { recursive: true })
+    writeFileSync(TEST_CONFIG_FILE, JSON.stringify({ cwd: '/elsewhere', tenantUrl: 'https://x.cumulocity.com' }), 'utf8')
+    expect(readActiveTenantUrl(CWD)).toBeNull()
   })
 })
