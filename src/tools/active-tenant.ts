@@ -32,7 +32,7 @@ export function createSetActiveTenantTool() {
     {
       name: 'set-active-tenant',
       title: 'Set Active Tenant',
-      description: 'Set the Cumulocity tenant for this CLI session, or pass tenantUrl: null to clear the active tenant. The tenantUrl must match one returned by the status tool. The selection is persisted across sessions so you only need to call this once (or when switching tenants). Clearing falls back to bundled-only browsing — codemode discovery still works but live API calls are unavailable until a tenant is set again.',
+      description: 'Set the Cumulocity tenant for this CLI session, or pass tenantUrl: null to clear the active tenant. The tenantUrl must match one returned by the status tool. The selection is persisted for the working directory this server was started in, so later sessions in the same project reuse it; sessions in other directories are never affected. Clearing falls back to bundled-only browsing — codemode discovery still works but live API calls are unavailable until a tenant is set again.',
       schema: v.object({
         tenantUrl: v.nullable(
           v.pipe(

@@ -262,7 +262,7 @@ After this, `mc8yp creds add` will work.
 Adding credentials does **not** auto-activate a tenant. Live API calls only run against a tenant once one has been selected, and the agent does that itself through MCP tools:
 
 1. The agent calls `status` to see stored credentials, the current active tenant, and the API namespaces currently visible.
-2. The agent calls `set-active-tenant` with one of the tenant URLs. The selection is written to `~/.config/mc8yp/active-tenant.json` and reused across CLI restarts.
+2. The agent calls `set-active-tenant` with one of the tenant URLs. The selection is saved **per working directory** (the directory the MCP client starts `mc8yp` in, normally the project root) under `~/.config/mc8yp/active-tenants/`, and reused when a session starts in that directory again. Agents working in other directories keep their own tenant and are never switched by it, and a directory that never selected a tenant falls back to the selection saved by older versions in `~/.config/mc8yp/active-tenant.json` (read-only — it is no longer written), or starts with none if that file does not exist. Sessions that are already running are never affected, since each one keeps its tenant in memory.
 3. The agent runs `codemode` as needed. Each result starts with a marker line showing which tenant it ran against.
 
 To switch tenants, call `set-active-tenant` again. To stop targeting any tenant (browse bundled specs only), call it with `tenantUrl: null` — discovery (`codemode.search`/`describe`, `docs`) keeps working against the bundled reference snapshots, while live API calls return a missing-auth error so the agent cannot accidentally hit a tenant.
