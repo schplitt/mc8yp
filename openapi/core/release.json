@@ -7174,6 +7174,9 @@
           },
           "403": {
             "$ref": "#/components/responses/operationNotAuthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/invalidPayload"
           }
         }
       },
@@ -7480,7 +7483,7 @@
           }
         ],
         "summary": "Create one or multiple managed objects",
-        "description": "Create a managed object, for example, a device with temperature measurements support or a binary switch.<br>\nIn general, each managed object may consist of:\n\n*  A unique identifier that references the object.\n*  The name of the object.\n*  The most specific type of the managed object.\n*  A time stamp showing the last update.\n*  Fragments with specific meanings, for example, `c8y_IsDevice`, `c8y_SupportedOperations`.\n*  Any additional custom fragments.\n\nImagine, for example, that you want to describe electric meters from different vendors. Depending on the make of the meter, one may have a relay and one may be capable to measure a single phase or three phases (for example, a three-phase electricity sensor). A fragment `c8y_ThreePhaseElectricitySensor` would identify such an electric meter. Devices' characteristics are identified by storing fragments for each of them.\n\n> **&#9432; Info:** For more details about fragments with specific meanings, refer to [Device management & connectivity > Device integration > Fragment library](https://www.cumulocity.com/docs/device-integration/fragment-library/) in the Cumulocity user documentation.\n\nThe maximum number of managed objects that can be created in a single bulk request is 50.\nIf any managed object included in the bulk request fails validation, then the request fails with a client error and nothing from the bulk request gets created.\nIf an unexpected server error occurs during bulk processing, then the response will return a server error, but part of the bulk that was processed before the error occurred will be created and the remainder will not.\n\nExternal identifiers can be assigned to managed objects upon creation by specifying a list in `externalIds` field.\nGiven external identifiers must be valid and not be already assigned to another managed object or the request to create a single or multiple managed objects will fail with a client error and not create anything.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_INVENTORY_CREATE <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_CREATE\n</section>\n",
+        "description": "Create a managed object, for example, a device with temperature measurements support or a binary switch.<br>\nIn general, each managed object may consist of:\n\n*  A unique identifier that references the object.\n*  The name of the object.\n*  The most specific type of the managed object.\n*  A time stamp showing the last update.\n*  Fragments with specific meanings, for example, `c8y_IsDevice`, `c8y_SupportedOperations`.\n*  Any additional custom fragments.\n\nImagine, for example, that you want to describe electric meters from different vendors. Depending on the make of the meter, one may have a relay and one may be capable to measure a single phase or three phases (for example, a three-phase electricity sensor). A fragment `c8y_ThreePhaseElectricitySensor` would identify such an electric meter. Devices' characteristics are identified by storing fragments for each of them.\n\n> **&#9432; Info:** For more details about fragments with specific meanings, refer to [Device management & connectivity > Device integration > Fragment library](https://www.cumulocity.com/docs/device-integration/fragment-library/) in the Cumulocity user documentation.\n\nExternal identifiers can be assigned to managed objects upon creation by specifying a list in `externalIds` field.\nGiven external identifiers must be valid and not be already assigned to another managed object or the request to create a single or multiple managed objects will fail with a client error and not create anything.\n\n#### Bulk create\n\nA bulk request creates at most 50 managed objects; the response lists them in request order.\nAll of them are validated, and their external identifiers checked, before anything is created, so a failed check creates nothing.\nAn external identifier may occur only once in the request.\n\nPart of the request is created only if a failure occurs while writing, for example, a concurrent request binds the same external identifier (`409`), or the datastore fails (`500`).\nThe error's `bulkRequest.fragmentType` then names a fragment that each created managed object carries with its request position, for example, `\"c8y_BatchId_7c8e1e0a-3b2f-4f6e-9a51-5d2c7e4b9f10\": { \"index\": 3 }`.\nTo complete the request without duplicates:\n\n1. Find the created managed objects with `GET /inventory/managedObjects?fragmentType=<fragmentType>&pageSize=50`. If the lookup fails, retry it, never the bulk request.\n2. Re-send only the positions the lookup did not return. This also applies to `failedIndex`, which may have been created.\n3. Managed objects found may have incomplete external identifiers or group assignment.\n\nThe fragment is not in the response or notifications, and is removed on success; if removal fails, it stays.\nRemove it with a bulk update setting it to `null`, or ignore fragments starting with `c8y_BatchId_`. The prefix is reserved and dropped from managed objects you create.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_INVENTORY_CREATE <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_CREATE\n</section>\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -7543,17 +7546,22 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "All managed objects of the bulk request were created. The `managedObjects` array has the same order as in the request.",
+            "content": {
+              "application/vnd.com.nsn.cumulocity.managedobjectcollection+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedObjectCollection"
+                }
+              }
+            }
+          },
           "201": {
             "description": "A managed object was created.",
             "content": {
               "application/vnd.com.nsn.cumulocity.managedobject+json": {
                 "schema": {
                   "$ref": "#/components/schemas/managedObject"
-                }
-              },
-              "application/vnd.com.nsn.cumulocity.managedobjectcollection+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ManagedObjectCollection"
                 }
               }
             }
@@ -7564,8 +7572,59 @@
           "403": {
             "$ref": "#/components/responses/operationNotAuthorized"
           },
+          "409": {
+            "description": "Conflict – An external identifier is already bound to another managed object.\n",
+            "content": {
+              "application/vnd.com.nsn.cumulocity.error+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bulkRequestError"
+                },
+                "examples": {
+                  "bound_before_the_request": {
+                    "description": "An external identifier was already bound to another managed object when the request was received. Nothing was created.",
+                    "value": {
+                      "error": "identity/Duplicate",
+                      "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting",
+                      "bulkRequest": {
+                        "failedIndex": 3
+                      }
+                    }
+                  },
+                  "bound_during_the_request": {
+                    "description": "Another request bound the external identifier while the bulk request was being processed. Part of the bulk request may have been created.",
+                    "value": {
+                      "error": "identity/Duplicate",
+                      "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting",
+                      "bulkRequest": {
+                        "failedIndex": 3,
+                        "fragmentType": "c8y_BatchId_7c8e1e0a-3b2f-4f6e-9a51-5d2c7e4b9f10"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "422": {
-            "$ref": "#/components/responses/invalidPayload"
+            "$ref": "#/components/responses/invalidBulkPayload"
+          },
+          "500": {
+            "description": "Internal Server Error – For a bulk request, part of it may have been created.",
+            "content": {
+              "application/vnd.com.nsn.cumulocity.error+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bulkRequestError"
+                },
+                "example": {
+                  "error": "inventory/Internal Server Error",
+                  "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting",
+                  "bulkRequest": {
+                    "failedIndex": 17,
+                    "fragmentType": "c8y_BatchId_7c8e1e0a-3b2f-4f6e-9a51-5d2c7e4b9f10"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -7595,7 +7654,7 @@
           }
         ],
         "summary": "Update multiple managed objects at once",
-        "description": "Updates multiple managed objects (for example, devices) by their given IDs.\n\nThe maximum number of managed objects that can be updated in a single bulk request is 50.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> owner of the source <b>OR</b> MANAGE_OBJECT_ADMIN permission on the source\n</section>\n",
+        "description": "Updates multiple managed objects (for example, devices) by their given IDs.\n\nThe maximum number of managed objects that can be updated in a single bulk request is 50.\nEach ID can occur only once in the request.\nUpdating `externalIds` is not supported through this operation; use the Identity API instead.\n\nAll managed objects of the bulk request are validated, and checked to exist, before anything is updated.\nIf any of these checks fails, the request fails with a client error and nothing is updated.\nThe error response identifies the failed managed object in `bulkRequest`. A duplicate ID fails the whole request.\n\nIf the request fails while the managed objects are updated, for example, when the datastore fails, part of them may have been updated.\nRetrieve the managed objects by their IDs to find out their current state.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> owner of the source <b>OR</b> MANAGE_OBJECT_ADMIN permission on the source\n</section>\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -7654,7 +7713,24 @@
             "$ref": "#/components/responses/operationNotAuthorized"
           },
           "404": {
-            "$ref": "#/components/responses/inventoryObjectNotFound"
+            "description": "Managed object not found.",
+            "content": {
+              "application/vnd.com.nsn.cumulocity.error+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bulkRequestError"
+                },
+                "example": {
+                  "error": "inventory/Not Found",
+                  "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting",
+                  "bulkRequest": {
+                    "failedIndex": 1
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/invalidBulkPayload"
           }
         }
       },
@@ -7976,7 +8052,7 @@
           }
         ],
         "summary": "Remove a specific managed object",
-        "description": "Remove a specific managed object (for example, device) by a given ID.\n\n> **&#9432; Info:** Inventory DELETE requests are not synchronous. The response could be returned before the delete request has been completed. This may happen especially when the deleted managed object has a lot of associated data. After sending the request, the platform starts deleting the associated data in an asynchronous way. Finally, the requested managed object is deleted after all associated data has been deleted.\n\n> **&#9432; Info:** By default, the delete operation is propagated to subgroups, but only if the object being deleted is a group. Deleting a parent group will also delete its subgroups. The cascade parameter controls whether the devices assigned to the groups are also deleted. When set to false, the devices remain intact even as the groups and subgroups are deleted. When set to true, all groups, subgroups, and their assigned devices are deleted.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> owner of the source <b>OR</b> MANAGE_OBJECT_ADMIN permission on the source\n</section>\n",
+        "description": "Remove a specific managed object (for example, device) by a given ID.\n\n> **&#9432; Info:** The platform first deletes the associated data and then the requested managed object. If this completes within 30 seconds, the response is 204 and the managed object has been deleted. Otherwise, the response is 202 and the deletion continues in the background. This happens especially when the deleted managed object has a lot of associated data or children. An error during the background deletion is not reported to the client. To verify that the managed object has been deleted, retrieve it until the response is 404.\n\n> **&#9432; Info:** By default, the delete operation is propagated to subgroups, but only if the object being deleted is a group. Deleting a parent group will also delete its subgroups. The cascade parameter controls whether the devices assigned to the groups are also deleted. When set to false, the devices remain intact even as the groups and subgroups are deleted. When set to true, all groups, subgroups, and their assigned devices are deleted.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> owner of the source <b>OR</b> MANAGE_OBJECT_ADMIN permission on the source\n</section>\n",
         "x-code-samples": [
           {
             "lang": "cURL",
@@ -8000,15 +8076,23 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "A managed object was removed.",
+          "202": {
+            "description": "The deletion did not complete within 30 seconds and continues in the background.",
             "content": {
-              "*/*": {
+              "application/vnd.com.nsn.cumulocity.managedobject+json": {
                 "schema": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/inventoryObjectDeleteInBackground"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/inventoryObjectDeleteInBackground"
                 }
               }
             }
+          },
+          "204": {
+            "description": "A managed object was removed."
           },
           "401": {
             "$ref": "#/components/responses/unauthorizedError"
@@ -8021,6 +8105,12 @@
           },
           "409": {
             "$ref": "#/components/responses/inventoryObjectDeleteConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/inventoryObjectDeleteInvalidData"
+          },
+          "429": {
+            "$ref": "#/components/responses/inventoryObjectDeleteTooManyRequests"
           }
         }
       }
@@ -13733,7 +13823,7 @@
           }
         ],
         "summary": "Create a measurement",
-        "description": "A measurement must be associated with a source (managed object) identified by ID, and must specify the type of measurement and the time when it was measured by the device (for example, a thermometer).\n\nEach measurement fragment is an object (for example, `c8y_Steam`) containing the actual measurements as properties. The property name represents the name of the measurement (for example, `Temperature`) and it contains two properties:\n\n*   `value` - The value of the individual measurement. The maximum precision for floating point numbers is 64-bit IEEE 754. For integers it's a 64-bit two's complement integer. The `value` is mandatory for a fragment.\n*   `unit` - The unit of the measurements. This field is optional in the request body; however, if it is provided, it must be a non-empty string and must not be null.\n\nReview the [System of units](#section/System-of-units) section for details about the conversions of units. Also review [Getting started > Technical concepts > Cumulocity's domain model > Inventory > Fragments > Naming conventions of fragments](https://www.cumulocity.com/docs/concepts/domain-model/#naming-conventions-of-fragments) in the Cumulocity user documentation.\n\nThe example below uses `c8y_SteamFragment` in the request body to illustrate recording two measurements called `Temperature` and `Humidity`.\n\n  ```json\n  {\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"type\": \"temperatureMeasurement\",\n    \"c8y_SteamFragment\": {\n        \"Temperature\": { \"value\": 42.7, \"unit\": \"C\" },\n        \"Humidity\": { \"value\": 13.37, \"unit\": \"%RH\" }\n      }\n    }\n  ```\n\n> **⚠️ Important:** Property names used for fragment and series must not contain whitespaces nor the special characters `. , * [ ] ( ) @ $`. This is required to ensure a correct processing.\n\n**Legacy compatibility:**\n\nFor legacy compatibility reasons, a measurement can contain custom fragments. The platform's behavior will vary based on whether the series in the custom fragment are valid or not:\n\n1. ***Mixed Series Fragments:***\n\nWhen creating a measurement with a fragment containing both valid and invalid series:\n  - Valid series (those with numeric value fields) are processed and persisted.\n  - Invalid series (e.g., Booleans, Lists, Strings, Structs) are silently ignored and are not included in the resulting measurement.\n  - The measurement is created successfully (HTTP 201 Created), but the invalid series are removed.\n\n**Example:**\n  ```json\n  {\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"type\": \"temperatureMeasurement\",\n    \"c8y_SteamFragment\": {\n        \"validSeries_DOUBLE\": { \"value\": 3.141592653589793, \"unit\": \"RAD\" },\n        \"validSeries_INTEGER\": { \"value\": 42, \"unit\": \"C\" },\n        \"ignoredField_BOOLEAN\": { \"value\": false, \"unit\": \"t/f\" },\n        \"ignoredField_LIST\": { \"value\": [42, 43, 44] },\n        \"ignoredField_STRUCT\": { \"value\": { \"a\": 1, \"b\": 2 }, \"unit\": \"C\" },\n        \"ignoredField0\": 42,\n        \"ignoredField1\": { \"value\": { \"a\": 1, \"b\": 2 }, \"unit\": \"C\" },\n        \"ignoredField2\": { \"unit\": \"C\" },\n        \"ignoredField3\": { \"val\": 42 },\n        \"ignoredField4\": { \"subseries\": { \"value\": 42 } }\n      }\n    }\n  ```\n\n  **Response:**\n  ```json\n  {\n    \"self\": \"https://example.cumulocity.com/measurement/measurements/124\",\n    \"id\": \"124\",\n    \"type\": \"temperatureMeasurement\",\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"c8y_SteamFragment\": {\n        \"validSeries_DOUBLE\": { \"value\": 3.141592653589793, \"unit\": \"RAD\" },\n        \"validSeries_INTEGER\": { \"value\": 42, \"unit\": \"C\" }\n      }\n    }\n  ```\n\n2. ***Fragments with Only Invalid Series:***\n\nIf a measurement fragment contains only invalid series, the entire fragment is preserved as a plain object, and no fields are removed or validated further. This means that such fragments are treated as normal document properties rather than as series fragments. As a result:\n  - These objects are not included in series fragment aggregation.\n  - They are not treated as part of the measurement's series data but remain accessible as regular property within the measurement document.\n\n**Example:**\n  ```json\n  {\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"type\": \"temperatureMeasurement\",\n    \"c8y_SteamFragment\": {\n        \"invalidSeries_BOOLEAN\": { \"value\": false, \"unit\": \"t/f\" },\n        \"invalidSeries_LIST\": { \"value\": [1, 2, 3], \"unit\": \"list\" }\n    }\n  }\n  ```\n\n  **Response:**\n  ```json\n  {\n    \"self\": \"https://example.cumulocity.com/measurement/measurements/125\",\n    \"id\": \"125\",\n    \"type\": \"temperatureMeasurement\",\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"c8y_SteamFragment\": {\n        \"invalidSeries_BOOLEAN\": { \"value\": false, \"unit\": \"t/f\" },\n        \"invalidSeries_LIST\": { \"value\": [1, 2, 3], \"unit\": \"list\" }\n      }\n    }\n  ```\n\nTo ensure data integrity, custom fragments should be used only with valid series.\n\n**Create multiple measurements**\n\nUsing the same API request, it is also possible to create multiple measurements by sending a `measurements` array containing all the measurements to be created. The content type must be `application/vnd.com.nsn.cumulocity.measurementcollection+json`.\n\n> **&#9432; Info:** For more details about fragments with specific meanings, refer to [Device management & connectivity > Device integration > Fragment library](https://www.cumulocity.com/docs/device-integration/fragment-library/) in the Cumulocity user documentation.\n\n<section><h5>Required roles</h5>\nROLE_MEASUREMENT_ADMIN <b>OR</b> owner of the source <b>OR</b> MEASUREMENT_ADMIN permission on the source\n</section>\n",
+        "description": "A measurement must be associated with a source (managed object) identified by ID, and must specify the type of measurement and the time when it was measured by the device (for example, a thermometer).\n\nEach measurement fragment is an object (for example, `c8y_Steam`) containing the actual measurements as properties. The property name represents the name of the measurement (for example, `Temperature`) and it contains two properties:\n\n*   `value` - The value of the individual measurement. The maximum precision for floating point numbers is 64-bit IEEE 754. For integers it's a 64-bit two's complement integer. The `value` is mandatory for a fragment.\n*   `unit` - The unit of the measurements. This field is optional in the request body; however, if it is provided, it must be a non-empty string and must not be null.\n\nReview the [System of units](#section/System-of-units) section for details about the conversions of units. Also review [Getting started > Technical concepts > Cumulocity's domain model > Inventory > Fragments > Naming conventions of fragments](https://www.cumulocity.com/docs/concepts/domain-model/#naming-conventions-of-fragments) in the Cumulocity user documentation.\n\nThe example below uses `c8y_SteamFragment` in the request body to illustrate recording two measurements called `Temperature` and `Humidity`.\n\n  ```json\n  {\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"type\": \"temperatureMeasurement\",\n    \"c8y_SteamFragment\": {\n        \"Temperature\": { \"value\": 42.7, \"unit\": \"C\" },\n        \"Humidity\": { \"value\": 13.37, \"unit\": \"%RH\" }\n      }\n    }\n  ```\n\n> **⚠️ Important:** Property names used for fragment and series must not contain whitespaces nor the special characters `. , * [ ] ( ) @ $`. This is required to ensure a correct processing.\n\n**Legacy compatibility:**\n\nFor legacy compatibility reasons, a measurement can contain custom fragments. The platform's behavior will vary based on whether the series in the custom fragment are valid or not:\n\n1. ***Mixed Series Fragments:***\n\nWhen creating a measurement with a fragment containing both valid and invalid series:\n  - Valid series (those with numeric value fields) are processed and persisted.\n  - Invalid series (e.g., Booleans, Lists, Strings, Structs) are silently ignored and are not included in the resulting measurement.\n  - The measurement is created successfully (HTTP 201 Created), but the invalid series are removed.\n\n**Example:**\n  ```json\n  {\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"type\": \"temperatureMeasurement\",\n    \"c8y_SteamFragment\": {\n        \"validSeries_DOUBLE\": { \"value\": 3.141592653589793, \"unit\": \"RAD\" },\n        \"validSeries_INTEGER\": { \"value\": 42, \"unit\": \"C\" },\n        \"ignoredField_BOOLEAN\": { \"value\": false, \"unit\": \"t/f\" },\n        \"ignoredField_LIST\": { \"value\": [42, 43, 44] },\n        \"ignoredField_STRUCT\": { \"value\": { \"a\": 1, \"b\": 2 }, \"unit\": \"C\" },\n        \"ignoredField0\": 42,\n        \"ignoredField1\": { \"value\": { \"a\": 1, \"b\": 2 }, \"unit\": \"C\" },\n        \"ignoredField2\": { \"unit\": \"C\" },\n        \"ignoredField3\": { \"val\": 42 },\n        \"ignoredField4\": { \"subseries\": { \"value\": 42 } }\n      }\n    }\n  ```\n\n  **Response:**\n  ```json\n  {\n    \"self\": \"https://example.cumulocity.com/measurement/measurements/124\",\n    \"id\": \"124\",\n    \"type\": \"temperatureMeasurement\",\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"c8y_SteamFragment\": {\n        \"validSeries_DOUBLE\": { \"value\": 3.141592653589793, \"unit\": \"RAD\" },\n        \"validSeries_INTEGER\": { \"value\": 42, \"unit\": \"C\" }\n      }\n    }\n  ```\n\n2. ***Fragments with Only Invalid Series:***\n\nIf a measurement fragment contains only invalid series, the entire fragment is preserved as a plain object, and no fields are removed or validated further. This means that such fragments are treated as normal document properties rather than as series fragments. As a result:\n  - These objects are not included in series fragment aggregation.\n  - They are not treated as part of the measurement's series data but remain accessible as regular property within the measurement document.\n\n**Example:**\n  ```json\n  {\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"type\": \"temperatureMeasurement\",\n    \"c8y_SteamFragment\": {\n        \"invalidSeries_BOOLEAN\": { \"value\": false, \"unit\": \"t/f\" },\n        \"invalidSeries_LIST\": { \"value\": [1, 2, 3], \"unit\": \"list\" }\n    }\n  }\n  ```\n\n  **Response:**\n  ```json\n  {\n    \"self\": \"https://example.cumulocity.com/measurement/measurements/125\",\n    \"id\": \"125\",\n    \"type\": \"temperatureMeasurement\",\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"c8y_SteamFragment\": {\n        \"invalidSeries_BOOLEAN\": { \"value\": false, \"unit\": \"t/f\" },\n        \"invalidSeries_LIST\": { \"value\": [1, 2, 3], \"unit\": \"list\" }\n      }\n    }\n  ```\n\nTo ensure data integrity, custom fragments should be used only with valid series.\n\n**Create multiple measurements**\n\nUsing the same API request, it is also possible to create multiple measurements by sending a `measurements` array containing all the measurements to be created. The content type must be `application/vnd.com.nsn.cumulocity.measurementcollection+json`.\nA validation error identifies the rejected measurement in `bulkRequest.failedIndex`.\n\n> **&#9432; Info:** For more details about fragments with specific meanings, refer to [Device management & connectivity > Device integration > Fragment library](https://www.cumulocity.com/docs/device-integration/fragment-library/) in the Cumulocity user documentation.\n\n<section><h5>Required roles</h5>\nROLE_MEASUREMENT_ADMIN <b>OR</b> owner of the source <b>OR</b> MEASUREMENT_ADMIN permission on the source\n</section>\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -13824,7 +13914,7 @@
             "$ref": "#/components/responses/operationNotAuthorized"
           },
           "422": {
-            "$ref": "#/components/responses/invalidPayload"
+            "$ref": "#/components/responses/invalidBulkPayload"
           }
         }
       },
@@ -22827,6 +22917,23 @@
       "invalidPayload": {
         "description": "Unprocessable Entity – invalid payload."
       },
+      "invalidBulkPayload": {
+        "description": "Unprocessable Entity – invalid payload.",
+        "content": {
+          "application/vnd.com.nsn.cumulocity.error+json": {
+            "schema": {
+              "$ref": "#/components/schemas/bulkRequestError"
+            },
+            "example": {
+              "error": "undefined/validationError",
+              "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting",
+              "bulkRequest": {
+                "failedIndex": 2
+              }
+            }
+          }
+        }
+      },
       "identityExternalIdNotFound": {
         "description": "External ID not found.",
         "content": {
@@ -23827,15 +23934,45 @@
         }
       },
       "inventoryObjectDeleteConflict": {
-        "description": "Conflict – The managed object is associated to other objects, for example child devices.",
+        "description": "Conflict – The device user cannot be deleted with `withDeviceUser=true` because it owns other managed objects.",
         "content": {
           "application/vnd.com.nsn.cumulocity.error+json": {
             "schema": {
               "$ref": "#/components/schemas/error"
             },
             "example": {
-              "error": "inventory/conflict",
-              "message": "Cannot delete the specified object as it has associated data.",
+              "error": "inventory/Update Conflict",
+              "message": "Can't delete user because it is used by another managed object",
+              "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting"
+            }
+          }
+        }
+      },
+      "inventoryObjectDeleteInvalidData": {
+        "description": "Unprocessable Entity – The managed object cannot be deleted through the Inventory API, for example a binary, a tenant or a monitored application.",
+        "content": {
+          "application/vnd.com.nsn.cumulocity.error+json": {
+            "schema": {
+              "$ref": "#/components/schemas/error"
+            },
+            "example": {
+              "error": "inventory/Invalid Data",
+              "message": "Cannot delete managed object.",
+              "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting"
+            }
+          }
+        }
+      },
+      "inventoryObjectDeleteTooManyRequests": {
+        "description": "Too Many Requests – Too many delete operations are in progress.",
+        "content": {
+          "application/vnd.com.nsn.cumulocity.error+json": {
+            "schema": {
+              "$ref": "#/components/schemas/error"
+            },
+            "example": {
+              "error": "inventory/Too Many Requests",
+              "message": "Too many delete operations in progress.",
               "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting"
             }
           }
@@ -23889,6 +24026,50 @@
             "type": "string"
           }
         }
+      },
+      "inventoryObjectDeleteInBackground": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "description": "A human-readable message stating that the deletion continues in the background.",
+            "type": "string"
+          }
+        },
+        "example": {
+          "message": "Managed object delete is being continued in background"
+        }
+      },
+      "bulkRequestError": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/error"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "bulkRequest": {
+                "description": "Present when the error belongs to one element of the bulk request.\nAbsent when the error belongs to the whole request, for example, when the request has too many elements or none.\n",
+                "type": "object",
+                "required": [
+                  "failedIndex"
+                ],
+                "properties": {
+                  "failedIndex": {
+                    "description": "The position of the element that the error belongs to, counted from 0 in the request.\nIf several elements are invalid, the lowest position is reported.\n",
+                    "type": "integer",
+                    "minimum": 0,
+                    "example": 17
+                  },
+                  "fragmentType": {
+                    "description": "The batch marker fragment carried by the managed objects that the request created.\nPresent only when part of the bulk create may have been created.\nUse it as the `fragmentType` query parameter to find the created managed objects.\n",
+                    "type": "string",
+                    "example": "c8y_BatchId_7c8e1e0a-3b2f-4f6e-9a51-5d2c7e4b9f10"
+                  }
+                }
+              }
+            }
+          }
+        ]
       },
       "alarm": {
         "type": "object",
@@ -25932,11 +26113,13 @@
           "name": {
             "description": "Name of the binary object.",
             "type": "string",
+            "maxLength": 1000,
             "example": "HelloWorld"
           },
           "type": {
             "description": "Media type of the file.",
             "type": "string",
+            "maxLength": 1000,
             "example": "text/plain"
           }
         }
@@ -26171,7 +26354,9 @@
             "readOnly": true
           },
           "name": {
-            "$ref": "#/components/schemas/desc_objectName"
+            "description": "Human-readable name that is used for representing the object in user interfaces.",
+            "type": "string",
+            "maxLength": 1000
           },
           "owner": {
             "description": "Username of the device's owner.",
@@ -26182,7 +26367,8 @@
           },
           "type": {
             "description": "The fragment type can be interpreted as _device class_, this means, devices with the same type can receive the same types of configuration, software, firmware and operations. The type value is indexed and is therefore used for queries.",
-            "type": "string"
+            "type": "string",
+            "maxLength": 1000
           },
           "childAdditions": {
             "$ref": "#/components/schemas/objectChildAdditions"
@@ -26297,11 +26483,14 @@
         "type": "object",
         "properties": {
           "name": {
-            "$ref": "#/components/schemas/desc_objectName"
+            "description": "Human-readable name that is used for representing the object in user interfaces.",
+            "type": "string",
+            "maxLength": 1000
           },
           "type": {
             "description": "The fragment type can be interpreted as _device class_, this means, devices with the same type can receive the same types of configuration, software, firmware and operations. The type value is indexed and is therefore used for queries.",
-            "type": "string"
+            "type": "string",
+            "maxLength": 1000
           },
           "externalIds": {
             "description": "List of external identifiers to bind to newly created managed object.",
@@ -26365,11 +26554,14 @@
             "type": "string"
           },
           "name": {
-            "$ref": "#/components/schemas/desc_objectName"
+            "description": "Human-readable name that is used for representing the object in user interfaces.",
+            "type": "string",
+            "maxLength": 1000
           },
           "type": {
             "description": "The fragment type can be interpreted as _device class_, this means, devices with the same type can receive the same types of configuration, software, firmware and operations. The type value is indexed and is therefore used for queries.",
-            "type": "string"
+            "type": "string",
+            "maxLength": 1000
           },
           "c8y_IsDevice": {
             "description": "A fragment which identifies this managed object as a device.",
