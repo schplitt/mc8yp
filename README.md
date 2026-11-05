@@ -12,7 +12,7 @@ The agent writes a short async JavaScript function. It runs in a sandbox where e
 async () => {
   const { results } = await codemode.search('managed objects')
   const devices = await c8y.getManagedObjectCollectionResource({ pageSize: 20 })
-  return devices.managedObjects?.map(d => ({ id: d.id, name: d.name }))
+  return devices.managedObjects?.map((d) => ({ id: d.id, name: d.name }))
 }
 ```
 
@@ -20,14 +20,14 @@ Any microservice on the tenant that ships an OpenAPI spec or an MCP server is pi
 
 ## CLI or microservice
 
-|                  | CLI                                         | Microservice                                   |
-| ---------------- | ------------------------------------------- | ---------------------------------------------- |
-| Runs             | Locally, over stdio                         | Inside Cumulocity, over HTTP at `/mcp`         |
-| Credentials      | OS keyring (`mc8yp creds add`)              | The caller's `Authorization` header            |
-| Tenant           | The agent picks one with `set-active-tenant` | Fixed by the deployment                        |
-| Extra tools      | `status`, `set-active-tenant`               | Optional `sandbox` shell (opt-in)              |
-| Platforms        | macOS, Linux, [WSL 2](docs/wsl-setup.md)    | Any Cumulocity tenant                          |
-| Use it for       | Local development with Claude Code or similar | Shared and production agents, AI Agent Manager |
+|             | CLI                                           | Microservice                                   |
+| ----------- | --------------------------------------------- | ---------------------------------------------- |
+| Runs        | Locally, over stdio                           | Inside Cumulocity, over HTTP at `/mcp`         |
+| Credentials | OS keyring (`mc8yp creds add`)                | The caller's `Authorization` header            |
+| Tenant      | The agent picks one with `set-active-tenant`  | Fixed by the deployment                        |
+| Extra tools | `status`, `set-active-tenant`                 | Optional `sandbox` shell (opt-in)              |
+| Platforms   | macOS, Linux, [WSL 2](docs/wsl-setup.md)      | Any Cumulocity tenant                          |
+| Use it for  | Local development with Claude Code or similar | Shared and production agents, AI Agent Manager |
 
 ## Microservice
 
@@ -89,11 +89,11 @@ Two rule types, set per connection:
 
 Restrictions win when both match. A rule is `[METHOD:]/path`, where `*` matches within one path segment and `**` matches any number of segments.
 
-| Rule                   | Means                                     |
-| ---------------------- | ----------------------------------------- |
-| `/alarm/**`            | every method on `/alarm` and below        |
-| `GET:/inventory/**`    | only GET on `/inventory` and below        |
-| `DELETE:/inventory/**` | only DELETE on `/inventory` and below     |
+| Rule                   | Means                                 |
+| ---------------------- | ------------------------------------- |
+| `/alarm/**`            | every method on `/alarm` and below    |
+| `GET:/inventory/**`    | only GET on `/inventory` and below    |
+| `DELETE:/inventory/**` | only DELETE on `/inventory` and below |
 
 **CLI:** `-r` for restrictions, `-a` for allow rules.
 
@@ -114,7 +114,7 @@ mc8yp-allow: GET:/inventory/**, GET:/alarm/**
 mc8yp-restriction: /user/**
 ```
 
-Blocked operations are hidden from the agent's search and are refused before any request reaches Cumulocity. Rules apply to OpenAPI-backed APIs only, not to MCP-backed ones. See [docs/access-policy.md](docs/access-policy.md) for the full syntax and the MCP caveat.
+Blocked operations are hidden from the agent's search and are refused before any request reaches Cumulocity. Rules apply to OpenAPI-backed APIs only, not to MCP-backed ones. See <docs/access-policy.md> for the full syntax and the MCP caveat.
 
 ## More
 

@@ -17,6 +17,7 @@ The practical effect: **any Cumulocity microservice that ships an OpenAPI spec i
 The same discovery run also picks up MCP servers declared via `exposeMcpServers` (type `http`) and fetches their tool lists. A service exposing both an MCP server and an OpenAPI spec is wrapped as an MCP namespace; per connection you can opt services back to their spec with the `mc8yp-no-mcp` header / `noMcp` query param (server mode) or `--no-mcp` (CLI) — pass `*` for all services or a comma-separated contextPath list. Wrapped MCP tools run with the end user's credentials; elicitation and sampling are NOT forwarded (mc8yp advertises no such capabilities, so compliant servers use their fallbacks).
 
 When a new service is subscribed mid-session, CLI agents can call the `status` tool with `refresh: true` to bust the cache without waiting for the 30-minute window. Server mode does not yet expose an in-protocol refresh trigger — use the `POST /refresh-apis` HTTP route from ops/CI scripts that sit outside the MCP protocol.
+
 ## Tools and prompts
 
 | Tool                | Description                                                                                                                                                                                                                                                                                                                                             |
@@ -56,6 +57,7 @@ async () => {
 There is deliberately no raw-request escape hatch — the typed namespaces are the complete surface. Whether a namespace wraps an OpenAPI spec or an MCP server is invisible to the agent; the backing protocol is an operator concern.
 
 Operations can be hidden from derivation and discovery by annotating them in the OpenAPI spec with the vendor extension `x-mc8yp-exclude: true` — with no escape hatch, exclusion is absolute for the sandbox.
+
 ## The `sandbox` shell (microservice only, opt-in)
 
 > **Experimental.** Available in deployed microservice mode only, and **disabled by default**; not exposed in the local CLI (agent harnesses there bring their own file I/O).
@@ -76,6 +78,7 @@ async () => {
 The surface mirrors [Flue's `SandboxApi`](https://flueframework.com/docs/api/sandbox-api/): `readFile`, `readFileBuffer`, `writeFile`, `stat`, `readdir`, `exists`, `mkdir`, `rm`, `exec`, plus an mc8yp-specific `clear()` that wipes the filesystem. It is backed by a swappable adapter (currently [`just-bash`](https://github.com/vercel-labs/just-bash), core shell only) so the provider can be replaced later without changing agent-facing code.
 
 **Lifecycle:** one in-memory sandbox per MCP session, so files persist across `codemode` calls within a session. It is evicted from memory 15 minutes after its last use (or immediately via `sandbox.clear()`). Nothing is ever written to disk, and sessions never share state. (Cross-call persistence relies on your MCP client maintaining the `mcp-session-id`, which standard clients do.)
+
 ## OpenAPI coverage
 
 What the agent sees through codemode discovery comes from two layers:

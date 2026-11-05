@@ -92,4 +92,3 @@ mc8yp-allow: GET:/measurement/**
 When a live call is blocked by connection policy, the codemode run returns explanatory text, no request is sent to Cumulocity, and retrying through the same connection will not help. Blocked operations are additionally omitted from `codemode.search`/`describe` and the docs index, so the agent never plans around a method it cannot call.
 
 > **Note:** path-based restriction/allow rules apply to OpenAPI-derived namespaces only. Wrapped MCP tools have no METHOD:path identity and are not covered by these rules — use the `noMcp` opt-out to disable MCP wrapping for a connection if that matters for your deployment. The same gap applies to [external MCP servers](external-mcp-servers.md); there the lever is simply not configuring the server for that connection.
-
