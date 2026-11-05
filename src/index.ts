@@ -86,7 +86,7 @@ const app = new H3().all('/mcp', async (event) => {
     const cached = getCachedDiscovery(tenantId)
     if (cached) {
       const result = await cached
-      specs = resolveCapabilities(result.specs, result.installedContextPaths, result.mcpServers)
+      specs = resolveCapabilities(result.specs, result.mcpServers)
     }
   }
 
@@ -288,7 +288,7 @@ app.post('/resolve-mcp-servers', async (event) => {
         discovery = await refreshCapabilities(tenantId, new Client(new BasicAuth(subscribedCred), C8Y_BASEURL))
       }
 
-      const resolved = resolveCapabilities(discovery.specs, discovery.installedContextPaths, discovery.mcpServers)
+      const resolved = resolveCapabilities(discovery.specs, discovery.mcpServers)
       // Assembled the same way a real connection assembles it, with no policy:
       // restrictions filter operations, never namespace names, so the set of
       // names is exactly what an external entry has to fit around.

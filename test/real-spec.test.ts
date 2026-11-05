@@ -8,7 +8,7 @@
  */
 import { beforeAll, describe, expect, it } from 'vitest'
 import rawCoreSpec from '../openapi/core/release.json' with { type: 'json' }
-import rawDtmSpec from '../openapi/dtm/release.json' with { type: 'json' }
+import rawDtmSpec from './fixtures/dtm-openapi.json' with { type: 'json' }
 import { describeTarget } from '../src/codemode/describe'
 import { deriveOperations } from '../src/codemode/derive-operations'
 import { buildNamespaces, toSearchableMethods } from '../src/codemode/namespaces'
@@ -31,8 +31,9 @@ beforeAll(async () => {
   const spec = await preprocessOpenApi(structuredClone(rawCoreSpec) as unknown as Spec)
   coreSpec = spec
   ops = deriveOperations(spec)
-  // DTM runs through the same servicePrefix rewrite the bundled-services
-  // build plugin and live discovery apply.
+  // DTM stands in for a real discovered service spec (test fixture only —
+  // nothing but core is bundled), run through the servicePrefix rewrite that
+  // live discovery applies.
   const dtmSpec = await preprocessOpenApi(structuredClone(rawDtmSpec) as unknown as Spec, { servicePrefix: '/service/dtm' })
   dtmOps = deriveOperations(dtmSpec)
   docsIndex = getDocsIndex({}, () => [{ namespace: 'c8y', spec }, { namespace: 'dtm', spec: dtmSpec }])

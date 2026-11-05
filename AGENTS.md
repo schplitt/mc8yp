@@ -98,14 +98,12 @@ openapi/
     2026.json                Bundled 2026 Cumulocity core OpenAPI snapshot
     2025.json                Bundled 2025 Cumulocity core OpenAPI snapshot
     2024.json                Bundled 2024 Cumulocity core OpenAPI snapshot
-  dtm/
-    release.json             Bundled latest Cumulocity DTM OpenAPI snapshot
 openapi-builds.json           Build matrix plus download URLs for bundled OpenAPI sources
 scripts/
   cumulocity.mjs             Updates cumulocity.json metadata from package.json
   package-microservices.mjs  Builds versioned Docker-based Cumulocity release zips
-tsdown.config.ts              CLI/server build configuration plus the `#core-openapi` and `#bundled-services` virtual module plugins
-src/openapi-modules.d.ts      Ambient type declarations for the `#core-openapi` and `#bundled-services` virtual modules
+tsdown.config.ts              CLI/server build configuration plus the `#core-openapi` virtual module plugin
+src/openapi-modules.d.ts      Ambient type declarations for the `#core-openapi` virtual module
 ```
 
 ### Runtime Flow
@@ -130,7 +128,7 @@ src/openapi-modules.d.ts      Ambient type declarations for the `#core-openapi` 
 #### Shared MCP surface
 
 - `src/server.ts` creates the MCP server, registers tools and prompts, and conditionally enables `status` and `set-active-tenant` only in CLI mode.
-- `openapi/core/` and `openapi/dtm/` contain the bundled OpenAPI snapshots consumed by the build.
+- `openapi/core/` contains the bundled core OpenAPI snapshots consumed by the build. Core is the ONLY bundled spec: every service (DTM included) comes from live discovery.
 - `src/tools/codemode.ts` defines the `codemode` tool.
 - `src/prompts/codemode.ts` defines the `code-mode-guide` prompt.
 
@@ -180,21 +178,22 @@ Servers the CONNECTION brings, not the tenant: `mc8yp-mcp-server` header (repeat
 
 ### Bundled OpenAPI Selection
 
-There are exactly two virtual modules:
+There is exactly one virtual module:
 
 - **`#core-openapi`** — the always-available core spec. Exports `specs`, `getCoreOpenApiSpec()`, `getCoreOpenApiVersion()`, `setCoreOpenApiVersion()`, `getCoreOpenApiLabel()`. Core is the only spec with a fixed namespace name (`c8y`, `CORE_NAMESPACE` in `src/codemode/namespaces.ts`).
-- **`#bundled-services`** — a generic registry of all bundled service-backed specs (DTM today). Exports `BUNDLED_SERVICE_SPECS: ReadonlyArray<BundledServiceSpec>` where each entry has `{ contextPath, appLabel, specLabel, servicePrefix, spec }`. The plugin loops every entry in `openapi-builds.json` `sources.*` that has a `servicePrefix` and inlines the resolved version for that build, with paths already rewritten via `rewriteSpecPaths`.
 
-Both modules return `Spec`-typed data (not `unknown`); the `Spec`/`PathItem`/`OperationInfo` types live in `src/utils/capability-resolution.ts` and are referenced from `src/openapi-modules.d.ts`.
+It returns `Spec`-typed data (not `unknown`); the `Spec`/`PathItem`/`OperationInfo` types live in `src/utils/capability-resolution.ts` and are referenced from `src/openapi-modules.d.ts`.
+
+**Only core is bundled.** Core is not a microservice, so discovery cannot find it. Every service spec comes from live discovery — a `#bundled-services` registry that shipped DTM as an offline fallback was removed because discovery covers it. Do not reintroduce bundled service specs; a service that publishes no spec or MCP server on a tenant should get no namespace there. The DTM snapshot survives only as a test fixture (`test/fixtures/dtm-openapi.json`) standing in for a real discovered service spec in `test/real-spec.test.ts` and `test/openapi-preprocessor.test.ts`; it is not refreshed by `scripts/update-openapi.mjs`.
 
 Build-time behaviour:
 
-- For the CLI build the core plugin inlines all `openapi/core/*.json` snapshots and `setCoreOpenApiVersion` switches between them at runtime. The bundled-services plugin inlines the `default` version of each service-backed source.
-- For each server build, the plugins inline exactly the configured core+services combination for that build, taken from `builds[].apis`.
-  - Types for both virtual modules live together in `src/openapi-modules.d.ts`; no `tsconfig.paths` entry is needed.
+- For the CLI build the core plugin inlines all `openapi/core/*.json` snapshots and `setCoreOpenApiVersion` switches between them at runtime.
+- For each server build, the plugin inlines exactly the core version configured for that build, taken from `builds[].apis.core`.
+  - Types for the virtual module live in `src/openapi-modules.d.ts`; no `tsconfig.paths` entry is needed.
   - `openapi-builds.json` is the source of truth for both the download URLs used by `scripts/update-openapi.mjs` and the server build/package matrix used by `tsdown.config.ts` and `scripts/package-microservices.mjs`.
   - `tsdown.config.ts` emits one server bundle per supported build version into `.output/<version>/`.
-  - `scripts/package-microservices.mjs` turns those built server outputs into one Docker-based zip per build, for example `mc8yp-core-2026-dtm-v2.x.x.zip`.
+  - `scripts/package-microservices.mjs` turns those built server outputs into one Docker-based zip per build, for example `mc8yp-core-2026-v2.x.x.zip`.
   - The packaging script writes a temporary generated Dockerfile under `.c8y/`, builds from the repository root, copies the selected `.output/<version>/` bundle into `/app/server/`, and installs production dependencies inside the Linux image with pnpm before copying them into the runtime stage.
   - The packaging script builds Docker images for `linux/amd64` by default so release zips created on Apple Silicon remain deployable in typical Cumulocity environments; override with `DOCKER_PLATFORM` only when you intentionally need a different target.
 
@@ -235,7 +234,7 @@ Restrictions and allow rules both use the format `[METHOD:]<path-pattern>`.
 - Allow rules are allow-list entries. When any allow rule exists, requests must match at least one allow rule unless a restriction blocks them first.
 - Restrictions take priority over allow rules.
 - In microservice mode, prefer the project-scoped `mc8yp-restriction` and `mc8yp-allow` headers for HTTP policy transport; repeated headers and comma-separated values are both accepted.
-- Bundled services that are not installed on the tenant simply get no namespace. The connection-level restriction/allow policy is the only access layer above the Cumulocity API itself.
+- Services that publish no spec or MCP server on the tenant simply get no namespace. The connection-level restriction/allow policy is the only access layer above the Cumulocity API itself.
 
 The restriction system is implemented in two places:
 
@@ -300,7 +299,7 @@ pnpm prerelease    # lint + typecheck + build
 - `tsdown.config.ts` builds the CLI bundle into `dist/`
 - Both CLI and server bundles use `noExternal: [/^(?!@iso4\/sandbox$|@napi-rs\/)/]` to inline all non-native dependencies. Only `@iso4/sandbox` (per-platform Rust binaries) and `@napi-rs/keyring` (N-API, CLI only) remain external and are the only packages in `dependencies`. Everything else lives in `devDependencies` and is inlined at build time.
 - Release zip artifacts are created in the repository root by `pnpm package:microservices`
-- `pnpm package:microservices` names artifacts from the bundled API combination, for example `mc8yp-core-2026-dtm-v2.x.x.zip`.
+- `pnpm package:microservices` names artifacts from each build's `artifact` field, for example `mc8yp-core-2026-v2.x.x.zip`.
 - `pnpm package:microservices` uses a temporary `.c8y/` staging directory, deletes old root `*.zip` artifacts before creating fresh ones, installs production dependencies inside a Linux Docker build so platform-specific optional native packages resolve correctly, and builds `linux/amd64` images unless `DOCKER_PLATFORM` is set explicitly.
 
 ## Code Style And Conventions
@@ -316,9 +315,8 @@ pnpm prerelease    # lint + typecheck + build
 ### Practical editing guidance
 
 - If a change affects tool behavior, inspect both the tool definition and the codemode runtime.
-- If a change affects bundled OpenAPI selection, update the `#core-openapi` / `#bundled-services` plugins in `tsdown.config.ts`, the ambient declarations in `src/openapi-modules.d.ts`, and the source/build matrix in `openapi-builds.json`.
-- If you add a new bundled **service-backed** OpenAPI spec in the future: drop the JSON under `openapi/<key>/<version>.json` and add one entry under `sources.<key>` in `openapi-builds.json` with a `servicePrefix` (e.g. `"servicePrefix": "/service/<key>"`). `bundledServicesPlugin` picks it up automatically; `resolveCapabilities`, `buildNamespaces`, derivation, and the docs index all handle new entries generically. No code edits required.
-- If you add a new always-available (non-service-backed) bundled spec like core: that needs a new virtual module wired into `tsdown.config.ts`, `src/openapi-modules.d.ts`, and a new fixed namespace in `src/codemode/namespaces.ts`. This is a much bigger change and the bundled-services flow is _not_ the right place for it.
+- If a change affects bundled core OpenAPI selection, update the `#core-openapi` plugin in `tsdown.config.ts`, the ambient declarations in `src/openapi-modules.d.ts`, and the source/build matrix in `openapi-builds.json`.
+- Do not bundle service specs. A service becomes available by publishing an `openApiSpec` or `exposeMcpServers` in its manifest; discovery, `resolveCapabilities`, `buildNamespaces`, derivation, and the docs index handle it generically.
 - If a change affects restrictions or allow rules, verify both policy messaging and live request blocking.
 - If a change affects auth, verify the CLI and server paths separately.
 - If a change affects public MCP behavior, update `README.md` as well as this file.
@@ -336,7 +334,7 @@ pnpm prerelease    # lint + typecheck + build
   - namespace assembly / describe rendering: `test/describe.test.ts`
   - method search ranking: `test/method-search.test.ts`
   - method naming policy: `test/operation-naming.test.ts`
-  - derivation/rendering against the real bundled specs: `test/real-spec.test.ts`
+  - derivation/rendering against the real core spec and the DTM fixture: `test/real-spec.test.ts`
   - docs indexing/search: `test/docs-index.test.ts`
   - external MCP config parsing, namespace assembly, session tool-list cache: `test/external-mcp.test.ts`
   - full middleman flow incl. external servers over real HTTP: `test/e2e-mcp.test.ts`
@@ -366,7 +364,7 @@ When working on this project:
 1. Start from the actual controlling surface. For most feature work that is `src/tools/`, `src/prompts/`, `src/codemode/execute.ts`, or restriction/auth utilities.
 2. Treat CLI mode and microservice mode as separate execution environments with different auth and tool availability.
 3. Run focused tests first when changing a narrow subsystem, then run the full validation set if the change is broader. Use this exact validation order: `pnpm test:run`, then `pnpm lint:fix`, then `pnpm typecheck`.
-4. The codemode runtime reads `TenantCapabilities` (`{ core: Spec, specs: Record<string, Spec> }`) from `c8yMcpServer.ctx.custom?.specs`. In server mode it is computed per-request by the H3 handler via `resolveCapabilities(discoveredSpecs, installedContextPaths)`. In CLI mode it is set on tenant activation by `setCliTenantContext` and falls back to `getBundledOnlyCapabilities()` (every bundled snapshot, no removal) before any tenant is active. Spec removal is unconditional inside `resolveCapabilities`: when a tenant is active the agent only sees what is reachable on that tenant. The no-tenant CLI fallback is the only path that exposes all bundled snapshots, and in that state `codemode` runs discovery-only — live calls throw the missing-auth error and the result marker says `No active tenant — discovery only`. In CLI mode only, every `codemode` result starts with a marker line (`Executed against tenant: <url>` or the no-tenant notice) so the agent can verify which tenant the result reflects. Server mode omits it — the tenant is fixed by deployment/request auth there, so the marker would just be noise. The marker reads from `c8yMcpServer.ctx.custom.auth.tenantUrl` — no extra metadata is threaded.
+4. The codemode runtime reads `TenantCapabilities` (`{ core: Spec, specs: Record<string, Spec> }`) from `c8yMcpServer.ctx.custom?.specs`. In server mode it is computed per-request by the H3 handler via `resolveCapabilities(discoveredSpecs, discoveredMcpServers)`. In CLI mode it is set on tenant activation by `setCliTenantContext` and falls back to `getCoreOnlyCapabilities()` (core, no services) before any tenant is active. Service namespaces come from discovery only, so with a tenant active the agent only sees what is reachable on that tenant. In the no-tenant CLI state `codemode` runs discovery-only — live calls throw the missing-auth error and the result marker says `No active tenant — discovery only`. In CLI mode only, every `codemode` result starts with a marker line (`Executed against tenant: <url>` or the no-tenant notice) so the agent can verify which tenant the result reflects. Server mode omits it — the tenant is fixed by deployment/request auth there, so the marker would just be noise. The marker reads from `c8yMcpServer.ctx.custom.auth.tenantUrl` — no extra metadata is threaded.
 5. Keep public MCP tool and prompt descriptions aligned with actual runtime behavior.
 6. Preserve the current sandbox limits and request boundary logic unless the task explicitly changes them.
 7. Record recurring project-specific lessons in the section below when they are likely to prevent future mistakes.
@@ -395,8 +393,8 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 
 - `codemode` runs a static entry module that imports the `mc8yp:api` host module and the agent's `mc8yp:agent` source module, and reads the default export from sandbox execution.
 - `codemode` accepts function-expression style code and normalizes fenced code input before evaluation.
-- `#core-openapi` and `#bundled-services` are virtual modules synthesized by tsdown plugins; consumers must not import the JSON snapshots directly.
-- The CLI build inlines all bundled core snapshots plus the default version of every service-backed source (currently DTM `release`); each server build inlines exactly the configured combination for that build.
+- `#core-openapi` is a virtual module synthesized by a tsdown plugin; consumers must not import the JSON snapshots directly.
+- The CLI build inlines all bundled core snapshots; each server build inlines exactly the core version configured for that build.
 - Service specs land in the sandbox as one typed namespace per contextPath (bundled and live-discovered alike). Core is the only fixed namespace name (`c8y`).
 - `resolveCapabilities` returns a single `{ core, specs }` object. An absent key in `specs` means the spec is unavailable for this tenant; there are no `null` values.
 - API discovery lists applications via paginated `GET /application/applications?tenant=<id>&type=MICROSERVICE` (100 per page), NOT `applicationsByTenant`. The unpaginated `applicationsByTenant?pageSize=2000` response included every HOSTED web-app manifest and got cut off by the internal gateway mid-body ("Premature close") on app-heavy tenants, permanently breaking discovery for that tenant. HOSTED/EXTERNAL apps can never contribute specs (spec download goes through `/service/<contextPath>/`, microservices only), so `installedContextPaths` intentionally contains only microservice context paths.
@@ -417,7 +415,7 @@ This section captures project-specific knowledge, tool quirks, and lessons learn
 - The namespace/discovery layer: host-side derivation of one typed method per OpenAPI operation (or MCP tool), `search`/`describe` as the discovery SDK, deliberately NO escape hatch — namespaces are the complete surface. Design choices to know: namespace-level describe lists methods one line each and never renders types (core is too big for full type dumps — see the three describe altitudes above), output types are derived from response schemas, and prose docs get their own MiniSearch-backed `docs` global because name-oriented method search scores long prose poorly.
 - Caches in the codemode layer (`deriveOperations` WeakMap, `getDocsIndex` WeakMap) are keyed by spec/resolved-specs object identity and MUST stay policy-independent — restrictions differ per connection in server mode. Apply policy at assembly/query time (`buildNamespaces` filter, `isHidden` predicate), never inside the cached artifact.
 - `codemode.search` is MiniSearch-backed (same engine as docs), replacing the hand-tuned CF token scorer: fuzzy matching absorbs singular/plural drift and OR-combination keeps recall when a query word has no counterpart in the spec vocabulary ("list assets" still ranks `getAssets`). It accepts `string | string[]` — the calling agent is the semantic layer and passes phrasing variants in one call. The index is policy-independent and cached per tenant (same WeakMap pattern as docs/derivation); the connection's policy filters hits at query time via a visible-targets predicate. Search RESULTS are deliberately never cached: they are policy-dependent, the query keyspace is unbounded, and a query over ~300 entries costs well under a millisecond. Host main-thread impact is negligible (agent code runs in the separate Rust sandbox process); if a tenant ever surfaces thousands of operations, moving index+query into a worker_thread is a clean follow-up.
-- The whole cache chain hangs on object identity: per-tenant discovery cache (30-min TTL in `capability-discovery.ts`) → memoized `resolveCapabilities` (WeakMap on the (discoveredSpecs, installedContextPaths) pair, so the server's per-request call returns the same `TenantCapabilities` for a tenant until refresh) → `deriveOperations`/`getDocsIndex` keyed on those stable objects. A discovery refresh mints new objects, everything downstream repopulates lazily, and old entries are GC'd. Do NOT "clean up" the `resolveCapabilities` memoization — removing it silently turns the docs index into a per-request rebuild.
+- The whole cache chain hangs on object identity: per-tenant discovery cache (30-min TTL in `capability-discovery.ts`) → memoized `resolveCapabilities` (WeakMap on the (discoveredSpecs, discoveredMcpServers) pair, so the server's per-request call returns the same `TenantCapabilities` for a tenant until refresh) → `deriveOperations`/`getDocsIndex` keyed on those stable objects. A discovery refresh mints new objects, everything downstream repopulates lazily, and old entries are GC'd. Do NOT "clean up" the `resolveCapabilities` memoization — removing it silently turns the docs index into a per-request rebuild.
 
 ### Common Mistakes To Avoid
 

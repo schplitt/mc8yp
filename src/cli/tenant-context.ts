@@ -61,12 +61,9 @@ export function clearCliTenantContext(): void {
  * uses the per-tenant cache), resolves specs, and stores the result in
  * memory so subsequent tool calls can read it synchronously.
  *
- * Spec removal is unconditional for an active tenant: bundled specs for
- * services that the tenant has not installed are dropped from the query
- * sandbox so the agent cannot accidentally plan against a surface that
- * isn't actually there. To browse all bundled snapshots, leave the CLI
- * with no active tenant (the no-tenant fallback in cli/index.ts keeps
- * everything visible).
+ * Service namespaces come from live discovery only, so the agent sees
+ * exactly what this tenant publishes. With no active tenant the CLI falls
+ * back to core only (see getCoreOnlyCapabilities in cli/index.ts).
  * @param tenantUrl - Base URL of the Cumulocity tenant to activate
  */
 export async function setCliTenantContext(tenantUrl: string): Promise<CliTenantContext> {
@@ -101,12 +98,12 @@ async function resolveCliTenantContext(tenantUrl: string): Promise<CliTenantCont
   // _context.specs is a resolved snapshot; the cache is busted externally
   // when service-user credentials rotate. Call set-active-tenant again to
   // force a fresh snapshot into the context.
-  const { specs: discovered, installedContextPaths, mcpServers } = await startDiscovery(creds.tenantId, cliClient)
+  const { specs: discovered, mcpServers } = await startDiscovery(creds.tenantId, cliClient)
 
   return {
     tenantUrl,
     authorizationHeader: authHeaders.Authorization!,
-    specs: resolveCapabilities(discovered, installedContextPaths, mcpServers),
+    specs: resolveCapabilities(discovered, mcpServers),
     tfaExpiresAt: creds.tfaSession?.expiresAt,
   }
 }

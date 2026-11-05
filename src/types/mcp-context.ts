@@ -46,9 +46,9 @@ export interface C8yMcpCustomContext extends Record<string, unknown> {
    */
   externalMcpServers?: ExternalMcpServerConfig[]
   /**
-   * Resolved specs for the query sandbox: always-available `core` plus a
-   * service-spec map keyed by contextPath (bundled service entries + any
-   * non-bundled discovered services). Paths are already prefixed.
+   * Resolved specs for the query sandbox: always-available bundled `core`
+   * plus a service-spec map keyed by contextPath, populated by live
+   * discovery only. Paths are already prefixed.
    *
    * Optional because the microservice request handler may receive platform
    * probe calls (e.g. the Cumulocity MCP tool-discovery flow) that arrive

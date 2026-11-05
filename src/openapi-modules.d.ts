@@ -1,16 +1,3 @@
-declare module '#bundled-services' {
-  import type { Spec } from './utils/capability-resolution'
-
-  export interface BundledServiceSpec {
-    contextPath: string
-    appLabel: string
-    specLabel: string
-    servicePrefix: string
-    spec: Spec
-  }
-  export const BUNDLED_SERVICE_SPECS: ReadonlyArray<BundledServiceSpec>
-}
-
 declare module '#core-openapi' {
   import type { Spec } from './utils/capability-resolution'
 

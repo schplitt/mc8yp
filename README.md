@@ -120,7 +120,7 @@ Blocked operations are hidden from the agent's search and are refused before any
 
 - [Access policy reference](docs/access-policy.md)
 - [External MCP servers](docs/external-mcp-servers.md): attach third-party MCP servers to a connection
-- [Advanced](docs/advanced.md): how discovery works, the `sandbox` shell, MCP-backed services, bundled specs, `--spec`
+- [Advanced](docs/advanced.md): how discovery works, the `sandbox` shell, MCP-backed services, the bundled core spec, `--spec`
 - [WSL 2 keyring setup](docs/wsl-setup.md)
 
 ## Development
