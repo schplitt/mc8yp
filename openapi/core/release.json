@@ -7174,6 +7174,9 @@
           },
           "403": {
             "$ref": "#/components/responses/operationNotAuthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/invalidPayload"
           }
         }
       },
@@ -7480,7 +7483,7 @@
           }
         ],
         "summary": "Create one or multiple managed objects",
-        "description": "Create a managed object, for example, a device with temperature measurements support or a binary switch.<br>\nIn general, each managed object may consist of:\n\n*  A unique identifier that references the object.\n*  The name of the object.\n*  The most specific type of the managed object.\n*  A time stamp showing the last update.\n*  Fragments with specific meanings, for example, `c8y_IsDevice`, `c8y_SupportedOperations`.\n*  Any additional custom fragments.\n\nImagine, for example, that you want to describe electric meters from different vendors. Depending on the make of the meter, one may have a relay and one may be capable to measure a single phase or three phases (for example, a three-phase electricity sensor). A fragment `c8y_ThreePhaseElectricitySensor` would identify such an electric meter. Devices' characteristics are identified by storing fragments for each of them.\n\n> **&#9432; Info:** For more details about fragments with specific meanings, refer to [Device management & connectivity > Device integration > Fragment library](https://www.cumulocity.com/docs/device-integration/fragment-library/) in the Cumulocity user documentation.\n\nThe maximum number of managed objects that can be created in a single bulk request is 50.\nIf any managed object included in the bulk request fails validation, then the request fails with a client error and nothing from the bulk request gets created.\nIf an unexpected server error occurs during bulk processing, then the response will return a server error, but part of the bulk that was processed before the error occurred will be created and the remainder will not.\n\nExternal identifiers can be assigned to managed objects upon creation by specifying a list in `externalIds` field.\nGiven external identifiers must be valid and not be already assigned to another managed object or the request to create a single or multiple managed objects will fail with a client error and not create anything.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_INVENTORY_CREATE <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_CREATE\n</section>\n",
+        "description": "Create a managed object, for example, a device with temperature measurements support or a binary switch.<br>\nIn general, each managed object may consist of:\n\n*  A unique identifier that references the object.\n*  The name of the object.\n*  The most specific type of the managed object.\n*  A time stamp showing the last update.\n*  Fragments with specific meanings, for example, `c8y_IsDevice`, `c8y_SupportedOperations`.\n*  Any additional custom fragments.\n\nImagine, for example, that you want to describe electric meters from different vendors. Depending on the make of the meter, one may have a relay and one may be capable to measure a single phase or three phases (for example, a three-phase electricity sensor). A fragment `c8y_ThreePhaseElectricitySensor` would identify such an electric meter. Devices' characteristics are identified by storing fragments for each of them.\n\n> **&#9432; Info:** For more details about fragments with specific meanings, refer to [Device management & connectivity > Device integration > Fragment library](https://www.cumulocity.com/docs/device-integration/fragment-library/) in the Cumulocity user documentation.\n\nExternal identifiers can be assigned to managed objects upon creation by specifying a list in `externalIds` field.\nGiven external identifiers must be valid and not be already assigned to another managed object or the request to create a single or multiple managed objects will fail with a client error and not create anything.\n\n#### Bulk create\n\nA bulk request creates at most 50 managed objects; the response lists them in request order.\nAll of them are validated, and their external identifiers checked, before anything is created, so a failed check creates nothing.\nAn external identifier may occur only once in the request.\n\nPart of the request is created only if a failure occurs while writing, for example, a concurrent request binds the same external identifier (`409`), or the datastore fails (`500`).\nThe error's `bulkRequest.fragmentType` then names a fragment that each created managed object carries with its request position, for example, `\"c8y_BatchId_7c8e1e0a-3b2f-4f6e-9a51-5d2c7e4b9f10\": { \"index\": 3 }`.\nTo complete the request without duplicates:\n\n1. Find the created managed objects with `GET /inventory/managedObjects?fragmentType=<fragmentType>&pageSize=50`. If the lookup fails, retry it, never the bulk request.\n2. Re-send only the positions the lookup did not return. This also applies to `failedIndex`, which may have been created.\n3. Managed objects found may have incomplete external identifiers or group assignment.\n\nThe fragment is not in the response or notifications, and is removed on success; if removal fails, it stays.\nRemove it with a bulk update setting it to `null`, or ignore fragments starting with `c8y_BatchId_`. The prefix is reserved and dropped from managed objects you create.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_INVENTORY_CREATE <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_CREATE\n</section>\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -7543,17 +7546,22 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "All managed objects of the bulk request were created. The `managedObjects` array has the same order as in the request.",
+            "content": {
+              "application/vnd.com.nsn.cumulocity.managedobjectcollection+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedObjectCollection"
+                }
+              }
+            }
+          },
           "201": {
             "description": "A managed object was created.",
             "content": {
               "application/vnd.com.nsn.cumulocity.managedobject+json": {
                 "schema": {
                   "$ref": "#/components/schemas/managedObject"
-                }
-              },
-              "application/vnd.com.nsn.cumulocity.managedobjectcollection+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ManagedObjectCollection"
                 }
               }
             }
@@ -7564,8 +7572,59 @@
           "403": {
             "$ref": "#/components/responses/operationNotAuthorized"
           },
+          "409": {
+            "description": "Conflict – An external identifier is already bound to another managed object.\n",
+            "content": {
+              "application/vnd.com.nsn.cumulocity.error+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bulkRequestError"
+                },
+                "examples": {
+                  "bound_before_the_request": {
+                    "description": "An external identifier was already bound to another managed object when the request was received. Nothing was created.",
+                    "value": {
+                      "error": "identity/Duplicate",
+                      "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting",
+                      "bulkRequest": {
+                        "failedIndex": 3
+                      }
+                    }
+                  },
+                  "bound_during_the_request": {
+                    "description": "Another request bound the external identifier while the bulk request was being processed. Part of the bulk request may have been created.",
+                    "value": {
+                      "error": "identity/Duplicate",
+                      "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting",
+                      "bulkRequest": {
+                        "failedIndex": 3,
+                        "fragmentType": "c8y_BatchId_7c8e1e0a-3b2f-4f6e-9a51-5d2c7e4b9f10"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "422": {
-            "$ref": "#/components/responses/invalidPayload"
+            "$ref": "#/components/responses/invalidBulkPayload"
+          },
+          "500": {
+            "description": "Internal Server Error – For a bulk request, part of it may have been created.",
+            "content": {
+              "application/vnd.com.nsn.cumulocity.error+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bulkRequestError"
+                },
+                "example": {
+                  "error": "inventory/Internal Server Error",
+                  "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting",
+                  "bulkRequest": {
+                    "failedIndex": 17,
+                    "fragmentType": "c8y_BatchId_7c8e1e0a-3b2f-4f6e-9a51-5d2c7e4b9f10"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -7595,7 +7654,7 @@
           }
         ],
         "summary": "Update multiple managed objects at once",
-        "description": "Updates multiple managed objects (for example, devices) by their given IDs.\n\nThe maximum number of managed objects that can be updated in a single bulk request is 50.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> owner of the source <b>OR</b> MANAGE_OBJECT_ADMIN permission on the source\n</section>\n",
+        "description": "Updates multiple managed objects (for example, devices) by their given IDs.\n\nThe maximum number of managed objects that can be updated in a single bulk request is 50.\nEach ID can occur only once in the request.\nUpdating `externalIds` is not supported through this operation; use the Identity API instead.\n\nAll managed objects of the bulk request are validated, and checked to exist, before anything is updated.\nIf any of these checks fails, the request fails with a client error and nothing is updated.\nThe error response identifies the failed managed object in `bulkRequest`. A duplicate ID fails the whole request.\n\nIf the request fails while the managed objects are updated, for example, when the datastore fails, part of them may have been updated.\nRetrieve the managed objects by their IDs to find out their current state.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> owner of the source <b>OR</b> MANAGE_OBJECT_ADMIN permission on the source\n</section>\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -7654,7 +7713,24 @@
             "$ref": "#/components/responses/operationNotAuthorized"
           },
           "404": {
-            "$ref": "#/components/responses/inventoryObjectNotFound"
+            "description": "Managed object not found.",
+            "content": {
+              "application/vnd.com.nsn.cumulocity.error+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bulkRequestError"
+                },
+                "example": {
+                  "error": "inventory/Not Found",
+                  "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting",
+                  "bulkRequest": {
+                    "failedIndex": 1
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/invalidBulkPayload"
           }
         }
       },
@@ -7976,7 +8052,7 @@
           }
         ],
         "summary": "Remove a specific managed object",
-        "description": "Remove a specific managed object (for example, device) by a given ID.\n\n> **&#9432; Info:** Inventory DELETE requests are not synchronous. The response could be returned before the delete request has been completed. This may happen especially when the deleted managed object has a lot of associated data. After sending the request, the platform starts deleting the associated data in an asynchronous way. Finally, the requested managed object is deleted after all associated data has been deleted.\n\n> **&#9432; Info:** By default, the delete operation is propagated to subgroups, but only if the object being deleted is a group. Deleting a parent group will also delete its subgroups. The cascade parameter controls whether the devices assigned to the groups are also deleted. When set to false, the devices remain intact even as the groups and subgroups are deleted. When set to true, all groups, subgroups, and their assigned devices are deleted.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> owner of the source <b>OR</b> MANAGE_OBJECT_ADMIN permission on the source\n</section>\n",
+        "description": "Remove a specific managed object (for example, device) by a given ID.\n\n> **&#9432; Info:** The platform first deletes the associated data and then the requested managed object. If this completes within 30 seconds, the response is 204 and the managed object has been deleted. Otherwise, the response is 202 and the deletion continues in the background. This happens especially when the deleted managed object has a lot of associated data or children. An error during the background deletion is not reported to the client. To verify that the managed object has been deleted, retrieve it until the response is 404.\n\n> **&#9432; Info:** By default, the delete operation is propagated to subgroups, but only if the object being deleted is a group. Deleting a parent group will also delete its subgroups. The cascade parameter controls whether the devices assigned to the groups are also deleted. When set to false, the devices remain intact even as the groups and subgroups are deleted. When set to true, all groups, subgroups, and their assigned devices are deleted.\n\n<section><h5>Required roles</h5>\nROLE_INVENTORY_ADMIN <b>OR</b> ROLE_MANAGED_OBJECT_ADMIN <b>OR</b> owner of the source <b>OR</b> MANAGE_OBJECT_ADMIN permission on the source\n</section>\n",
         "x-code-samples": [
           {
             "lang": "cURL",
@@ -8000,15 +8076,23 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "A managed object was removed.",
+          "202": {
+            "description": "The deletion did not complete within 30 seconds and continues in the background.",
             "content": {
-              "*/*": {
+              "application/vnd.com.nsn.cumulocity.managedobject+json": {
                 "schema": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/inventoryObjectDeleteInBackground"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/inventoryObjectDeleteInBackground"
                 }
               }
             }
+          },
+          "204": {
+            "description": "A managed object was removed."
           },
           "401": {
             "$ref": "#/components/responses/unauthorizedError"
@@ -8021,6 +8105,12 @@
           },
           "409": {
             "$ref": "#/components/responses/inventoryObjectDeleteConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/inventoryObjectDeleteInvalidData"
+          },
+          "429": {
+            "$ref": "#/components/responses/inventoryObjectDeleteTooManyRequests"
           }
         }
       }
@@ -9653,6 +9743,102 @@
         }
       }
     },
+    "/inventory/templates/globalId/{globalId}/externalId": {
+      "parameters": [
+        {
+          "name": "globalId",
+          "in": "path",
+          "description": "Unique identifier of the managed object holding the SmartREST template.",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "example": "251982"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "postSmartRestTemplateCollectionResource",
+        "x-codegen-resource-name": "createSmartRestTemplateExternalId",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/acceptHeader"
+          }
+        ],
+        "tags": [
+          "External IDs"
+        ],
+        "security": [
+          {
+            "Basic": []
+          },
+          {
+            "OAI-Secure": []
+          },
+          {
+            "SSO": []
+          }
+        ],
+        "summary": "Create a SmartREST template external ID",
+        "description": "Bind a SmartREST 1.0 template identifier (X-Id) to an existing managed object (identified by ID). The external ID type must be `c8y_SmartRestDeviceIdentifier`.\n\n<section><h5>Required roles</h5>\nROLE_IDENTITY_ADMIN <b>OR</b> owner of the resource <b>OR</b> MANAGED_OBJECT_ADMIN permission on the resource\n</section>\n",
+        "x-code-samples": [
+          {
+            "lang": "cURL",
+            "source": "curl --location --request POST \"https://<TENANT_DOMAIN>/inventory/templates/globalId/{globalId}/externalId\" \\\n--header \"Authorization: Basic <AUTHORIZATION>\" \\\n--header \"Accept: application/json\" \\\n--header \"Content-Type: application/json\" \\\n--data-raw '<Payload>'\n"
+          },
+          {
+            "lang": "C#",
+            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/inventory/templates/globalId/{globalId}/externalId\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.POST);\nrequest.AddHeader(\"Authorization\", \"Basic <AUTHORIZATION>\");\nrequest.AddHeader(\"Content-Type\", \"application/json\");\nrequest.AddHeader(\"Accept\", \"application/json\");\nrequest.AddParameter(\"application/json\", \"<Payload>\", ParameterType.RequestBody);\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
+          },
+          {
+            "lang": "Java",
+            "source": "Unirest.setTimeouts(0, 0);\nHttpResponse<String> response = Unirest.post(\"https://<TENANT_DOMAIN>/inventory/templates/globalId/{globalId}/externalId\")\n    .header(\"Authorization\", \"Basic <AUTHORIZATION>\")\n    .header(\"Content-Type\", \"application/json\")\n    .header(\"Accept\", \"application/json\")\n    .body(\"<Payload>\")\n    .asString();\n"
+          },
+          {
+            "lang": "Node.js",
+            "source": "var unirest = require(\"unirest\");\nvar req = unirest(\"POST\", \"https://<TENANT_DOMAIN>/inventory/templates/globalId/{globalId}/externalId\")\n    .headers({\n        \"Authorization\": \"Basic <AUTHORIZATION>\",\n        \"Accept\": \"application/json\",\n        \"Content-Type\": \"application/json\"\n    })\n    .send(JSON.stringify( <Payload> ))\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
+          },
+          {
+            "lang": "Python",
+            "source": "import requests\nimport json\n\nurl = \"https://<TENANT_DOMAIN>/inventory/templates/globalId/{globalId}/externalId\"\nheaders = {\n  \"Authorization\": \"Basic <AUTHORIZATION>\",\n  \"Accept\": \"application/json\",\n  \"Content-Type\": \"application/json\"\n}\nresponse = requests.request(\"POST\", url, headers = headers, data = json.dumps(<Payload>))\nprint(response.text.encode(\"utf8\"))\n"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/vnd.com.nsn.cumulocity.externalid+json": {
+              "example": {
+                "externalId": "myTemplateXid",
+                "type": "c8y_SmartRestDeviceIdentifier"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/externalId"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "An external ID was created. The response body is empty."
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/operationNotAuthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/identityGlobalObjectNotFound"
+          },
+          "409": {
+            "description": "Duplicate – Identity already bound to a different Global ID."
+          },
+          "422": {
+            "$ref": "#/components/responses/invalidData"
+          }
+        }
+      }
+    },
     "/identity": {
       "get": {
         "operationId": "getIdentityApiResource",
@@ -10227,7 +10413,7 @@
           }
         ],
         "summary": "Update the current user",
-        "description": "Update the current user.\n\n<section><h5>Required roles</h5>\nROLE_USER_MANAGEMENT_OWN_ADMIN \n</section>\n",
+        "description": "Update the current user.\n\nThe `password` property is ignored. To change the current user's password, use [Update the current user's password](#operation/putCurrentUserPasswordResource), which verifies the current password.\n\n<section><h5>Required roles</h5>\nROLE_USER_MANAGEMENT_OWN_ADMIN\n</section>\n",
         "x-code-samples": [
           {
             "lang": "cURL",
@@ -10257,8 +10443,7 @@
               "example": {
                 "firstName": "John",
                 "lastName": "Doe",
-                "email": "johndoe@example.com",
-                "password": "S3cur3P4sswd."
+                "email": "johndoe@example.com"
               },
               "schema": {
                 "$ref": "#/components/schemas/currentUser"
@@ -11607,7 +11792,7 @@
           }
         ],
         "summary": "Update a specific user for a specific tenant",
-        "description": "Update a specific user (by a given user ID) for a specific tenant (by a given tenant ID).\n\nAny change in user's roles, device permissions and groups creates corresponding audit records with type \"User\" and activity \"User updated\" with information which properties have been changed.\n\nWhen the user is updated with changed permissions or groups, a corresponding audit record is created with type \"User\" and activity \"User updated\".\n\nNote that you cannot update the password or email of another user, they can only be updated for the current user.\n\nThe certificate authentication opt-in (`requiredAuthType`) is not part of this representation and cannot be set here, for any user. A regular user opts in for themselves through [Update the current user](#operation/putCurrentUserResource). A service user opts in for itself through [Update the authentication method required for the current service user](#operation/putCurrentApplicationResourceAuthType); a tenant administrator can only reset that value back to `NONE` through [Reset the authentication method required for a service user](#operation/putApplicationResourceAuthType).\n\n<section><h5>Required roles</h5>\nROLE_USER_MANAGEMENT_ADMIN to update root users in a user hierarchy <b>OR</b> users that are not in any hierarchy<br/>\nROLE_USER_MANAGEMENT_ADMIN to update non-root users in a user hierarchy <b>AND</b> whose parents have access to roles, groups, device permissions and applications being assigned<br/>\nROLE_USER_MANAGEMENT_CREATE to update descendants of the current user in a user hierarchy <b>AND</b> whose parents have access to roles, groups, device permissions and applications being assigned\n</section>\n",
+        "description": "Update a specific user (by a given user ID) for a specific tenant (by a given tenant ID).\n\nAny change in user's roles, device permissions and groups creates corresponding audit records with type \"User\" and activity \"User updated\" with information which properties have been changed.\n\nWhen the user is updated with changed permissions or groups, a corresponding audit record is created with type \"User\" and activity \"User updated\".\n\nNote that you cannot update the password or email of another user. The email can only be updated for the current user. The `password` property is ignored when updating the current user. To change the current user's password, use [Update the current user's password](#operation/putCurrentUserPasswordResource), which verifies the current password.\n\nThe certificate authentication opt-in (`requiredAuthType`) is not part of this representation and cannot be set here, for any user. A regular user opts in for themselves through [Update the current user](#operation/putCurrentUserResource). A service user opts in for itself through [Update the authentication method required for the current service user](#operation/putCurrentApplicationResourceAuthType); a tenant administrator can only reset that value back to `NONE` through [Reset the authentication method required for a service user](#operation/putApplicationResourceAuthType).\n\n<section><h5>Required roles</h5>\nROLE_USER_MANAGEMENT_ADMIN to update root users in a user hierarchy <b>OR</b> users that are not in any hierarchy<br/>\nROLE_USER_MANAGEMENT_ADMIN to update non-root users in a user hierarchy <b>AND</b> whose parents have access to roles, groups, device permissions and applications being assigned<br/>\nROLE_USER_MANAGEMENT_CREATE to update descendants of the current user in a user hierarchy <b>AND</b> whose parents have access to roles, groups, device permissions and applications being assigned\n</section>\n",
         "x-code-samples": [
           {
             "lang": "cURL",
@@ -11645,7 +11830,8 @@
                       "password": {
                         "format": "password",
                         "type": "string",
-                        "description": "The user's password. Allowed characters are: Latin letters (a–z, A–Z), digits (0–9), and the following special characters: ` ~ ! @ # $ % ^ & * ( ) _ | + - = ? ; : ' \" , . < > { } [ ] \\ /\nThe password can only be updated for the current user.\n"
+                        "description": "The user's password. Allowed characters are: Latin letters (a–z, A–Z), digits (0–9), and the following special characters: ` ~ ! @ # $ % ^ & * ( ) _ | + - = ? ; : ' \" , . < > { } [ ] \\ /\nThe password of another user cannot be updated. For the current user, this property is ignored. To change the current user's password, use [Update the current user's password](#operation/putCurrentUserPasswordResource).\n",
+                        "deprecated": true
                       },
                       "email": {
                         "type": "string",
@@ -13733,7 +13919,7 @@
           }
         ],
         "summary": "Create a measurement",
-        "description": "A measurement must be associated with a source (managed object) identified by ID, and must specify the type of measurement and the time when it was measured by the device (for example, a thermometer).\n\nEach measurement fragment is an object (for example, `c8y_Steam`) containing the actual measurements as properties. The property name represents the name of the measurement (for example, `Temperature`) and it contains two properties:\n\n*   `value` - The value of the individual measurement. The maximum precision for floating point numbers is 64-bit IEEE 754. For integers it's a 64-bit two's complement integer. The `value` is mandatory for a fragment.\n*   `unit` - The unit of the measurements. This field is optional in the request body; however, if it is provided, it must be a non-empty string and must not be null.\n\nReview the [System of units](#section/System-of-units) section for details about the conversions of units. Also review [Getting started > Technical concepts > Cumulocity's domain model > Inventory > Fragments > Naming conventions of fragments](https://www.cumulocity.com/docs/concepts/domain-model/#naming-conventions-of-fragments) in the Cumulocity user documentation.\n\nThe example below uses `c8y_SteamFragment` in the request body to illustrate recording two measurements called `Temperature` and `Humidity`.\n\n  ```json\n  {\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"type\": \"temperatureMeasurement\",\n    \"c8y_SteamFragment\": {\n        \"Temperature\": { \"value\": 42.7, \"unit\": \"C\" },\n        \"Humidity\": { \"value\": 13.37, \"unit\": \"%RH\" }\n      }\n    }\n  ```\n\n> **⚠️ Important:** Property names used for fragment and series must not contain whitespaces nor the special characters `. , * [ ] ( ) @ $`. This is required to ensure a correct processing.\n\n**Legacy compatibility:**\n\nFor legacy compatibility reasons, a measurement can contain custom fragments. The platform's behavior will vary based on whether the series in the custom fragment are valid or not:\n\n1. ***Mixed Series Fragments:***\n\nWhen creating a measurement with a fragment containing both valid and invalid series:\n  - Valid series (those with numeric value fields) are processed and persisted.\n  - Invalid series (e.g., Booleans, Lists, Strings, Structs) are silently ignored and are not included in the resulting measurement.\n  - The measurement is created successfully (HTTP 201 Created), but the invalid series are removed.\n\n**Example:**\n  ```json\n  {\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"type\": \"temperatureMeasurement\",\n    \"c8y_SteamFragment\": {\n        \"validSeries_DOUBLE\": { \"value\": 3.141592653589793, \"unit\": \"RAD\" },\n        \"validSeries_INTEGER\": { \"value\": 42, \"unit\": \"C\" },\n        \"ignoredField_BOOLEAN\": { \"value\": false, \"unit\": \"t/f\" },\n        \"ignoredField_LIST\": { \"value\": [42, 43, 44] },\n        \"ignoredField_STRUCT\": { \"value\": { \"a\": 1, \"b\": 2 }, \"unit\": \"C\" },\n        \"ignoredField0\": 42,\n        \"ignoredField1\": { \"value\": { \"a\": 1, \"b\": 2 }, \"unit\": \"C\" },\n        \"ignoredField2\": { \"unit\": \"C\" },\n        \"ignoredField3\": { \"val\": 42 },\n        \"ignoredField4\": { \"subseries\": { \"value\": 42 } }\n      }\n    }\n  ```\n\n  **Response:**\n  ```json\n  {\n    \"self\": \"https://example.cumulocity.com/measurement/measurements/124\",\n    \"id\": \"124\",\n    \"type\": \"temperatureMeasurement\",\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"c8y_SteamFragment\": {\n        \"validSeries_DOUBLE\": { \"value\": 3.141592653589793, \"unit\": \"RAD\" },\n        \"validSeries_INTEGER\": { \"value\": 42, \"unit\": \"C\" }\n      }\n    }\n  ```\n\n2. ***Fragments with Only Invalid Series:***\n\nIf a measurement fragment contains only invalid series, the entire fragment is preserved as a plain object, and no fields are removed or validated further. This means that such fragments are treated as normal document properties rather than as series fragments. As a result:\n  - These objects are not included in series fragment aggregation.\n  - They are not treated as part of the measurement's series data but remain accessible as regular property within the measurement document.\n\n**Example:**\n  ```json\n  {\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"type\": \"temperatureMeasurement\",\n    \"c8y_SteamFragment\": {\n        \"invalidSeries_BOOLEAN\": { \"value\": false, \"unit\": \"t/f\" },\n        \"invalidSeries_LIST\": { \"value\": [1, 2, 3], \"unit\": \"list\" }\n    }\n  }\n  ```\n\n  **Response:**\n  ```json\n  {\n    \"self\": \"https://example.cumulocity.com/measurement/measurements/125\",\n    \"id\": \"125\",\n    \"type\": \"temperatureMeasurement\",\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"c8y_SteamFragment\": {\n        \"invalidSeries_BOOLEAN\": { \"value\": false, \"unit\": \"t/f\" },\n        \"invalidSeries_LIST\": { \"value\": [1, 2, 3], \"unit\": \"list\" }\n      }\n    }\n  ```\n\nTo ensure data integrity, custom fragments should be used only with valid series.\n\n**Create multiple measurements**\n\nUsing the same API request, it is also possible to create multiple measurements by sending a `measurements` array containing all the measurements to be created. The content type must be `application/vnd.com.nsn.cumulocity.measurementcollection+json`.\n\n> **&#9432; Info:** For more details about fragments with specific meanings, refer to [Device management & connectivity > Device integration > Fragment library](https://www.cumulocity.com/docs/device-integration/fragment-library/) in the Cumulocity user documentation.\n\n<section><h5>Required roles</h5>\nROLE_MEASUREMENT_ADMIN <b>OR</b> owner of the source <b>OR</b> MEASUREMENT_ADMIN permission on the source\n</section>\n",
+        "description": "A measurement must be associated with a source (managed object) identified by ID, and must specify the type of measurement and the time when it was measured by the device (for example, a thermometer).\n\nEach measurement fragment is an object (for example, `c8y_Steam`) containing the actual measurements as properties. The property name represents the name of the measurement (for example, `Temperature`) and it contains two properties:\n\n*   `value` - The value of the individual measurement. The maximum precision for floating point numbers is 64-bit IEEE 754. For integers it's a 64-bit two's complement integer. The `value` is mandatory for a fragment.\n*   `unit` - The unit of the measurements. This field is optional in the request body; however, if it is provided, it must be a non-empty string and must not be null.\n\nReview the [System of units](#section/System-of-units) section for details about the conversions of units. Also review [Getting started > Technical concepts > Cumulocity's domain model > Inventory > Fragments > Naming conventions of fragments](https://www.cumulocity.com/docs/concepts/domain-model/#naming-conventions-of-fragments) in the Cumulocity user documentation.\n\nThe example below uses `c8y_SteamFragment` in the request body to illustrate recording two measurements called `Temperature` and `Humidity`.\n\n  ```json\n  {\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"type\": \"temperatureMeasurement\",\n    \"c8y_SteamFragment\": {\n        \"Temperature\": { \"value\": 42.7, \"unit\": \"C\" },\n        \"Humidity\": { \"value\": 13.37, \"unit\": \"%RH\" }\n      }\n    }\n  ```\n\n> **⚠️ Important:** Property names used for fragment and series must not contain whitespaces nor the special characters `. , * [ ] ( ) @ $`. This is required to ensure a correct processing.\n\n**Legacy compatibility:**\n\nFor legacy compatibility reasons, a measurement can contain custom fragments. The platform's behavior will vary based on whether the series in the custom fragment are valid or not:\n\n1. ***Mixed Series Fragments:***\n\nWhen creating a measurement with a fragment containing both valid and invalid series:\n  - Valid series (those with numeric value fields) are processed and persisted.\n  - Invalid series (e.g., Booleans, Lists, Strings, Structs) are silently ignored and are not included in the resulting measurement.\n  - The measurement is created successfully (HTTP 201 Created), but the invalid series are removed.\n\n**Example:**\n  ```json\n  {\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"type\": \"temperatureMeasurement\",\n    \"c8y_SteamFragment\": {\n        \"validSeries_DOUBLE\": { \"value\": 3.141592653589793, \"unit\": \"RAD\" },\n        \"validSeries_INTEGER\": { \"value\": 42, \"unit\": \"C\" },\n        \"ignoredField_BOOLEAN\": { \"value\": false, \"unit\": \"t/f\" },\n        \"ignoredField_LIST\": { \"value\": [42, 43, 44] },\n        \"ignoredField_STRUCT\": { \"value\": { \"a\": 1, \"b\": 2 }, \"unit\": \"C\" },\n        \"ignoredField0\": 42,\n        \"ignoredField1\": { \"value\": { \"a\": 1, \"b\": 2 }, \"unit\": \"C\" },\n        \"ignoredField2\": { \"unit\": \"C\" },\n        \"ignoredField3\": { \"val\": 42 },\n        \"ignoredField4\": { \"subseries\": { \"value\": 42 } }\n      }\n    }\n  ```\n\n  **Response:**\n  ```json\n  {\n    \"self\": \"https://example.cumulocity.com/measurement/measurements/124\",\n    \"id\": \"124\",\n    \"type\": \"temperatureMeasurement\",\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"c8y_SteamFragment\": {\n        \"validSeries_DOUBLE\": { \"value\": 3.141592653589793, \"unit\": \"RAD\" },\n        \"validSeries_INTEGER\": { \"value\": 42, \"unit\": \"C\" }\n      }\n    }\n  ```\n\n2. ***Fragments with Only Invalid Series:***\n\nIf a measurement fragment contains only invalid series, the entire fragment is preserved as a plain object, and no fields are removed or validated further. This means that such fragments are treated as normal document properties rather than as series fragments. As a result:\n  - These objects are not included in series fragment aggregation.\n  - They are not treated as part of the measurement's series data but remain accessible as regular property within the measurement document.\n\n**Example:**\n  ```json\n  {\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"type\": \"temperatureMeasurement\",\n    \"c8y_SteamFragment\": {\n        \"invalidSeries_BOOLEAN\": { \"value\": false, \"unit\": \"t/f\" },\n        \"invalidSeries_LIST\": { \"value\": [1, 2, 3], \"unit\": \"list\" }\n    }\n  }\n  ```\n\n  **Response:**\n  ```json\n  {\n    \"self\": \"https://example.cumulocity.com/measurement/measurements/125\",\n    \"id\": \"125\",\n    \"type\": \"temperatureMeasurement\",\n    \"source\": { \"id\": \"681200\" },\n    \"time\": \"2020-03-19T12:03:27.845Z\",\n    \"c8y_SteamFragment\": {\n        \"invalidSeries_BOOLEAN\": { \"value\": false, \"unit\": \"t/f\" },\n        \"invalidSeries_LIST\": { \"value\": [1, 2, 3], \"unit\": \"list\" }\n      }\n    }\n  ```\n\nTo ensure data integrity, custom fragments should be used only with valid series.\n\n**Create multiple measurements**\n\nUsing the same API request, it is also possible to create multiple measurements by sending a `measurements` array containing all the measurements to be created. The content type must be `application/vnd.com.nsn.cumulocity.measurementcollection+json`.\nA validation error identifies the rejected measurement in `bulkRequest.failedIndex`.\n\n> **&#9432; Info:** For more details about fragments with specific meanings, refer to [Device management & connectivity > Device integration > Fragment library](https://www.cumulocity.com/docs/device-integration/fragment-library/) in the Cumulocity user documentation.\n\n<section><h5>Required roles</h5>\nROLE_MEASUREMENT_ADMIN <b>OR</b> owner of the source <b>OR</b> MEASUREMENT_ADMIN permission on the source\n</section>\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -13824,7 +14010,7 @@
             "$ref": "#/components/responses/operationNotAuthorized"
           },
           "422": {
-            "$ref": "#/components/responses/invalidPayload"
+            "$ref": "#/components/responses/invalidBulkPayload"
           }
         }
       },
@@ -16306,7 +16492,7 @@
           }
         ],
         "summary": "Add a new certificate",
-        "description": "Add a new trusted certificate to a specific tenant (by a given ID) which can be further used by the devices to establish connections with the Cumulocity platform.\n\n<section><h5>Required roles</h5>\n(ROLE_TENANT_MANAGEMENT_ADMIN <b>OR</b> ROLE_TENANT_ADMIN) <b>AND</b> (is the current tenant)\n</section>\n",
+        "description": "Add a new trusted certificate to a specific tenant (by a given ID) which can be further used by the devices to establish connections with the Cumulocity platform.\n\nA self-signed certificate can be valid for at most 5 years.\n\n<section><h5>Required roles</h5>\n(ROLE_TENANT_MANAGEMENT_ADMIN <b>OR</b> ROLE_TENANT_ADMIN) <b>AND</b> (is the current tenant)\n</section>\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -16369,7 +16555,7 @@
             "description": "Duplicate – A certificate with the same fingerprint already exists."
           },
           "422": {
-            "description": "Unprocessable Entity – Invalid certificate data."
+            "description": "Unprocessable Entity – Invalid certificate data, for example an expired certificate or a self-signed certificate valid for more than 5 years."
           }
         }
       },
@@ -16486,7 +16672,7 @@
           }
         ],
         "summary": "Add multiple certificates",
-        "description": "Add multiple trusted certificates to a specific tenant (by a given ID) which can be further used by the devices to establish connections with the Cumulocity platform.\n\n<section><h5>Required roles</h5>\n(ROLE_TENANT_MANAGEMENT_ADMIN <b>OR</b> ROLE_TENANT_ADMIN) <b>AND</b> (is the current tenant)\n</section>\n",
+        "description": "Add multiple trusted certificates to a specific tenant (by a given ID) which can be further used by the devices to establish connections with the Cumulocity platform.\n\nA self-signed certificate can be valid for at most 5 years.\n\n<section><h5>Required roles</h5>\n(ROLE_TENANT_MANAGEMENT_ADMIN <b>OR</b> ROLE_TENANT_ADMIN) <b>AND</b> (is the current tenant)\n</section>\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -16553,7 +16739,7 @@
             "description": "Duplicate – A certificate with the same fingerprint already exists."
           },
           "422": {
-            "description": "Unprocessable Entity – Invalid certificates data."
+            "description": "Unprocessable Entity – Invalid certificates data, for example an expired certificate or a self-signed certificate valid for more than 5 years."
           }
         }
       }
@@ -19767,9 +19953,6 @@
             "$ref": "#/components/parameters/tenantIdInHeader"
           },
           {
-            "$ref": "#/components/parameters/tokenResponseModeHeader"
-          },
-          {
             "$ref": "#/components/parameters/tfaCodeHeader"
           },
           {
@@ -19781,7 +19964,7 @@
         ],
         "security": [],
         "summary": "Obtain an access token with a certificate",
-        "description": "Obtain a platform access token by presenting an X.509 certificate over standard HTTPS, without requiring mutual TLS (mTLS) or MQTT. This provides a REST-native, standard-port alternative for certificate-authenticated clients that cannot use MQTT or the dedicated mTLS endpoint.\n\nThe request body contains the leaf certificate, or the full certificate chain, in PEM format. By default the returned access token is encrypted as a JWE with the public key from the presented certificate, so that only the holder of the corresponding private key can decrypt it and use it as a `Bearer` token for subsequent REST API requests. The response format can be controlled with the `X-Cumulocity-Token-Response-Mode` header. JWE mode requires the certificate to use an RSA key, because the platform encrypts the token with `RSA-OAEP-256`; clients presenting a certificate with a non-RSA key must request a plain JWT with the `X-Cumulocity-Token-Response-Mode: jwt` header.\n\nThe platform derives the identity from the certificate subject, validates the certificate material against the tenant-trusted certificate authorities (including validity dates and revocation checks where configured) and confirms that the certificate is authorized for the resolved user. The tenant context must be established from the request before validation, for example through the `tenant_id` query parameter or the `X-Cumulocity-TenantId` header. The certificate is not used as the primary tenant identification mechanism.\n\nIf the resolved certificate identity is ambiguous, for example when the same certificate common name could resolve to both a regular user and a device user, the request is rejected and no token is issued. Untrusted, expired, revoked, malformed, unsupported or unmapped certificates are rejected as well.\n\nExcept for device users, the resolved account must have explicitly opted in to certificate authentication by setting its `requiredAuthType` to `CERTIFICATES` (see [Update the current user](#operation/putCurrentUserResource) and [Update the authentication method required for the current service user](#operation/putCurrentApplicationResourceAuthType)). A `401` is returned for any other account, even if the presented certificate chain is otherwise valid and trusted by the tenant. Single sign-on (SSO) users are always rejected, regardless of `requiredAuthType`, because their identity is owned by the external identity provider.\n\nIf two-factor authentication (TFA) is active for the resolved user, it must be passed with the request as well, because the certificate replaces the password, not the second factor. Send the current TFA code in the `X-Cumulocity-TFA-Code` header. Both the TOTP and the SMS strategy are supported, in the same way as for the OAI-Secure login. Device users are never asked for a second factor.\n",
+        "description": "Obtain a platform access token by presenting an X.509 certificate over standard HTTPS, without requiring mutual TLS (mTLS) or MQTT. This provides a REST-native, standard-port alternative for certificate-authenticated clients that cannot use MQTT or the dedicated mTLS endpoint.\n\nThe request body contains the leaf certificate, or the full certificate chain, in PEM format. The returned access token is always encrypted as a JWE with the public key from the presented certificate, so that only the holder of the corresponding private key can decrypt it and use it as a `Bearer` token for subsequent REST API requests. The certificate must therefore use an RSA key, because the platform encrypts the token with `RSA-OAEP-256`; certificates with a non-RSA key are rejected.\n\nThe platform derives the identity from the certificate subject, validates the certificate material against the tenant-trusted certificate authorities (including validity dates and revocation checks where configured) and confirms that the certificate is authorized for the resolved user. The tenant context must be established from the request before validation, for example through the `tenant_id` query parameter or the `X-Cumulocity-TenantId` header. The certificate is not used as the primary tenant identification mechanism.\n\nIf the resolved certificate identity is ambiguous, for example when the same certificate common name could resolve to both a regular user and a device user, the request is rejected and no token is issued. Untrusted, expired, revoked, malformed, unsupported or unmapped certificates are rejected as well.\n\nExcept for device users, the resolved account must have explicitly opted in to certificate authentication by setting its `requiredAuthType` to `CERTIFICATES` (see [Update the current user](#operation/putCurrentUserResource) and [Update the authentication method required for the current service user](#operation/putCurrentApplicationResourceAuthType)). A `401` is returned for any other account, even if the presented certificate chain is otherwise valid and trusted by the tenant. Single sign-on (SSO) users are always rejected, regardless of `requiredAuthType`, because their identity is owned by the external identity provider.\n\nIf two-factor authentication (TFA) is active for the resolved user, it must be passed with the request as well, because the certificate replaces the password, not the second factor. Send the current TFA code in the `X-Cumulocity-TFA-Code` header. Both the TOTP and the SMS strategy are supported, in the same way as for the OAI-Secure login. Device users are never asked for a second factor.\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -19798,28 +19981,28 @@
         "x-code-samples": [
           {
             "lang": "cURL",
-            "source": "curl --location --request POST \"https://<TENANT_DOMAIN>/tenant/oauth/certificate\" \\\n--header \"Content-Type: application/x-pem-file\" \\\n--header \"Accept: application/json\" \\\n--header \"X-Cumulocity-TenantId: <TENANT_ID>\" \\\n--header \"X-Cumulocity-Token-Response-Mode: jwe\" \\\n--data-binary \"@client-certificate.pem\"\n"
+            "source": "curl --location --request POST \"https://<TENANT_DOMAIN>/tenant/oauth/certificate\" \\\n--header \"Content-Type: application/x-pem-file\" \\\n--header \"Accept: application/json\" \\\n--header \"X-Cumulocity-TenantId: <TENANT_ID>\" \\\n--data-binary \"@client-certificate.pem\"\n"
           },
           {
             "lang": "C#",
-            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/oauth/certificate\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.POST);\nrequest.AddHeader(\"Content-Type\", \"application/x-pem-file\");\nrequest.AddHeader(\"Accept\", \"application/json\");\nrequest.AddHeader(\"X-Cumulocity-TenantId\", \"<TENANT_ID>\");\nrequest.AddHeader(\"X-Cumulocity-Token-Response-Mode\", \"jwe\");\nrequest.AddParameter(\"application/x-pem-file\", File.ReadAllText(\"client-certificate.pem\"), ParameterType.RequestBody);\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
+            "source": "var client = new RestClient(\"https://<TENANT_DOMAIN>/tenant/oauth/certificate\");\nclient.Timeout = -1;\n\nvar request = new RestRequest(Method.POST);\nrequest.AddHeader(\"Content-Type\", \"application/x-pem-file\");\nrequest.AddHeader(\"Accept\", \"application/json\");\nrequest.AddHeader(\"X-Cumulocity-TenantId\", \"<TENANT_ID>\");\nrequest.AddParameter(\"application/x-pem-file\", File.ReadAllText(\"client-certificate.pem\"), ParameterType.RequestBody);\n\nIRestResponse response = client.Execute(request);\nConsole.WriteLine(response.Content);\n"
           },
           {
             "lang": "Java",
-            "source": "Unirest.setTimeouts(0, 0);\nString certificate = new String(Files.readAllBytes(Paths.get(\"client-certificate.pem\")), java.nio.charset.StandardCharsets.US_ASCII);\nHttpResponse<String> response = Unirest.post(\"https://<TENANT_DOMAIN>/tenant/oauth/certificate\")\n    .header(\"Content-Type\", \"application/x-pem-file\")\n    .header(\"Accept\", \"application/json\")\n    .header(\"X-Cumulocity-TenantId\", \"<TENANT_ID>\")\n    .header(\"X-Cumulocity-Token-Response-Mode\", \"jwe\")\n    .body(certificate)\n    .asString();\nSystem.out.println(response);\n"
+            "source": "Unirest.setTimeouts(0, 0);\nString certificate = new String(Files.readAllBytes(Paths.get(\"client-certificate.pem\")), java.nio.charset.StandardCharsets.US_ASCII);\nHttpResponse<String> response = Unirest.post(\"https://<TENANT_DOMAIN>/tenant/oauth/certificate\")\n    .header(\"Content-Type\", \"application/x-pem-file\")\n    .header(\"Accept\", \"application/json\")\n    .header(\"X-Cumulocity-TenantId\", \"<TENANT_ID>\")\n    .body(certificate)\n    .asString();\nSystem.out.println(response);\n"
           },
           {
             "lang": "Node.js",
-            "source": "var unirest = require(\"unirest\");\nvar fs = require(\"fs\");\nvar req = unirest(\"POST\", \"https://<TENANT_DOMAIN>/tenant/oauth/certificate\")\n    .headers({\n        \"Accept\": \"application/json\",\n        \"Content-Type\": \"application/x-pem-file\",\n        \"X-Cumulocity-TenantId\": \"<TENANT_ID>\",\n        \"X-Cumulocity-Token-Response-Mode\": \"jwe\"\n    })\n    .send(fs.readFileSync(\"client-certificate.pem\"))\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
+            "source": "var unirest = require(\"unirest\");\nvar fs = require(\"fs\");\nvar req = unirest(\"POST\", \"https://<TENANT_DOMAIN>/tenant/oauth/certificate\")\n    .headers({\n        \"Accept\": \"application/json\",\n        \"Content-Type\": \"application/x-pem-file\",\n        \"X-Cumulocity-TenantId\": \"<TENANT_ID>\"\n    })\n    .send(fs.readFileSync(\"client-certificate.pem\"))\n    .end(function (res) {\n        if (res.error) throw new Error(res.error);\n        console.log(res.raw_body);\n    });\n"
           },
           {
             "lang": "Python",
-            "source": "import requests\n\nurl = \"https://<TENANT_DOMAIN>/tenant/oauth/certificate\"\nheaders = {\n  \"Accept\": \"application/json\",\n  \"Content-Type\": \"application/x-pem-file\",\n  \"X-Cumulocity-TenantId\": \"<TENANT_ID>\",\n  \"X-Cumulocity-Token-Response-Mode\": \"jwe\"\n}\nwith open(\"client-certificate.pem\", \"rb\") as certificate:\n  data = certificate.read()\n\nresponse = requests.request(\"POST\", url, headers=headers, data=data)\nprint(response.text.encode(\"utf8\"))\n"
+            "source": "import requests\n\nurl = \"https://<TENANT_DOMAIN>/tenant/oauth/certificate\"\nheaders = {\n  \"Accept\": \"application/json\",\n  \"Content-Type\": \"application/x-pem-file\",\n  \"X-Cumulocity-TenantId\": \"<TENANT_ID>\"\n}\nwith open(\"client-certificate.pem\", \"rb\") as certificate:\n  data = certificate.read()\n\nresponse = requests.request(\"POST\", url, headers=headers, data=data)\nprint(response.text.encode(\"utf8\"))\n"
           }
         ],
         "responses": {
           "200": {
-            "description": "The access token is sent in the response. By default it is a JWE encrypted with the public key from the presented certificate.",
+            "description": "The access token is sent in the response as a JWE encrypted with the public key from the presented certificate.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19833,9 +20016,6 @@
           },
           "401": {
             "$ref": "#/components/responses/certificateAccessTokenUnauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/operationNotAuthorized"
           },
           "422": {
             "$ref": "#/components/responses/jweUnsupportedCertificateKeyUnprocessableEntity"
@@ -20921,21 +21101,6 @@
         "schema": {
           "type": "string",
           "example": "t07007007"
-        }
-      },
-      "tokenResponseModeHeader": {
-        "name": "X-Cumulocity-Token-Response-Mode",
-        "in": "header",
-        "description": "Optional. Selects the format of the returned access token. `jwe` (default) returns the access token as a JWE encrypted with the public key from the presented certificate (RSA-OAEP-256 for key encryption and AES-256-GCM for content encryption), so that only the holder of the corresponding private key can decrypt it; it requires the certificate to use an RSA key. `jwt` returns a plain, unencrypted JWT and is rejected with a 403 error unless plain JWT responses are enabled for the platform or the certificate does not use an RSA key. Unsupported values are rejected with a 400 error.\n",
-        "required": false,
-        "schema": {
-          "type": "string",
-          "enum": [
-            "jwe",
-            "jwt"
-          ],
-          "default": "jwe",
-          "example": "jwe"
         }
       },
       "tfaCodeHeader": {
@@ -22827,6 +22992,23 @@
       "invalidPayload": {
         "description": "Unprocessable Entity – invalid payload."
       },
+      "invalidBulkPayload": {
+        "description": "Unprocessable Entity – invalid payload.",
+        "content": {
+          "application/vnd.com.nsn.cumulocity.error+json": {
+            "schema": {
+              "$ref": "#/components/schemas/bulkRequestError"
+            },
+            "example": {
+              "error": "undefined/validationError",
+              "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting",
+              "bulkRequest": {
+                "failedIndex": 2
+              }
+            }
+          }
+        }
+      },
       "identityExternalIdNotFound": {
         "description": "External ID not found.",
         "content": {
@@ -23482,7 +23664,7 @@
         }
       },
       "jweUnsupportedCertificateKeyUnprocessableEntity": {
-        "description": "The presented certificate does not use an RSA key, so the access token cannot be encrypted as a JWE. Request a plain JWT with the `X-Cumulocity-Token-Response-Mode: jwt` header instead.\n",
+        "description": "The presented certificate does not use an RSA key, so the access token cannot be encrypted as a JWE.\n",
         "content": {
           "application/vnd.com.nsn.cumulocity.error+json": {
             "schema": {
@@ -23490,7 +23672,7 @@
             },
             "example": {
               "error": "certificate-token/Unprocessable Entity",
-              "message": "Only RSA certificates are supported for JWE mode. Use header X-Cumulocity-Token-Response-Mode: jwt for non-RSA certificates.",
+              "message": "Only RSA certificates are supported, because the access token is encrypted with the certificate's public key.",
               "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting"
             }
           }
@@ -23827,15 +24009,45 @@
         }
       },
       "inventoryObjectDeleteConflict": {
-        "description": "Conflict – The managed object is associated to other objects, for example child devices.",
+        "description": "Conflict – The device user cannot be deleted with `withDeviceUser=true` because it owns other managed objects.",
         "content": {
           "application/vnd.com.nsn.cumulocity.error+json": {
             "schema": {
               "$ref": "#/components/schemas/error"
             },
             "example": {
-              "error": "inventory/conflict",
-              "message": "Cannot delete the specified object as it has associated data.",
+              "error": "inventory/Update Conflict",
+              "message": "Can't delete user because it is used by another managed object",
+              "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting"
+            }
+          }
+        }
+      },
+      "inventoryObjectDeleteInvalidData": {
+        "description": "Unprocessable Entity – The managed object cannot be deleted through the Inventory API, for example a binary, a tenant or a monitored application.",
+        "content": {
+          "application/vnd.com.nsn.cumulocity.error+json": {
+            "schema": {
+              "$ref": "#/components/schemas/error"
+            },
+            "example": {
+              "error": "inventory/Invalid Data",
+              "message": "Cannot delete managed object.",
+              "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting"
+            }
+          }
+        }
+      },
+      "inventoryObjectDeleteTooManyRequests": {
+        "description": "Too Many Requests – Too many delete operations are in progress.",
+        "content": {
+          "application/vnd.com.nsn.cumulocity.error+json": {
+            "schema": {
+              "$ref": "#/components/schemas/error"
+            },
+            "example": {
+              "error": "inventory/Too Many Requests",
+              "message": "Too many delete operations in progress.",
               "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting"
             }
           }
@@ -23889,6 +24101,50 @@
             "type": "string"
           }
         }
+      },
+      "inventoryObjectDeleteInBackground": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "description": "A human-readable message stating that the deletion continues in the background.",
+            "type": "string"
+          }
+        },
+        "example": {
+          "message": "Managed object delete is being continued in background"
+        }
+      },
+      "bulkRequestError": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/error"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "bulkRequest": {
+                "description": "Present when the error belongs to one element of the bulk request.\nAbsent when the error belongs to the whole request, for example, when the request has too many elements or none.\n",
+                "type": "object",
+                "required": [
+                  "failedIndex"
+                ],
+                "properties": {
+                  "failedIndex": {
+                    "description": "The position of the element that the error belongs to, counted from 0 in the request.\nIf several elements are invalid, the lowest position is reported.\n",
+                    "type": "integer",
+                    "minimum": 0,
+                    "example": 17
+                  },
+                  "fragmentType": {
+                    "description": "The batch marker fragment carried by the managed objects that the request created.\nPresent only when part of the bulk create may have been created.\nUse it as the `fragmentType` query parameter to find the created managed objects.\n",
+                    "type": "string",
+                    "example": "c8y_BatchId_7c8e1e0a-3b2f-4f6e-9a51-5d2c7e4b9f10"
+                  }
+                }
+              }
+            }
+          }
+        ]
       },
       "alarm": {
         "type": "object",
@@ -25287,10 +25543,11 @@
             "readOnly": true
           },
           "password": {
-            "description": "The user's password. Allowed characters are: Latin letters (a–z, A–Z), digits (0–9), and the following special characters: ` ~ ! @ # $ % ^ & * ( ) _ | + - = ? ; : ' \" , . < > { } [ ] \\ /",
+            "description": "The user's password. Allowed characters are: Latin letters (a–z, A–Z), digits (0–9), and the following special characters: ` ~ ! @ # $ % ^ & * ( ) _ | + - = ? ; : ' \" , . < > { } [ ] \\ /\n\nThis property is ignored when updating the current user. To change the password, use [Update the current user's password](#operation/putCurrentUserPasswordResource), which verifies the current password.\n",
             "type": "string",
             "format": "password",
             "writeOnly": true,
+            "deprecated": true,
             "minLength": 6,
             "maxLength": 32
           },
@@ -25932,11 +26189,13 @@
           "name": {
             "description": "Name of the binary object.",
             "type": "string",
+            "maxLength": 1000,
             "example": "HelloWorld"
           },
           "type": {
             "description": "Media type of the file.",
             "type": "string",
+            "maxLength": 1000,
             "example": "text/plain"
           }
         }
@@ -26171,7 +26430,9 @@
             "readOnly": true
           },
           "name": {
-            "$ref": "#/components/schemas/desc_objectName"
+            "description": "Human-readable name that is used for representing the object in user interfaces.",
+            "type": "string",
+            "maxLength": 1000
           },
           "owner": {
             "description": "Username of the device's owner.",
@@ -26182,7 +26443,8 @@
           },
           "type": {
             "description": "The fragment type can be interpreted as _device class_, this means, devices with the same type can receive the same types of configuration, software, firmware and operations. The type value is indexed and is therefore used for queries.",
-            "type": "string"
+            "type": "string",
+            "maxLength": 1000
           },
           "childAdditions": {
             "$ref": "#/components/schemas/objectChildAdditions"
@@ -26297,11 +26559,14 @@
         "type": "object",
         "properties": {
           "name": {
-            "$ref": "#/components/schemas/desc_objectName"
+            "description": "Human-readable name that is used for representing the object in user interfaces.",
+            "type": "string",
+            "maxLength": 1000
           },
           "type": {
             "description": "The fragment type can be interpreted as _device class_, this means, devices with the same type can receive the same types of configuration, software, firmware and operations. The type value is indexed and is therefore used for queries.",
-            "type": "string"
+            "type": "string",
+            "maxLength": 1000
           },
           "externalIds": {
             "description": "List of external identifiers to bind to newly created managed object.",
@@ -26365,11 +26630,14 @@
             "type": "string"
           },
           "name": {
-            "$ref": "#/components/schemas/desc_objectName"
+            "description": "Human-readable name that is used for representing the object in user interfaces.",
+            "type": "string",
+            "maxLength": 1000
           },
           "type": {
             "description": "The fragment type can be interpreted as _device class_, this means, devices with the same type can receive the same types of configuration, software, firmware and operations. The type value is indexed and is therefore used for queries.",
-            "type": "string"
+            "type": "string",
+            "maxLength": 1000
           },
           "c8y_IsDevice": {
             "description": "A fragment which identifies this managed object as a device.",
@@ -31140,11 +31408,11 @@
         }
       },
       "certificateAccessToken": {
-        "description": "Access token obtained by presenting an X.509 certificate. By default the token is returned as a JWE encrypted with the public key from the presented certificate, so that only the holder of the corresponding private key can decrypt it. This requires the certificate to use an RSA key, because the platform encrypts the token with `RSA-OAEP-256`.\n\nA plain, unencrypted JWT can be requested with the `X-Cumulocity-Token-Response-Mode: jwt` header, but such requests are rejected with a 403 error unless plain JWT responses have been explicitly enabled for the platform. Clients whose certificate does not use an RSA key are exempt from that restriction, as JWE mode is not available to them: they may always request `jwt`, and must do so, because a request left in the default `jwe` mode is rejected with a 422 error.\n",
+        "description": "Access token obtained by presenting an X.509 certificate. The token is returned as a JWE encrypted with the public key from the presented certificate, so that only the holder of the corresponding private key can decrypt it. This requires the certificate to use an RSA key, because the platform encrypts the token with `RSA-OAEP-256`.\n",
         "type": "object",
         "properties": {
           "access_token": {
-            "description": "The access token generated by the Cumulocity platform. A JWE compact-serialized, encrypted JWT when `response_mode` is `jwe`, or a plain, unencrypted JWT when `response_mode` is `jwt`.",
+            "description": "The access token generated by the Cumulocity platform, as a JWE compact-serialized, encrypted JWT. Decrypt it with the private key of the presented certificate to obtain the JWT to use as a `Bearer` token.",
             "type": "string",
             "example": "eyJhbGciOiJSU0EtT0FFUC0yNTYiLCJlbmMiOiJBMjU2R0NNIn0.g_hEwksO1Ax8Qn7HoN-BVeBoa8FXe0kpyk_XdcSmxvcM5_P296JXXtoHISr_DD_M...48V95cLzdVlCyoQ"
           },
@@ -31152,15 +31420,6 @@
             "description": "The type of the returned token.",
             "type": "string",
             "example": "Bearer"
-          },
-          "response_mode": {
-            "description": "The format of the returned access token. `jwe` unless a plain JWT was requested with the `X-Cumulocity-Token-Response-Mode` header and permitted.",
-            "type": "string",
-            "enum": [
-              "jwe",
-              "jwt"
-            ],
-            "example": "jwe"
           },
           "expires_in": {
             "description": "The token lifetime in seconds.",
