@@ -417,7 +417,7 @@ describe('preprocessOpenApi — annotateQueryParams', () => {
   })
 
   it('annotates all DTM query-language params in the real spec', async () => {
-    const raw = readFileSync(path.join(rootDir, 'openapi', 'dtm', 'release.json'), 'utf8')
+    const raw = readFileSync(path.join(rootDir, 'test', 'fixtures', 'dtm-openapi.json'), 'utf8')
     const out = await preprocessOpenApi(JSON.parse(raw)) as any
     const queryParams: any[] = []
     for (const pathItem of Object.values(out.paths) as any[]) {
@@ -436,7 +436,7 @@ describe('preprocessOpenApi — annotateQueryParams', () => {
 })
 
 describe('preprocessOpenApi — real DTM spec', () => {
-  const raw = readFileSync(path.join(rootDir, 'openapi', 'dtm', 'release.json'), 'utf8')
+  const raw = readFileSync(path.join(rootDir, 'test', 'fixtures', 'dtm-openapi.json'), 'utf8')
 
   it('minified output is smaller than the untouched input and stays valid JSON', async () => {
     const untouched = JSON.parse(raw)

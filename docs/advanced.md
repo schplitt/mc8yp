@@ -2,7 +2,7 @@
 
 ## How it works
 
-1. mc8yp discovers every microservice installed on the tenant that declares an OpenAPI spec, and derives typed method namespaces from those alongside the bundled Core (+ DTM) specs.
+1. mc8yp discovers every microservice installed on the tenant that declares an OpenAPI spec, and derives typed method namespaces from those alongside the bundled core spec.
 2. Inside a `codemode` run, the agent finds the right method with `codemode.search`, inspects its exact input/output types with `codemode.describe`, and reads prose documentation (domain query languages, parameter syntax) with `docs.search`/`docs.read`.
    `codemode.describe` works at three altitudes: no target lists the namespaces on this tenant, `describe("<namespace>")` lists every method in one namespace one line each — the callable target (`c8y.getAlarmCollectionResource`), `METHOD /path`, summary, no types — and `describe("<namespace>.<method>")` renders the full input/output types. The namespace listing is the survey step for when search keeps missing a domain's vocabulary; all ~250 core methods cost roughly 7k tokens, which is why full types stay method-level.
 3. In the same run, the agent calls the live Cumulocity API through the derived methods (`c8y.<method>({ ... })`). The namespaces are the complete surface — there is no raw-request escape hatch.
@@ -12,7 +12,7 @@
 
 When a tenant is active, mc8yp asks Cumulocity which applications the tenant is subscribed to, reads the `openApiSpec` declaration from each application manifest, fetches the spec, prefixes its paths with the service's `contextPath`, and exposes it to the sandbox as a typed namespace named after the contextPath. Results are cached per tenant for 30 minutes.
 
-The practical effect: **any Cumulocity microservice that ships an OpenAPI spec is automatically usable by the agent**, whether it is one of the bundled snapshots, a Cumulocity-provided service, or a custom microservice built in-house. The bundled specs are just guaranteed offline coverage; the discovery layer fills in everything else.
+The practical effect: **any Cumulocity microservice that ships an OpenAPI spec is automatically usable by the agent**, whether it is a Cumulocity-provided service such as DTM or a custom microservice built in-house. Only the core API is bundled, because it is not a microservice and cannot be discovered.
 
 The same discovery run also picks up MCP servers declared via `exposeMcpServers` (type `http`) and fetches their tool lists. A service exposing both an MCP server and an OpenAPI spec is wrapped as an MCP namespace; per connection you can opt services back to their spec with the `mc8yp-no-mcp` header / `noMcp` query param (server mode) or `--no-mcp` (CLI) — pass `*` for all services or a comma-separated contextPath list. Wrapped MCP tools run with the end user's credentials; elicitation and sampling are NOT forwarded (mc8yp advertises no such capabilities, so compliant servers use their fallbacks).
 
@@ -83,12 +83,8 @@ The surface mirrors [Flue's `SandboxApi`](https://flueframework.com/docs/api/san
 
 What the agent sees through codemode discovery comes from two layers:
 
-1. **Live-discovered specs** — every microservice subscribed on the active tenant whose manifest declares an `openApiSpec`. Discovered at runtime, cached for 30 minutes per tenant, exposed as a typed namespace named after the contextPath. This works for any service, not just the ones bundled here.
-2. **Bundled snapshots** — shipped with the build so Core and DTM are always available even when discovery hasn't run yet:
-   - **Core** snapshots: `release`, `2026`, `2025`, `2024`
-   - **DTM** snapshot bundled alongside each supported core build
-
-With an active tenant, services not installed on that tenant get no namespace at all, so the agent only sees what is actually reachable.
+1. **Bundled core snapshot**: the `c8y` namespace. Core is not a microservice and cannot be discovered, so it ships with the build. Snapshots: `release`, `2026`, `2025`, `2024`.
+2. **Live-discovered services**: every microservice subscribed on the active tenant whose manifest declares an `openApiSpec` or `exposeMcpServers`. Discovered at runtime, cached for 30 minutes per tenant, exposed as a typed namespace named after the contextPath. No service spec is bundled, so the agent only sees what the tenant actually publishes. With no active tenant (CLI), only `c8y` is available.
 
 In CLI mode, pick which **core** snapshot the `c8y` namespace derives from:
 
@@ -120,11 +116,11 @@ Run locally from source by pointing your MCP client at the built CLI:
 
 Produces one Docker-based Cumulocity zip per bundled server variant in the repository root, e.g.:
 
-- `mc8yp-core-release-dtm-v1.2.3.zip`
-- `mc8yp-core-2026-dtm-v1.2.3.zip`
-- `mc8yp-core-2025-dtm-v1.2.3.zip`
-- `mc8yp-core-2024-dtm-v1.2.3.zip`
+- `mc8yp-core-release-v1.2.3.zip`
+- `mc8yp-core-2026-v1.2.3.zip`
+- `mc8yp-core-2025-v1.2.3.zip`
+- `mc8yp-core-2024-v1.2.3.zip`
 
 The packaging step writes a temporary generated Dockerfile under `.c8y/`, copies the selected versioned server bundle into `/app/server/`, and installs production dependencies inside a `linux/amd64` Docker image so the per-platform native binaries of `@iso4/sandbox` resolve correctly. The deployed HTTP transport is POST-only (`GET /mcp` returns `405`) because some reverse proxies and Cumulocity ingress layers do not keep a long-lived SSE channel stable enough for reliable MCP tool calls.
 
-The build matrix is driven by [`openapi-builds.json`](openapi-builds.json). Core snapshots live under `openapi/core/`, DTM snapshots under `openapi/dtm/`.
+The build matrix is driven by [`openapi-builds.json`](openapi-builds.json). Core snapshots live under `openapi/core/`.

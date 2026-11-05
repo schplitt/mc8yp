@@ -10,7 +10,7 @@ import { parseAllowRule, parseNoMcp, parseRestrictionRule } from '../utils/restr
 import { parseExternalMcpServers } from '../utils/external-mcp'
 import { clearActiveTenant, readActiveTenantUrl } from './active-tenant'
 import { getCliTenantContext, restoreCliTenantContext } from './tenant-context'
-import { getBundledOnlyCapabilities } from '../utils/capability-resolution'
+import { getCoreOnlyCapabilities } from '../utils/capability-resolution'
 
 const main = defineCommand({
   meta: {
@@ -154,7 +154,7 @@ const main = defineCommand({
       // No active tenant: expose every bundled spec so codemode discovery
       // stays useful as a reference. Live API calls throw a clear
       // missing-auth error so the agent cannot misuse this state.
-      specs: active?.specs ?? getBundledOnlyCapabilities(),
+      specs: active?.specs ?? getCoreOnlyCapabilities(),
       auth: active ? { tenantUrl: active.tenantUrl, authorizationHeader: active.authorizationHeader } : undefined,
     })
   },

@@ -1,103 +1,81 @@
 import { describe, expect, it } from 'vitest'
-import type { DiscoveredApiSpec } from '../src/utils/capability-discovery'
-import { getBundledOnlyCapabilities, resolveCapabilities } from '../src/utils/capability-resolution'
-
-const EMPTY_INSTALLED = new Set<string>()
+import type { DiscoveredApiSpec, DiscoveredMcpServer } from '../src/utils/capability-discovery'
+import { getCoreOnlyCapabilities, resolveCapabilities } from '../src/utils/capability-resolution'
 
 function makeDiscovered(contextPath: string, spec: object = { paths: {} }): DiscoveredApiSpec {
   return { contextPath, appLabel: contextPath, specLabel: contextPath, servicePrefix: `/service/${contextPath}`, spec }
 }
 
 // ---------------------------------------------------------------------------
-// resolveCapabilities — { core, specs } shape, "absent key = unavailable" semantics.
-// Spec removal is unconditional for an active tenant; there is no flag.
+// resolveCapabilities — core is bundled, every service comes from discovery.
 // ---------------------------------------------------------------------------
 
 describe('resolveCapabilities — core', () => {
   it('core is always populated regardless of discovery results', () => {
-    const a = resolveCapabilities([], EMPTY_INSTALLED)
-    const b = resolveCapabilities([makeDiscovered('svcA')], new Set(['svcA']))
+    const a = resolveCapabilities([])
+    const b = resolveCapabilities([makeDiscovered('svcA')])
     expect(a.core).toBeTruthy()
     expect(b.core).toBeTruthy()
     expect(a.core).toEqual(b.core)
   })
 })
 
-describe('resolveCapabilities — service map (bundled + discovered)', () => {
-  it('omits absent bundled services from the map', () => {
-    const { specs } = resolveCapabilities([], EMPTY_INSTALLED)
-    expect(specs.dtm).toBeUndefined()
-    expect(Object.hasOwn(specs, 'dtm')).toBe(false)
+describe('resolveCapabilities — service map', () => {
+  it('is empty when discovery found nothing', () => {
+    expect(resolveCapabilities([]).specs).toEqual({})
   })
 
-  it('adds non-bundled discovered services as additional flat entries', () => {
-    const discovered = [makeDiscovered('svcA'), makeDiscovered('svcB')]
-    const { specs } = resolveCapabilities(discovered, new Set(['svcA', 'svcB']))
-    expect(specs.svcA).toBeTruthy()
-    expect(specs.svcB).toBeTruthy()
+  it('has one entry per discovered service, keyed by contextPath', () => {
+    const { specs } = resolveCapabilities([makeDiscovered('svcA'), makeDiscovered('svcB')])
     expect(Object.keys(specs).sort()).toEqual(['svcA', 'svcB'])
   })
 
-  it('non-bundled service entry value is the spec object directly', () => {
+  it('entry value is the discovered spec object directly', () => {
     const spec = { paths: { '/items': {} } }
-    const { specs } = resolveCapabilities([makeDiscovered('myservice', spec)], new Set(['myservice']))
+    const { specs } = resolveCapabilities([makeDiscovered('myservice', spec)])
     expect(specs.myservice).toEqual(spec)
   })
-})
 
-describe('resolveCapabilities — dtm (bundled service spec)', () => {
-  it('absent when not installed on the tenant', () => {
-    const { specs } = resolveCapabilities([], EMPTY_INSTALLED)
-    expect(specs.dtm).toBeUndefined()
-  })
-
-  it('live discovered spec wins when service is installed and a live spec was found', () => {
-    const liveSpec = { paths: { '/service/dtm/assets': {} } }
-    const { specs } = resolveCapabilities([makeDiscovered('dtm', liveSpec)], new Set(['dtm']))
-    expect(specs.dtm).toEqual(liveSpec)
-  })
-
-  it('bundled fallback when installed but no live spec', () => {
-    const { specs } = resolveCapabilities([], new Set(['dtm']))
-    expect(specs.dtm).toBeTruthy()
-  })
-
-  it('dtm with live spec is not duplicated as a non-bundled entry', () => {
-    const liveSpec = { paths: { '/service/dtm/assets': {} } }
-    const { specs } = resolveCapabilities([makeDiscovered('dtm', liveSpec)], new Set(['dtm']))
-    expect(Object.keys(specs).filter((k) => k === 'dtm')).toHaveLength(1)
+  it('bundles no service specs: a service without a live spec gets no entry', () => {
+    // dtm used to ship as a bundled fallback; it is discovery-only now.
+    expect(Object.hasOwn(resolveCapabilities([]).specs, 'dtm')).toBe(false)
   })
 })
 
 // ---------------------------------------------------------------------------
-// getBundledOnlyCapabilities — explicit "browse the bundled surface" path used by
-// the CLI when no tenant is active. No discovery, no removal.
+// getCoreOnlyCapabilities — the CLI's no-tenant fallback.
 // ---------------------------------------------------------------------------
 
-describe('getBundledOnlyCapabilities', () => {
-  it('returns every bundled service spec regardless of tenant installation state', () => {
-    const { core, specs } = getBundledOnlyCapabilities()
+describe('getCoreOnlyCapabilities', () => {
+  it('returns core and no service specs or MCP servers', () => {
+    const { core, specs, mcpServers } = getCoreOnlyCapabilities()
     expect(core).toBeTruthy()
-    expect(specs.dtm).toBeTruthy()
+    expect(specs).toEqual({})
+    expect(mcpServers).toEqual({})
   })
 
   it('produces the same core spec as resolveCapabilities', () => {
-    expect(getBundledOnlyCapabilities().core).toEqual(resolveCapabilities([], EMPTY_INSTALLED).core)
+    expect(getCoreOnlyCapabilities().core).toEqual(resolveCapabilities([]).core)
   })
 })
 
 describe('resolveCapabilities — identity memoization', () => {
   it('returns the same object for the same discovery inputs', () => {
     const discovered = [makeDiscovered('svcA')]
-    const installed = new Set(['svcA'])
-    expect(resolveCapabilities(discovered, installed)).toBe(resolveCapabilities(discovered, installed))
+    const mcp: DiscoveredMcpServer[] = []
+    expect(resolveCapabilities(discovered, mcp)).toBe(resolveCapabilities(discovered, mcp))
+  })
+
+  it('returns the same object when MCP servers are omitted', () => {
+    const discovered = [makeDiscovered('svcA')]
+    expect(resolveCapabilities(discovered)).toBe(resolveCapabilities(discovered))
   })
 
   it('returns a fresh object when either input changes identity', () => {
     const discovered = [makeDiscovered('svcA')]
-    const installed = new Set(['svcA'])
-    const resolved = resolveCapabilities(discovered, installed)
-    expect(resolveCapabilities([makeDiscovered('svcA')], installed)).not.toBe(resolved)
-    expect(resolveCapabilities(discovered, new Set(['svcA']))).not.toBe(resolved)
+    const mcp: DiscoveredMcpServer[] = []
+    const resolved = resolveCapabilities(discovered, mcp)
+    expect(resolveCapabilities([makeDiscovered('svcA')], mcp)).not.toBe(resolved)
+    expect(resolveCapabilities(discovered, [])).not.toBe(resolved)
   })
 })

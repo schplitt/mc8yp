@@ -116,7 +116,7 @@ async function refreshCliActiveTenant(tenantUrl: string): Promise<string> {
     const creds = await getFreshCliCredentials(tenantUrl)
     const client = createCliClient(creds)
     const result = await refreshCapabilities(creds.tenantId, client)
-    const resolved = resolveCapabilities(result.specs, result.installedContextPaths, result.mcpServers)
+    const resolved = resolveCapabilities(result.specs, result.mcpServers)
 
     // Update both the CLI-local context and the shared MCP custom context
     // so subsequent codemode calls see the new surface immediately — but
