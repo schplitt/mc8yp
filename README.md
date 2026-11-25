@@ -45,7 +45,7 @@ pnpm dlx mc8yp creds list
 pnpm dlx mc8yp creds remove
 ```
 
-Users with two-factor authentication are prompted for their code; the agent's MCP client asks for a new one when the session expires.
+Users with two-factor authentication are prompted for their code. When the session expires, mc8yp opens a local page (on `127.0.0.1`, for up to 5 minutes) where you enter a new code, so it never passes through the MCP client. Clients that support the 2026-07-28 protocol with URL elicitation (for example recent Claude Code versions) show you the link; with other clients, the tool error contains the link, so open it, enter the code, and run the tool again. `mc8yp creds add` in a terminal works too.
 
 Adding credentials does not select a tenant. The agent calls `status` to see stored tenants and `set-active-tenant` to pick one. The choice is saved per working directory, so agents in different projects do not switch each other's tenant. Every `codemode` result starts with the tenant it ran against.
 
