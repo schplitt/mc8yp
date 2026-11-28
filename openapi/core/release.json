@@ -76,7 +76,7 @@
     },
     {
       "name": "Audit API",
-      "description": "The audit API resource returns URIs and URI templates to collections of audit records, so that they can be retrieved by criteria such as “all records from a particular user”, or “all records from a particular application”.\n\n### Audited information:\n\n* Alarm modifications\n* Operation modifications\n* Two-factor authentication login attempts\n* Smart rule modifications\n* Complex Event Processing (CEP) module modifications\n* User and group permissions modifications\n* SSO and OAuth Internal logout and login attempts\n",
+      "description": "The audit API resource returns URIs and URI templates to collections of audit records, so that they can be retrieved by criteria such as “all records from a particular user”, or “all records from a particular application”.\n\n### Audited information:\n\n* Alarm modifications\n* Operation modifications\n* Two-factor authentication login attempts\n* Smart rule modifications\n* User and group permissions modifications\n* SSO and OAuth Internal logout and login attempts\n",
       "x-codegen-ignore": true
     },
     {
@@ -14247,6 +14247,12 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/processingModeHeader"
+          },
+          {
+            "$ref": "#/components/parameters/queryParam_measurement_sourceOfMeasurementToDelete"
+          },
+          {
+            "$ref": "#/components/parameters/queryParam_measurement_timeOfMeasurementToDelete"
           }
         ],
         "tags": [
@@ -14264,7 +14270,7 @@
           }
         ],
         "summary": "Remove a specific measurement",
-        "description": "Remove a specific measurement by a given ID.\nFor time series measurements, it is recommended to delete by query or use the retention rules to remove expired \ndata from the Operational Store.\n\n\n<section><h5>Required roles</h5>\nROLE_MEASUREMENT_ADMIN <b>OR</b> owner of the source <b>OR</b> MEASUREMENT_ADMIN permission on the source\n</section>\n",
+        "description": "Remove a specific measurement by a given ID.\nFor time series measurements, it is recommended to delete by query or use the retention rules to remove expired\ndata from the Operational Store.\n\nFor time series measurements, it is recommended to pass both the `source` and the exact `time` of the measurement\nto remove it faster. Passing only the `source` is also faster than passing neither, but slower than passing both.\nThe `time` parameter requires `source`. The measurement must match all given parameters, otherwise it is not found.\n\n\n<section><h5>Required roles</h5>\nROLE_MEASUREMENT_ADMIN <b>OR</b> owner of the source <b>OR</b> MEASUREMENT_ADMIN permission on the source\n</section>\n",
         "x-code-samples": [
           {
             "lang": "cURL",
@@ -14290,6 +14296,9 @@
         "responses": {
           "204": {
             "description": "A measurement was removed."
+          },
+          "400": {
+            "$ref": "#/components/responses/measurementDeleteBadRequest"
           },
           "401": {
             "$ref": "#/components/responses/unauthorizedError"
@@ -22161,7 +22170,7 @@
       "queryParam_audit_type": {
         "name": "type",
         "in": "query",
-        "description": "The type of audit record to search for.",
+        "description": "The type of audit record to search for. The value must match the type exactly, including uppercase and lowercase letters.",
         "schema": {
           "type": "string",
           "minLength": 1,
@@ -22330,6 +22339,26 @@
           "type": "string",
           "minLength": 1,
           "example": "251994"
+        }
+      },
+      "queryParam_measurement_sourceOfMeasurementToDelete": {
+        "name": "source",
+        "in": "query",
+        "description": "The managed object ID to which the measurement is associated.\nFor time series measurements, it speeds up the removal because the measurement is located through its source.\nIt is recommended to pass it together with `time`.\nIgnored if time series is not enabled for the tenant.\n",
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "example": "251994"
+        }
+      },
+      "queryParam_measurement_timeOfMeasurementToDelete": {
+        "name": "time",
+        "in": "query",
+        "description": "The exact date and time of the measurement, with millisecond precision.\nRequires the `source` parameter.\nFor time series measurements, it is recommended to pass it together with `source`, which speeds up the removal the most.\nIgnored if time series is not enabled for the tenant.\n",
+        "schema": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2020-03-01T12:13:14.123Z"
         }
       },
       "queryParam_measurement_sourceRequired": {
@@ -23235,6 +23264,21 @@
           "application/vnd.com.nsn.cumulocity.measurement+json": {
             "schema": {
               "$ref": "#/components/schemas/measurement"
+            }
+          }
+        }
+      },
+      "measurementDeleteBadRequest": {
+        "description": "The `time` parameter was given without the `source` parameter.",
+        "content": {
+          "application/vnd.com.nsn.cumulocity.error+json": {
+            "schema": {
+              "$ref": "#/components/schemas/error"
+            },
+            "example": {
+              "error": "general/Bad Request",
+              "message": "Parameter 'time' requires parameter 'source'",
+              "info": "https://www.cumulocity.com/guides/reference-guide/#error_reporting"
             }
           }
         }
@@ -24593,30 +24637,8 @@
             "format": "date-time"
           },
           "type": {
-            "description": "Identifies the platform component of the audit.",
-            "type": "string",
-            "enum": [
-              "Alarm",
-              "Application",
-              "BulkOperation",
-              "CepModule",
-              "Connector",
-              "Event",
-              "Group",
-              "Inventory",
-              "InventoryRole",
-              "Operation",
-              "Option",
-              "Report",
-              "SingleSignOn",
-              "SmartRule",
-              "SYSTEM",
-              "Tenant",
-              "TenantAuthConfig",
-              "TrustedCertificates",
-              "User",
-              "UserAuthentication"
-            ]
+            "description": "Identifies the platform component of the audit, for example, `SmartRule` or `UserAuthentication`.\nFor the types that the platform creates, see [Audit log types](https://www.cumulocity.com/docs/standard-tenant/monitoring/#audit-log-types) in the Cumulocity user documentation.\nClients can create audit records with any other type through the API.\n",
+            "type": "string"
           },
           "user": {
             "description": "The user who carried out the activity.",
